@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+*.xcodeproj
+.DS_Store
+*.o
+*.swiftmodule
+Package.resolved
+.vscode/
+
+# Exploration scratch, not part of the shipped package
+spikes/
