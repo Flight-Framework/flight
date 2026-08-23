@@ -26,11 +26,19 @@ jobs:
         with:
           swift-version: ${{ matrix.swift }}
 
+      # --enable-all-traits: a root build compiles every target, but only
+      # traits that are enabled bring their dependencies. Without this the
+      # Security target would be built with JWTKit pruned and fail.
       - name: Build (warnings are errors)
-        run: swift build -Xswiftc -warnings-as-errors
+        run: swift build --enable-all-traits -Xswiftc -warnings-as-errors
 
       - name: Test
-        run: swift test
+        run: swift test --enable-all-traits
+
+      # The lean configuration is a supported consumption mode, so it is
+      # built too: this is what a consumer using only the container gets.
+      - name: Build with defaults disabled
+        run: swift build --disable-default-traits
 
   lint:
     # Advisory only. Seven of the eight merged packages predate the shared

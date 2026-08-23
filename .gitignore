@@ -4,7 +4,9 @@
 .DS_Store
 *.o
 *.swiftmodule
-Package.resolved
+# Package.resolved IS committed: this repository's own CI must build the
+# exact dependency versions that were verified locally. SwiftPM ignores a
+# dependency's resolved file, so this never constrains consumers.
 .vscode/
 
 # Exploration scratch, not part of the shipped package
