@@ -10,39 +10,37 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# flight-core resolves flight-config by relative path. That is deliberate: it
+# keeps local cross-package development immediate — edit one, rebuild the
+# other, with no tagging round trip — which matters while several of these
+# packages still change together.
+#
+# The cost is that a standalone checkout has no sibling to resolve against, so
+# every job below reconstructs the layout the manifest expects. While these
+# repositories are private that needs a token with organisation read access:
+# set SWIFTFLIGHT_CI_TOKEN to a fine-grained PAT with Contents: read.
+
 jobs:
   test:
-    name: Test (Swift ${{ matrix.swift }} on ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test (Swift ${{ matrix.swift }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
         swift: ["6.2"]
     steps:
-      - uses: actions/checkout@v4
-        with:
-          path: Core/flight-core
-
-      # flight-core depends on flight-config by relative path, which keeps
-      # local cross-package development immediate: edit one, rebuild the
-      # other, no tagging round trip. The cost is that a standalone checkout
-      # has no sibling to resolve against, so CI reconstructs the layout the
-      # manifest expects.
-      #
-      # While these repositories are private, that needs a token with read
-      # access to the organization. Set SWIFTFLIGHT_CI_TOKEN to a fine-grained
-      # PAT (Contents: read) or the checkout below will fail with a clear
-      # message rather than a confusing "folder doesn't exist".
       - name: Check the sibling-repository token is present
         run: |
           if [ -z "${{ secrets.SWIFTFLIGHT_CI_TOKEN }}" ]; then
-            echo "::error::SWIFTFLIGHT_CI_TOKEN is not set. flight-core resolves"
-            echo "::error::flight-config by relative path, and this repository is"
-            echo "::error::private, so CI needs a token with read access to"
-            echo "::error::Swift-Flight/flight-config to reconstruct the layout."
+            echo "::error::SWIFTFLIGHT_CI_TOKEN is not set. flight-core resolves flight-config"
+            echo "::error::by relative path, and these repositories are private, so CI needs a"
+            echo "::error::token with read access to Swift-Flight/flight-config."
             exit 1
           fi
+
+      - uses: actions/checkout@v4
+        with:
+          path: Core/flight-core
 
       - uses: actions/checkout@v4
         with:
@@ -63,23 +61,49 @@ jobs:
         working-directory: Core/flight-core
         run: swift test
 
+      # Formatting stability, not swift-format's opinionated lint rules:
+      # the check is that running the formatter changes nothing.
+      - name: Check formatting is stable
+        working-directory: Core/flight-core
+        run: |
+          swift-format format --in-place --recursive Sources Tests Plugins
+          if ! git diff --quiet; then
+            echo "::error::Sources are not formatted. Run:"
+            echo "::error::  swift-format format --in-place --recursive Sources Tests Plugins"
+            git diff --stat
+            exit 1
+          fi
+
   docs:
     name: Build documentation
     runs-on: ubuntu-latest
     steps:
+      - name: Check the sibling-repository token is present
+        run: |
+          if [ -z "${{ secrets.SWIFTFLIGHT_CI_TOKEN }}" ]; then
+            echo "::error::SWIFTFLIGHT_CI_TOKEN is not set — see the note at the top of this workflow."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
+        with:
+          path: Core/flight-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Swift-Flight/flight-config
+          token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
+          path: Config/flight-config
 
       - name: Set up Swift
         uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.2"
 
-      # Fails the job on any DocC warning, so a broken symbol link or an
-      # unresolved guide reference cannot land on main.
       - name: Generate documentation
+        working-directory: Core/flight-core
         env:
           FLIGHT_CORE_BUILD_DOCS: "1"
-        working-directory: Core/flight-core
         run: |
           swift package --allow-writing-to-directory ./docs \
             generate-documentation --target FlightCore \
