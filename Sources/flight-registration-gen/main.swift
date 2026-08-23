@@ -611,7 +611,7 @@ out += """
     public func flightRegisterAll(_ container: FlightCore.Container) throws {
     """
 if sorted.isEmpty {
-    out += "\n // No @Component types found in scope.\n"
+    out += "\n    // No @Component types found in scope.\n"
 } else {
     out += "\n"
     for component in sorted {
@@ -619,18 +619,19 @@ if sorted.isEmpty {
             component.module == manifest.targetModuleName
             ? component.typeName
             : "\(component.module).\(component.typeName)"
-        out += " try \(qualified)._flightRegister(container)\n"
+        out += "    try \(qualified)._flightRegister(container)\n"
     }
 }
 if !bridges.isEmpty {
-    out += """
-
-        // Existential bridges (demand-driven): each `@Autowired var _: (any P)`
-        // with exactly one scanned conformer resolves through that conformer,
-        // mirroring its scope. A `// flight:hand-registered` marker on the
-        // demanding property suppresses the bridge.
-        """
+    // Emitted line by line rather than as a multiline literal: a multiline
+    // literal strips indentation relative to its CLOSING delimiter, so a
+    // formatter that re-indents the block silently changes the emitted text.
+    // These carry their indentation explicitly and cannot drift.
     out += "\n"
+    out += "    // Existential bridges (demand-driven): each `@Autowired var _: (any P)`\n"
+    out += "    // with exactly one scanned conformer resolves through that conformer,\n"
+    out += "    // mirroring its scope. A `// flight:hand-registered` marker on the\n"
+    out += "    // demanding property suppresses the bridge.\n"
     for bridge in bridges {
         let component = bridge.component
         let concrete =
@@ -647,9 +648,9 @@ if !bridges.isEmpty {
             ? "try c.resolveInActiveScope(\(concrete).self\(qualifierArgument))"
             : "try c.resolve(\(concrete).self\(qualifierArgument))"
         out +=
-            " container.register((any \(bridge.protocolName)).self, scope: \(component.scopeText)) { c in\n"
-        out += " \(resolveCall)\n"
-        out += " }\n"
+            "    container.register((any \(bridge.protocolName)).self, scope: \(component.scopeText)) { c in\n"
+        out += "        \(resolveCall)\n"
+        out += "    }\n"
     }
 }
 out += "}\n"

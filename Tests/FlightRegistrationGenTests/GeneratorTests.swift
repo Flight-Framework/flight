@@ -118,6 +118,50 @@ struct GeneratorTests {
         #expect(result.generated.contains("flightRegisterAll"))
     }
 
+    @Test("the generated body is exactly this — indentation included")
+    func generatedBodyIsGolden() throws {
+        // Every other test here asks `contains`, which cannot see the shape of
+        // what was emitted. That blind spot let a cleanup pass collapse the
+        // indentation inside the generator's own string literals: the output
+        // still compiled, still contained every expected substring, and every
+        // test still passed, while every Flight app got a mangled generated
+        // file. This asserts the whole body, so shape regressions fail here.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            protocol Greeter {}
+            @Service(scope: .scoped)
+            struct EnglishGreeter: Greeter {}
+            @Component
+            final class Welcomer {
+                @Autowired var greeter: (any Greeter)
+            }
+            """
+        ])
+
+        #expect(result.exitCode == 0)
+        // The header carries a component count and the target name; the body
+        // below it is what this test pins.
+        let marker = "public func flightRegisterAll"
+        let start = try #require(result.generated.range(of: marker)).lowerBound
+        #expect(
+            String(result.generated[start...]) == """
+                public func flightRegisterAll(_ container: FlightCore.Container) throws {
+                    try EnglishGreeter._flightRegister(container)
+                    try Welcomer._flightRegister(container)
+
+                    // Existential bridges (demand-driven): each `@Autowired var _: (any P)`
+                    // with exactly one scanned conformer resolves through that conformer,
+                    // mirroring its scope. A `// flight:hand-registered` marker on the
+                    // demanding property suppresses the bridge.
+                    container.register((any Greeter).self, scope: .scoped) { c in
+                        try c.resolveInActiveScope(EnglishGreeter.self)
+                    }
+                }
+
+                """)
+    }
+
     @Test("registration order is deterministic across runs")
     func deterministicOutput() throws {
         let sources = [
