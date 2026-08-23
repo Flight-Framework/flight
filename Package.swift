@@ -55,6 +55,24 @@ let package = Package(
         // TokenValidator seam so any issuer can be brought instead.
         .library(name: "FlightSecurityCore", targets: ["FlightSecurityCore"]),
     ],
+    traits: [
+        // "Web" is on by default: most Flight applications serve HTTP, and
+        // this keeps `.package(url: "...flight.git", from: "0.1.0")` working
+        // with no trait ceremony for them. Consumers that want only the
+        // container and lifecycle — including flight-data's cache and data
+        // protocols — opt out with `traits: []`, and then never resolve
+        // Hummingbird, NIO, or the TLS stack at all.
+        .default(enabledTraits: ["Web"]),
+        .trait(
+            name: "Web",
+            description: "HTTP, WebSockets, SSE, Channels, Presence, and the actuator."
+        ),
+        .trait(
+            name: "Security",
+            description: "OIDC/JWT resource-server authentication.",
+            enabledTraits: ["Web"]
+        ),
+    ],
     dependencies: [
         // Dependency policy: Apple-adjacent and SSWG-blessed only, with one
         // deliberate exception (jwt-kit) noted at its use site.
@@ -157,12 +175,12 @@ let package = Package(
         .target(
             name: "FlightWeb",
             dependencies: [
-                "FlightWebMacrosImpl",
+                .target(name: "FlightWebMacrosImpl", condition: .when(traits: ["Web"])),
                 "FlightCore",
-                .product(name: "HTTPTypes", package: "swift-http-types"),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(traits: ["Web"])),
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "ServiceContextModule", package: "swift-service-context"),
-                .product(name: "Tracing", package: "swift-distributed-tracing"),
+                .product(name: "ServiceContextModule", package: "swift-service-context", condition: .when(traits: ["Web"])),
+                .product(name: "Tracing", package: "swift-distributed-tracing", condition: .when(traits: ["Web"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
@@ -173,13 +191,13 @@ let package = Package(
         .target(
             name: "FlightTransport",
             dependencies: [
-                "FlightWeb",
-                .product(name: "HummingbirdCore", package: "hummingbird"),
-                .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket"),
-                .product(name: "HummingbirdTLS", package: "hummingbird"),
-                .product(name: "NIOCore", package: "swift-nio"),
-                .product(name: "NIOSSL", package: "swift-nio-ssl"),
-                .product(name: "HTTPTypes", package: "swift-http-types"),
+                .target(name: "FlightWeb", condition: .when(traits: ["Web"])),
+                .product(name: "HummingbirdCore", package: "hummingbird", condition: .when(traits: ["Web"])),
+                .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket", condition: .when(traits: ["Web"])),
+                .product(name: "HummingbirdTLS", package: "hummingbird", condition: .when(traits: ["Web"])),
+                .product(name: "NIOCore", package: "swift-nio", condition: .when(traits: ["Web"])),
+                .product(name: "NIOSSL", package: "swift-nio-ssl", condition: .when(traits: ["Web"])),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(traits: ["Web"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
             ],
@@ -188,7 +206,7 @@ let package = Package(
         .target(
             name: "FlightWebTesting",
             dependencies: [
-                "FlightWeb",
+                .target(name: "FlightWeb", condition: .when(traits: ["Web"])),
                 "FlightCore",
                 .product(name: "Logging", package: "swift-log"),
             ],
@@ -218,7 +236,7 @@ let package = Package(
         .target(
             name: "FlightChannels",
             dependencies: [
-                "FlightChannelsProtocol", "FlightCore", "FlightPubSub", "FlightWeb",
+                "FlightChannelsProtocol", "FlightCore", "FlightPubSub", .target(name: "FlightWeb", condition: .when(traits: ["Web"])),
                 .product(name: "Logging", package: "swift-log"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
@@ -233,7 +251,7 @@ let package = Package(
         ),
         .target(
             name: "FlightChannelsTesting",
-            dependencies: ["FlightChannels", "FlightChannelsClient", "FlightWebTesting"],
+            dependencies: [.target(name: "FlightChannels", condition: .when(traits: ["Web"])), "FlightChannelsClient", .target(name: "FlightWebTesting", condition: .when(traits: ["Web"]))],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -247,7 +265,7 @@ let package = Package(
         .target(
             name: "FlightPresence",
             dependencies: [
-                "FlightPresenceProtocol", "FlightCore", "FlightPubSub", "FlightChannels",
+                "FlightPresenceProtocol", "FlightCore", "FlightPubSub", .target(name: "FlightChannels", condition: .when(traits: ["Web"])),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
@@ -263,7 +281,7 @@ let package = Package(
 
         .target(
             name: "FlightActuator",
-            dependencies: ["FlightWeb", "FlightCore"],
+            dependencies: [.target(name: "FlightWeb", condition: .when(traits: ["Web"])), "FlightCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -272,14 +290,14 @@ let package = Package(
         .target(
             name: "FlightSecurityCore",
             dependencies: [
-                "FlightCore", "FlightWeb",
-                .product(name: "JWTKit", package: "jwt-kit"),
-                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                "FlightCore", .target(name: "FlightWeb", condition: .when(traits: ["Web"])),
+                .product(name: "JWTKit", package: "jwt-kit", condition: .when(traits: ["Security"])),
+                .product(name: "AsyncHTTPClient", package: "async-http-client", condition: .when(traits: ["Security"])),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-                .product(name: "HTTPTypes", package: "swift-http-types"),
-                .product(name: "NIOCore", package: "swift-nio"),
-                .product(name: "NIOFoundationCompat", package: "swift-nio"),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(traits: ["Web"])),
+                .product(name: "NIOCore", package: "swift-nio", condition: .when(traits: ["Web"])),
+                .product(name: "NIOFoundationCompat", package: "swift-nio", condition: .when(traits: ["Web"])),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
@@ -318,7 +336,7 @@ let package = Package(
         .testTarget(
             name: "FlightWebTests",
             dependencies: [
-                "FlightWeb", "FlightWebTesting", "FlightCore",
+                .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])), "FlightCore",
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ]
         ),
@@ -327,20 +345,20 @@ let package = Package(
         .testTarget(
             name: "FlightTransportTests",
             dependencies: [
-                "FlightTransport", "FlightWeb", "FlightWebTesting",
-                .product(name: "NIOCore", package: "swift-nio"),
-                .product(name: "NIOPosix", package: "swift-nio"),
-                .product(name: "NIOHTTP1", package: "swift-nio"),
-                .product(name: "NIOWebSocket", package: "swift-nio"),
-                .product(name: "NIOSSL", package: "swift-nio-ssl"),
-                .product(name: "X509", package: "swift-certificates"),
+                .target(name: "FlightTransport", condition: .when(traits: ["Web"])), .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])),
+                .product(name: "NIOCore", package: "swift-nio", condition: .when(traits: ["Web"])),
+                .product(name: "NIOPosix", package: "swift-nio", condition: .when(traits: ["Web"])),
+                .product(name: "NIOHTTP1", package: "swift-nio", condition: .when(traits: ["Web"])),
+                .product(name: "NIOWebSocket", package: "swift-nio", condition: .when(traits: ["Web"])),
+                .product(name: "NIOSSL", package: "swift-nio-ssl", condition: .when(traits: ["Web"])),
+                .product(name: "X509", package: "swift-certificates", condition: .when(traits: ["Web"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ]
         ),
         .testTarget(
             name: "FlightWebMacroTests",
             dependencies: [
-                "FlightWebMacrosImpl",
+                .target(name: "FlightWebMacrosImpl", condition: .when(traits: ["Web"])),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
@@ -357,28 +375,28 @@ let package = Package(
         .testTarget(
             name: "FlightChannelsTests",
             dependencies: [
-                "FlightChannels", "FlightChannelsTesting", "FlightCore",
-                "FlightPubSub", "FlightPubSubTesting", "FlightWeb", "FlightWebTesting",
+                .target(name: "FlightChannels", condition: .when(traits: ["Web"])), .target(name: "FlightChannelsTesting", condition: .when(traits: ["Web"])), "FlightCore",
+                "FlightPubSub", "FlightPubSubTesting", .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])),
             ]
         ),
         .testTarget(
             name: "FlightChannelsClientTests",
-            dependencies: ["FlightChannelsClient", "FlightChannelsTesting", "FlightWebTesting"]
+            dependencies: ["FlightChannelsClient", .target(name: "FlightChannelsTesting", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"]))]
         ),
         .testTarget(
             name: "FlightChannelsE2ETests",
             dependencies: [
-                "FlightChannels", "FlightChannelsClient", "FlightCore", "FlightPubSub",
-                "FlightWeb", "FlightWebTesting", "FlightTransport",
-                .product(name: "HummingbirdWSClient", package: "hummingbird-websocket"),
+                .target(name: "FlightChannels", condition: .when(traits: ["Web"])), "FlightChannelsClient", "FlightCore", "FlightPubSub",
+                .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])), .target(name: "FlightTransport", condition: .when(traits: ["Web"])),
+                .product(name: "HummingbirdWSClient", package: "hummingbird-websocket", condition: .when(traits: ["Web"])),
             ]
         ),
         .testTarget(
             name: "FlightPresenceTests",
             dependencies: [
-                "FlightPresence", "FlightPresenceClient", "FlightCore", "FlightPubSub",
-                "FlightPubSubTesting", "FlightChannels", "FlightChannelsTesting",
-                "FlightWeb", "FlightWebTesting",
+                .target(name: "FlightPresence", condition: .when(traits: ["Web"])), "FlightPresenceClient", "FlightCore", "FlightPubSub",
+                "FlightPubSubTesting", .target(name: "FlightChannels", condition: .when(traits: ["Web"])), .target(name: "FlightChannelsTesting", condition: .when(traits: ["Web"])),
+                .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
             ]
@@ -386,16 +404,16 @@ let package = Package(
         .testTarget(
             name: "FlightActuatorTests",
             dependencies: [
-                "FlightActuator", "FlightWeb", "FlightWebTesting", "FlightCore",
+                .target(name: "FlightActuator", condition: .when(traits: ["Web"])), .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])), "FlightCore",
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ]
         ),
         .testTarget(
             name: "FlightSecurityCoreTests",
             dependencies: [
-                "FlightSecurityCore", "FlightWeb", "FlightWebTesting", "FlightCore",
-                .product(name: "JWTKit", package: "jwt-kit"),
-                .product(name: "HTTPTypes", package: "swift-http-types"),
+                .target(name: "FlightSecurityCore", condition: .when(traits: ["Security"])), .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])), "FlightCore",
+                .product(name: "JWTKit", package: "jwt-kit", condition: .when(traits: ["Security"])),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(traits: ["Web"])),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
