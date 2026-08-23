@@ -1,9 +1,9 @@
-/// Carries messages BETWEEN nodes (§5). The local `PubSub` (§2) handles
+/// Carries messages BETWEEN nodes. The local `PubSub` handles
 /// intra-node delivery; this handles inter-node relay. A single-node
 /// deployment uses no adapter at all — the local core is complete on its own.
 ///
 /// This is the pluggable seam. Concrete conformances are sequenced, not
-/// shipped here (§5.1): Redis (`PUBLISH`/`SUBSCRIBE`) first as the pragmatic
+/// shipped here: Redis (`PUBLISH`/`SUBSCRIBE`) first as the pragmatic
 /// option, a SWIM-membership + NIO relay as the strategic native option, a
 /// `swift-distributed-actors` adapter if/when it reaches a stable 1.0.
 /// `ClusteredPubSub` composes any of them identically; nothing above the

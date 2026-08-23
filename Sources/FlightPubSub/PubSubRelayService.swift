@@ -7,7 +7,7 @@ import ServiceLifecycle
 public enum PubSubWiringError: Error, CustomStringConvertible, Sendable {
     /// `PubSubRelayService` was wired into an app whose `PubSub` component is not
     /// a `ClusteredPubSub` — i.e. no `DistributedPubSubAdapter` was
-    /// registered. A single-node app needs no relay service at all (§6).
+    /// registered. A single-node app needs no relay service at all.
     case pubSubIsNotClustered
 
     public var description: String {
@@ -18,7 +18,7 @@ public enum PubSubWiringError: Error, CustomStringConvertible, Sendable {
     }
 }
 
-/// The long-running half of a distributed deployment (§6): drains the
+/// The long-running half of a distributed deployment: drains the
 /// adapter's incoming stream into local fan-out for the app's lifetime.
 /// Handed to the `ServiceGroup` by whichever module provides the adapter —
 /// the local core deliberately has no service (it is demand-driven).
@@ -33,7 +33,7 @@ public struct PubSubRelayService: Service, Sendable {
 
     private enum Source: Sendable {
         /// Resolve lazily in `run()` — the module wiring path, where the
-        /// service is constructed pre-freeze (Core §7 collects services
+        /// service is constructed pre-freeze (Core collects services
         /// during configuration) and components exist only later.
         case container(Container)
         case clustered(ClusteredPubSub)

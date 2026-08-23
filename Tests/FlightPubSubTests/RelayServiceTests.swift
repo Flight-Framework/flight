@@ -4,7 +4,7 @@ import FlightCore
 import FlightPubSub
 import FlightPubSubTesting
 
-@Suite("PubSubRelayService (§6)", .timeLimit(.minutes(1)))
+@Suite("PubSubRelayService", .timeLimit(.minutes(1)))
 struct RelayServiceTests {
 
     @Test("wiring error: a container whose PubSub is local-only")

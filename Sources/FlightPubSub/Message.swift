@@ -1,11 +1,11 @@
 import struct Foundation.Data
 
-/// The unit of publish/subscribe (§2).
+/// The unit of publish/subscribe.
 ///
-/// - `topic` is opaque to PubSub (§3): conventions like `"room:42"` belong to
+/// - `topic` is opaque to PubSub: conventions like `"room:42"` belong to
 ///   consumers (Channels, Presence, Live); PubSub neither parses nor
 ///   validates structure.
-/// - `payload` is opaque `Data` (§4): serialization is the caller's concern.
+/// - `payload` is opaque `Data`: serialization is the caller's concern.
 ///   PubSub has no business knowing whether it ships JSON, a LiveView diff,
 ///   or presence deltas.
 /// - `metadata` carries small string annotations alongside the payload.

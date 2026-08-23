@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import FlightPubSub
 
-@Suite("LocalPubSub — the in-process core (§2)", .timeLimit(.minutes(1)))
+@Suite("LocalPubSub — the in-process core", .timeLimit(.minutes(1)))
 struct LocalPubSubTests {
 
     // MARK: - Delivery
@@ -27,7 +27,7 @@ struct LocalPubSubTests {
         }
     }
 
-    @Test("exact-match topic isolation (§3): other topics receive nothing")
+    @Test("exact-match topic isolation: other topics receive nothing")
     func topicIsolation() async {
         let pubsub = LocalPubSub()
         var roomA = pubsub.subscribe("room:a").makeAsyncIterator()
@@ -41,7 +41,7 @@ struct LocalPubSubTests {
         #expect(receivedB.map(text) == "for-b")
     }
 
-    @Test("no replay (§8): a message published before subscribing is never seen")
+    @Test("no replay: a message published before subscribing is never seen")
     func noReplay() async {
         let pubsub = LocalPubSub()
         await pubsub.publish(msg("room:1", "too-early"))
@@ -74,7 +74,7 @@ struct LocalPubSubTests {
 
     // MARK: - Ordering
 
-    @Test("per-subscriber publish order is preserved (§8)")
+    @Test("per-subscriber publish order is preserved")
     func ordering() async {
         let pubsub = LocalPubSub()
         var iterator = pubsub.subscribe("seq").makeAsyncIterator()
@@ -87,7 +87,7 @@ struct LocalPubSubTests {
         }
     }
 
-    // MARK: - Back-pressure isolation (§2.2)
+    // MARK: - Back-pressure isolation
 
     @Test("a slow subscriber blocks neither the publisher nor other subscribers")
     func slowSubscriberIsolation() async {
@@ -136,7 +136,7 @@ struct LocalPubSubTests {
         }
     }
 
-    // MARK: - Subscription lifetime (§2.1)
+    // MARK: - Subscription lifetime
 
     @Test("cancelling the consuming task tears the subscription down")
     func cancellationUnsubscribes() async {

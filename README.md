@@ -4,13 +4,13 @@ Topic-based publish/subscribe for Flight: a publisher sends a `Message` to a
 named topic; every subscriber to that topic receives it. That's the whole
 surface. It is the bottom of the Live family (Channels, Presence, Live all
 consume it) and the same distributed-coordination seam Flight Cloud's
-multi-node story needs. Design: `../flight-pubsub-design.md`; modeled on
+multi-node story needs. Modeled on
 `Phoenix.PubSub`.
 
 - **Local core** (`LocalPubSub`) — production-ready now; the 90% case.
 - **Distributed seam** (`DistributedPubSubAdapter`, `ClusteredPubSub`,
   `PubSubRelayService`) — ships now; concrete adapters (Redis first, then
-  SWIM-native) are sequenced, per the design's maturity assessment (§5.1).
+  SWIM-native) are sequenced, per the design's maturity assessment.
 - **No Web dependency** — usable by a headless app (job coordination, cache
   invalidation) with no HTTP at all.
 
@@ -41,7 +41,34 @@ Task {
 await pubsub.publish(Message(topic: "room:42", payload: data))
 ```
 
-### Semantics (the contract, §3/§8)
+### What the clustered path costs, and what it drops
+
+`publish` fans out locally first and unconditionally — local subscribers
+never wait on, or fail with, the inter-node hop. The remote broadcast is
+bounded by `broadcastTimeout` (5 seconds by default, `nil` to wait
+forever): an adapter that stops answering costs one remote delivery, not
+the publisher's liveness.
+
+Under a bounded `BufferingPolicy`, a full subscriber buffer discards the
+message — that is what at-most-once permits. `LocalPubSub.droppedCount` and
+`droppedCounts` report how many, per topic, and each drop is logged with
+the topic and a running total. Both are always zero under the default
+`.unbounded` policy.
+
+### Node identity
+
+`nodeID` names a node for logs and operators. It does **not** have to be
+unique and correctness does not depend on it: echo suppression matches on
+`instanceToken`, generated per instance. Two nodes sharing a `nodeID`
+deliver to each other normally, and the collision is logged once per
+offending instance so an operator reading conflated logs finds out why.
+
+Every reserved metadata key (`flight.pubsub.origin`,
+`flight.pubsub.instance`) is stripped before delivery — on both the
+receiving and the publishing node. A subscriber never sees transport
+bookkeeping, and never sees a caller's imitation of it.
+
+### Semantics (the contract)
 
 | Property | Guarantee |
 |---|---|
@@ -59,7 +86,7 @@ price of drops, which at-most-once semantics already permit.
 
 ## Multi-node
 
-Consumers never change: they code against `any PubSub` (§5). A deployment
+Consumers never change: they code against `any PubSub`. A deployment
 becomes multi-node by registering a `DistributedPubSubAdapter` component —
 `FlightPubSubModule`'s `any PubSub` factory then composes a `ClusteredPubSub`
 around the same local core instead of returning it bare.
@@ -77,7 +104,7 @@ An adapter package provides one `FlightModule` that:
 1. registers its `(any DistributedPubSubAdapter).self` component,
 2. declares `FlightPubSubModule.self` in `dependencies`,
 3. exposes `PubSubRelayService(container:)` — composed with any connection
-   service of its own — as its `service` (§6: the local core has no service;
+   service of its own — as its `service` (the local core has no service;
    the relay and the connection are the distributed deployment's
    long-running half).
 
@@ -108,7 +135,7 @@ yielding.
 Two implementation-mechanics deltas, both forced by the spec's own API
 contract; observable semantics are exactly as specified.
 
-1. **`Mutex`-guarded class, not an actor** (§2.2 named an actor). The
+1. **`Mutex`-guarded class, not an actor.** The
    protocol's `subscribe` is synchronous and must make registration effective
    at return (Presence-style "subscribe, then broadcast your own join" flows
    depend on it; `Phoenix.PubSub.subscribe` gives the same guarantee). An
@@ -118,11 +145,11 @@ contract; observable semantics are exactly as specified.
    primitive that can do it synchronously (Core precedent: health tracking,
    `Scope`).
 
-2. **No `AsyncChannel`** (§2.2 named it for per-subscriber back-pressure,
+2. **No `AsyncChannel`** (the obvious choice for per-subscriber back-pressure,
    and the header listed swift-async-algorithms as a dependency). A
    rendezvous channel's send suspends until the consumer receives; awaiting
    that in `publish` blocks the publisher on the slowest subscriber — which
-   §2.2 itself forbids — and pumping the channel into the returned
+   the contract itself forbids — and pumping the channel into the returned
    `AsyncStream` just relocates the backlog into the stream's buffer,
    reducing the channel to decoration. Per-subscriber `AsyncStream` buffers
    with configurable policy deliver the stated behavior directly, and the

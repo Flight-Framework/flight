@@ -3,7 +3,7 @@ import Testing
 import FlightPubSub
 import FlightPubSubTesting
 
-@Suite("ClusteredPubSub — the seam composition (§5)", .timeLimit(.minutes(1)))
+@Suite("ClusteredPubSub — the seam composition", .timeLimit(.minutes(1)))
 struct ClusteredPubSubTests {
 
     struct BrokenWire: Error {}

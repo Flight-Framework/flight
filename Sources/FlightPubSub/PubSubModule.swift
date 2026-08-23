@@ -1,6 +1,6 @@
 import FlightCore
 
-/// Registers PubSub with the container (§6).
+/// Registers PubSub with the container.
 ///
 /// Two components:
 /// - `LocalPubSub` — the concrete local core, resolvable directly by
@@ -10,9 +10,9 @@ import FlightCore
 ///   configured, and composes by *presence*: if some module registered a
 ///   `DistributedPubSubAdapter` component, the app's PubSub is a `ClusteredPubSub`
 ///   wrapping the local core; otherwise it IS the local core. Consumers never
-///   know which (§5).
+///   know which.
 ///
-/// No `service`: the local core is demand-driven (§6). A distributed
+/// No `service`: the local core is demand-driven. A distributed
 /// deployment's long-running half — the relay — belongs to the module that
 /// provides the adapter, which registers its adapter component, declares
 /// `FlightPubSubModule` as a dependency, and exposes

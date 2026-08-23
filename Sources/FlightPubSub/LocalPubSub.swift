@@ -1,14 +1,15 @@
 import Foundation
+import Logging
 import Synchronization
 
-/// The in-process pub/sub core (§2): a registry of topics to subscribers,
+/// The in-process pub/sub core: a registry of topics to subscribers,
 /// delivering messages concurrency-safely. Complete on its own for a
-/// single-node deployment; the local half of a clustered one (§5).
+/// single-node deployment; the local half of a clustered one.
 ///
-/// ## Concurrency model — a deliberate delta from the design doc (§2.2)
+/// ## Concurrency model — a deliberate choice worth explaining
 ///
 /// The doc reserves an `actor` for the registry and `AsyncChannel` for
-/// per-subscriber delivery. Implementing against the doc's *own API contract*
+/// per-subscriber delivery. Implementing against this type's *own API contract*
 /// forces two changes, both recorded in README.md:
 ///
 /// 1. **`Mutex`-guarded class, not an actor.** `subscribe(_:)` is synchronous
@@ -26,7 +27,7 @@ import Synchronization
 ///    `AsyncChannel` send suspends until the consumer receives — real
 ///    back-pressure, but pressure on *whoever awaits the send*. Awaiting it
 ///    in `publish` blocks the publisher on the slowest subscriber, which
-///    §2.2 itself forbids; bridging the channel into the returned
+///    the contract itself forbids; bridging the channel into the returned
 ///    `AsyncStream` via a pumping task just moves the backlog into the
 ///    stream's unbounded buffer and reduces the channel to decoration.
 ///    Per-subscriber buffering with a configurable `BufferingPolicy` yields
@@ -50,9 +51,33 @@ public final class LocalPubSub: PubSub, Sendable {
 
     private let registry = Mutex(Registry())
     private let bufferingPolicy: BufferingPolicy
+    private let dropped = Mutex([String: Int]())
+    private let logger: Logger
 
-    public init(bufferingPolicy: BufferingPolicy = .unbounded) {
+    public init(
+        bufferingPolicy: BufferingPolicy = .unbounded,
+        logger: Logger = Logger(label: "flight.pubsub.local")
+    ) {
         self.bufferingPolicy = bufferingPolicy
+        self.logger = logger
+    }
+
+    /// Messages a bounded buffer refused, per topic, since this instance
+    /// started.
+    ///
+    /// Always empty under the default `.unbounded` policy. Under a bounded
+    /// one, a full subscriber buffer silently discarded the message and
+    /// nothing recorded it — `yield` returns a result saying so and it was
+    /// thrown away, so the one signal that a subscriber was falling behind
+    /// went nowhere. At-most-once permits the drop; it does not require
+    /// hiding it.
+    public var droppedCounts: [String: Int] {
+        dropped.withLock { $0 }
+    }
+
+    /// Total messages a bounded buffer refused since this instance started.
+    public var droppedCount: Int {
+        dropped.withLock { $0.values.reduce(0, +) }
     }
 
     public func publish(_ message: Message) async {
@@ -62,9 +87,32 @@ public final class LocalPubSub: PubSub, Sendable {
         let subscribers = registry.withLock { state in
             state.topics[message.topic].map { Array($0.values) } ?? []
         }
+        var refused = 0
         for continuation in subscribers {
-            continuation.yield(message)
+            // The result is the only evidence a bounded buffer was full.
+            switch continuation.yield(message) {
+            case .enqueued, .terminated:
+                break
+            case .dropped:
+                refused += 1
+            @unknown default:
+                break
+            }
         }
+        guard refused > 0 else { return }
+
+        let total = dropped.withLock { counts in
+            counts[message.topic, default: 0] += refused
+            return counts[message.topic] ?? refused
+        }
+        logger.warning(
+            "subscriber buffer full; message dropped",
+            metadata: [
+                "topic": "\(message.topic)",
+                "dropped-now": "\(refused)",
+                "dropped-total-for-topic": "\(total)",
+            ]
+        )
     }
 
     public func subscribe(_ topic: String) -> AsyncStream<Message> {
@@ -79,7 +127,7 @@ public final class LocalPubSub: PubSub, Sendable {
         // Fires on consumer-task cancellation, on the stream being dropped
         // without full consumption, and on finish — every way a subscription
         // ends. This is the "no manual unsubscribe bookkeeping" contract
-        // (§2.1). Safe to set after registration: if termination already
+        //. Safe to set after registration: if termination already
         // happened, the handler runs immediately.
         continuation.onTermination = { [weak self] _ in
             guard let self else { return }

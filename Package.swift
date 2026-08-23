@@ -1,7 +1,7 @@
 // swift-tools-version: 6.1
 // Flight PubSub — topic-based publish/subscribe: the local core (production),
 // the distributed-adapter seam, and the clustered composition
-// (flight-pubsub-design.md). Bottom of the Live family; also feeds Flight
+// Bottom of the Live family; also feeds Flight
 // Cloud's multi-node story.
 import PackageDescription
 
@@ -23,11 +23,11 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Core/flight-core"),
-        // Dependency policy follows Flight Core §9: Apple-adjacent,
+        // Dependency policy follows Flight Core: Apple-adjacent,
         // SSWG-blessed only.
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
-        // NOTE: the design doc (§2.2) names swift-async-algorithms'
+        // NOTE: swift-async-algorithms'
         // AsyncChannel for per-subscriber delivery. It is deliberately NOT a
         // dependency here — see LocalPubSub.swift for the reasoning: the
         // doc's own API contract (synchronous `subscribe` returning

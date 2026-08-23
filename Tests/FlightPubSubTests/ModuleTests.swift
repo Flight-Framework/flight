@@ -38,12 +38,12 @@ private final class InMemoryAdapterModule: FlightModule {
 }
 
 // Static cluster slot ⇒ these tests must not interleave.
-@Suite("Module wiring (§6)", .serialized, .timeLimit(.minutes(1)))
+@Suite("Module wiring", .serialized, .timeLimit(.minutes(1)))
 struct ModuleTests {
 
     @Test("local-only app: PubSub component is the local core, and no service is registered")
     func localOnly() async throws {
-        let app = try assemble(configuration: Configuration(), modules: [FlightPubSubModule.self])
+        let app = try Flight.assemble(configuration: Configuration(), modules: [FlightPubSubModule.self])
 
         let pubsub = try app.container.resolve((any PubSub).self)
         #expect(pubsub is LocalPubSub)
@@ -66,7 +66,7 @@ struct ModuleTests {
         defer { InMemoryAdapterModule.clusterSlot.withLock { $0 = nil } }
 
         // FlightPubSubModule arrives transitively via the adapter module's DAG.
-        let app = try assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+        let app = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
 
         let pubsub = try app.container.resolve((any PubSub).self)
         #expect(pubsub is ClusteredPubSub)
@@ -88,8 +88,8 @@ struct ModuleTests {
         InMemoryAdapterModule.clusterSlot.withLock { $0 = InMemoryCluster() }
         defer { InMemoryAdapterModule.clusterSlot.withLock { $0 = nil } }
 
-        let appA = try assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
-        let appB = try assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+        let appA = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+        let appB = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
 
         func serviceGroup(for app: AssembledApplication, label: String) -> ServiceGroup {
             ServiceGroup(configuration: .init(

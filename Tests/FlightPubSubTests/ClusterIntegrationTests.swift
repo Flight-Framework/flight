@@ -4,9 +4,9 @@ import FlightPubSub
 import FlightPubSubTesting
 
 /// Multi-node topologies over the in-memory transport: what the seam
-/// promises (§5) — consumers against `PubSub` can't tell one node from
+/// promises — consumers against `PubSub` can't tell one node from
 /// twenty — exercised end to end.
-@Suite("Cluster integration (§5)", .timeLimit(.minutes(1)))
+@Suite("Cluster integration", .timeLimit(.minutes(1)))
 struct ClusterIntegrationTests {
 
     private struct Node {

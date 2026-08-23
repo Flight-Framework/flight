@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import FlightPubSub
 
-@Suite("Message (§2, §3, §4)")
+@Suite("Message")
 struct MessageTests {
 
     @Test("metadata defaults to empty")
