@@ -2,6 +2,7 @@ import FlightWeb
 import Foundation
 import HTTPTypes
 import HummingbirdCore
+import HummingbirdTLS
 import HummingbirdWebSocket
 import Logging
 import NIOCore
@@ -47,7 +48,7 @@ public struct FlightTransport: ServerTransport {
         let configuration = self.configuration
         let logger = self.logger
 
-        let server = try HTTPServerBuilder.http1WebSocketUpgrade(
+        let plain = HTTPServerBuilder.http1WebSocketUpgrade(
             configuration: .init(
                 http1: .init(),
                 ws: WebSocketServerConfiguration(
@@ -98,7 +99,16 @@ public struct FlightTransport: ServerTransport {
                 }
             }
         )
-        .buildServer(
+
+        // TLS wraps whatever channel the builder produced, so the upgrade
+        // path above is unchanged by it — `wss://` is `ws://` inside TLS.
+        let builder =
+            try configuration.tls.map {
+                try HTTPServerBuilder.tls(plain, tlsConfiguration: $0.nioConfiguration())
+            } ?? plain
+
+        let server = try builder
+            .buildServer(
             configuration: ServerConfiguration(
                 address: .hostname(configuration.host, port: configuration.port),
                 serverName: "FlightWeb",

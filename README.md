@@ -90,6 +90,45 @@ Transport settings come from the same `flight.yaml` everything else uses:
 `server.host` (127.0.0.1), `server.port` (8080), `server.backlog`,
 `server.max-request-body-bytes`, `server.max-websocket-frame-bytes`.
 
+### HTTPS
+
+TLS is off until a certificate and key are named, and on as soon as they are —
+there is no separate enable flag to forget:
+
+```yaml
+server:
+  tls:
+    certificate-chain-path: /etc/tls/fullchain.pem
+    private-key-path: /etc/tls/privkey.pem
+```
+
+Both are PEM; the chain is leaf first, intermediates after. Serving only the
+leaf is the usual cause of "works in curl, fails in a browser". Naming one
+key without the other fails at startup rather than falling back to
+plaintext — a server that was meant to be HTTPS and quietly is not is the
+worst of the three outcomes.
+
+Mutual TLS, when clients must present a certificate too:
+
+```yaml
+server:
+  tls:
+    certificate-chain-path: /etc/tls/fullchain.pem
+    private-key-path: /etc/tls/privkey.pem
+    trust-roots-path: /etc/tls/ca.pem
+    client-authentication: require   # none | request | require
+```
+
+`request` asks for a certificate, verifies it if one is offered, and serves
+clients that decline. `require` rejects the handshake without a trusted one.
+Either mode needs `trust-roots-path`; demanding client certificates with
+nothing to verify them against is a startup error.
+
+Terminating TLS at nginx or a load balancer instead is equally supported —
+leave these keys out and Flight serves plaintext to the proxy. WebSocket
+upgrades ride whatever the listener is doing, so `wss://` needs no separate
+configuration.
+
 Controllers must be `Sendable` — one instance serves concurrent requests.
 An internal struct whose `@Autowired`/`@ConfigValue` dependencies are
 Sendable gets the conformance implicitly; `public` controllers declare it
@@ -220,7 +259,9 @@ Tests/FlightTransportTests/    real-socket HTTP/SSE/WebSocket integration
 
 ## Deliberately not here (§10)
 
-No templating/SSR (a future consumer of the upgrade hook), no persistence
+No HTTP/2 or HTTP/3 (HummingbirdCore supports HTTP/2 and the builder seam
+would take it; nothing here has needed it yet), no templating/SSR (a future
+consumer of the upgrade hook), no persistence
 (Flight Data), no runtime route-registration API (routes are the macro path;
 `registerRoute` exists as the bootstrap-time escape hatch beside it, exactly
 as `container.register` sits beside `@Component`), and **no hand-rolled HTTP

@@ -40,6 +40,10 @@ let package = Package(
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.5.0"),
         .package(url: "https://github.com/hummingbird-project/hummingbird-websocket.git", from: "2.2.0"),
         .package(url: "https://github.com/swiftlang/swift-syntax.git", "601.0.0"..<"999.0.0"),
+        // Test-only: generates a throwaway self-signed certificate per run,
+        // so no private key is ever committed and no fixture can expire.
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.0"),
+        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.19.0"),
     ],
     targets: [
         .target(
@@ -65,7 +69,9 @@ let package = Package(
                 "FlightWeb",
                 .product(name: "HummingbirdCore", package: "hummingbird"),
                 .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket"),
+                .product(name: "HummingbirdTLS", package: "hummingbird"),
                 .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "HTTPTypes", package: "swift-http-types"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
@@ -112,6 +118,8 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOWebSocket", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
+                .product(name: "X509", package: "swift-certificates"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ]
         ),
