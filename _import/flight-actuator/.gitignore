@@ -1,8 +1,0 @@
-.build/
-.swiftpm/
-*.xcodeproj
-.DS_Store
-*.o
-*.swiftmodule
-Package.resolved
-.vscode/
