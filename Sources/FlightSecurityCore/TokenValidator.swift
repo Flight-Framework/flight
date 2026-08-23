@@ -1,5 +1,5 @@
 /// The seam for turning an externally issued token into a ``Principal``
-/// (design §3.2, §3.3).
+///.
 ///
 /// Flight Security Core ships one generic implementation,
 /// ``OIDCTokenValidator`` — OIDC-compliant providers (Descope, Keycloak,
@@ -11,7 +11,7 @@ public protocol TokenValidator: Sendable {
     /// audience, expiry, and clock-skew policy. Returns a ``Principal`` or
     /// throws a precise error.
     ///
-    /// Error hygiene (design §3.2): thrown errors carry detail for the
+    /// Error hygiene: thrown errors carry detail for the
     /// *internal* log only. The authentication middleware never lets them
     /// reach the wire; if application code rethrows one from a handler, it
     /// renders as an opaque 500, not as token detail.

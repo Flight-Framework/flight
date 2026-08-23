@@ -1,7 +1,7 @@
 import JWTKit
 
 /// A JSON value as it appears in a JWT payload. Internal: the public
-/// surface is `Principal.claims: [String: any Sendable]` (design §2).
+/// surface is `Principal.claims: [String: any Sendable]`.
 enum JSONValue: Codable, Equatable, Sendable {
     case string(String)
     case int(Int)
@@ -77,7 +77,7 @@ enum JSONValue: Codable, Equatable, Sendable {
 }
 
 /// The decoded JWT payload, claims kept verbatim. Signature verification is
-/// JWTKit's (design §3.1); claim *policy* is applied by
+/// JWTKit's; claim *policy* is applied by
 /// ``OIDCTokenValidator`` after verification, so `verify(using:)` is a
 /// deliberate no-op (it lets the validator use an injectable clock and
 /// produce precise ``TokenValidationError``s).
@@ -98,7 +98,7 @@ struct RawClaims: JWTPayload {
     }
 
     func verify(using _: some JWTAlgorithm) async throws {
-        // Claim policy is enforced by OIDCTokenValidator (design §3.2).
+        // Claim policy is enforced by OIDCTokenValidator.
     }
 
     /// Looks up a claim by name. An exact top-level match wins (Auth0-style

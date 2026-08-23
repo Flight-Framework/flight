@@ -1,7 +1,7 @@
 import FlightCore
 import Foundation
 
-/// Configuration of the generic OIDC validator (design §3.3, §6).
+/// Configuration of the generic OIDC validator.
 ///
 /// Switching providers is changing `issuer`/`audience` (and, rarely, an
 /// explicit JWKS URL) — configuration, not a code or package change.
@@ -33,7 +33,7 @@ public struct OIDCSecurityConfiguration: Sendable {
     /// How long fetched keys stay fresh before a revalidating refetch.
     public var jwksCacheTTL: TimeInterval
 
-    /// Leeway applied to `exp` and `nbf` (design §3.2: JWTKit supplies the
+    /// Leeway applied to `exp` and `nbf` (design: JWTKit supplies the
     /// primitive; Flight sets the policy).
     public var clockSkewLeeway: TimeInterval
 
@@ -41,6 +41,21 @@ public struct OIDCSecurityConfiguration: Sendable {
     /// refreshes and failing endpoints cannot be leveraged into hammering
     /// the IdP.
     public var jwksRefreshCooldown: TimeInterval
+
+    /// How long a cached key set may keep being served while the IdP is
+    /// unreachable, before validation starts failing instead.
+    ///
+    /// Unbounded stale-serving means a revoked key stays honored for the
+    /// whole outage. Bounded, a long outage eventually costs availability
+    /// rather than silently costing revocation.
+    public var jwksMaxStaleAge: TimeInterval
+
+    /// Whether key material may be fetched over plaintext HTTP.
+    ///
+    /// `https_only` by default, and there is no good reason to change it
+    /// outside local development: whoever answers this fetch chooses the
+    /// keys that verify every token this service accepts.
+    public var jwksTransport: JWKSTransportPolicy
 
     /// Claim names searched (in union) for roles. Each entry is an exact
     /// claim name first, else a dot-path into nested objects — the default
@@ -59,17 +74,19 @@ public struct OIDCSecurityConfiguration: Sendable {
         jwksCacheTTL: TimeInterval = 3600,
         clockSkewLeeway: TimeInterval = 60,
         jwksRefreshCooldown: TimeInterval = 30,
+        jwksMaxStaleAge: TimeInterval = 6 * 60 * 60,
+        jwksTransport: JWKSTransportPolicy = .httpsOnly,
         rolesClaims: [String] = ["roles", "groups", "realm_access.roles"],
         scopesClaims: [String] = ["scope", "scp"]
     ) throws {
         guard !issuer.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw ConfigError.decodingFailed(
-                key: "security.oidc.issuer", rawValue: issuer, targetType: OIDCSecurityConfiguration.self
+                key: "security.oidc.issuer", rawValue: issuer, targetType: String(describing: OIDCSecurityConfiguration.self)
             )
         }
         guard !audience.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw ConfigError.decodingFailed(
-                key: "security.oidc.audience", rawValue: audience, targetType: OIDCSecurityConfiguration.self
+                key: "security.oidc.audience", rawValue: audience, targetType: String(describing: OIDCSecurityConfiguration.self)
             )
         }
         self.issuer = issuer
@@ -78,11 +95,31 @@ public struct OIDCSecurityConfiguration: Sendable {
         self.jwksCacheTTL = max(0, jwksCacheTTL)
         self.clockSkewLeeway = max(0, clockSkewLeeway)
         self.jwksRefreshCooldown = max(0, jwksRefreshCooldown)
+        self.jwksMaxStaleAge = max(0, jwksMaxStaleAge)
+        self.jwksTransport = jwksTransport
         self.rolesClaims = rolesClaims
         self.scopesClaims = scopesClaims
     }
 
-    /// Reads the `security.oidc.*` keys from Flight Config (design §6).
+    /// Parses `security.oidc.jwks_transport`, refusing anything unrecognized
+    /// rather than falling back — a typo here would otherwise silently pick a
+    /// weaker transport than the operator wrote.
+    static func transportPolicy(_ raw: String?) throws -> JWKSTransportPolicy {
+        switch raw?.lowercased() {
+        case nil, "https_only":
+            return .httpsOnly
+        case "allow_insecure_loopback":
+            return .allowInsecureLoopback
+        case "allow_insecure_anywhere":
+            return .allowInsecureAnywhere
+        case .some(let other):
+            throw ConfigError.decodingFailed(
+                key: "security.oidc.jwks_transport", rawValue: other,
+                targetType: String(describing: JWKSTransportPolicy.self))
+        }
+    }
+
+    /// Reads the `security.oidc.*` keys from Flight Config.
     /// Missing required keys fail here — surfaced at container freeze, so a
     /// misconfigured app fails at startup, not on its first request.
     public init(configuration: Configuration) throws {
@@ -99,6 +136,12 @@ public struct OIDCSecurityConfiguration: Sendable {
             jwksRefreshCooldown: TimeInterval(
                 try configuration.getIfPresent("security.oidc.jwks_refresh_cooldown", as: Int.self) ?? 30
             ),
+            jwksMaxStaleAge: TimeInterval(
+                try configuration.getIfPresent("security.oidc.jwks_max_stale", as: Int.self)
+                    ?? 6 * 60 * 60
+            ),
+            jwksTransport: try Self.transportPolicy(
+                configuration.getIfPresent("security.oidc.jwks_transport", as: String.self)),
             rolesClaims: Self.claimList(
                 try configuration.getIfPresent("security.oidc.roles_claim", as: String.self),
                 default: ["roles", "groups", "realm_access.roles"]

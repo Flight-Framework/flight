@@ -2,7 +2,7 @@ import Foundation
 import JWTKit
 import Logging
 
-/// Process-wide JWKS cache (design §3.2, §6).
+/// Process-wide JWKS cache.
 ///
 /// Owns the orchestration the design calls "essential and easy to do
 /// naively":
@@ -36,6 +36,15 @@ actor JWKSCache {
     private let source: any JWKSSource
     private let ttl: TimeInterval
     private let refreshCooldown: TimeInterval
+    /// How far past its fetch time a key set may still be served when the IdP
+    /// is unreachable.
+    ///
+    /// Stale-serving was unbounded: once a key set was cached, an IdP that
+    /// stayed down kept it authoritative forever, so a revoked key went on
+    /// verifying tokens for as long as the outage lasted — which is exactly
+    /// the window revocation exists to close. Bounded, an outage eventually
+    /// costs availability instead of silently costing revocation.
+    private let maxStaleAge: TimeInterval
     private let now: @Sendable () -> Date
     private let logger: Logger
 
@@ -48,12 +57,14 @@ actor JWKSCache {
         source: any JWKSSource,
         ttl: TimeInterval,
         refreshCooldown: TimeInterval,
+        maxStaleAge: TimeInterval = 6 * 60 * 60,
         now: @escaping @Sendable () -> Date = { Date() },
         logger: Logger = Logger(label: "flight.security.jwks")
     ) {
         self.source = source
         self.ttl = ttl
         self.refreshCooldown = refreshCooldown
+        self.maxStaleAge = maxStaleAge
         self.now = now
         self.logger = logger
     }
@@ -99,10 +110,35 @@ actor JWKSCache {
         do {
             return try await refresh()
         } catch {
-            if let current {
+            if let current, let fetchedAt {
+                let age = moment.timeIntervalSince(fetchedAt)
+                guard age < maxStaleAge else {
+                    logger.error(
+                        """
+                        JWKS refresh has failed for longer than the stale limit; \
+                        refusing to keep serving keys that may have been revoked
+                        """,
+                        metadata: [
+                            "age-seconds": "\(Int(age))",
+                            "limit-seconds": "\(Int(maxStaleAge))",
+                            "reason": "\(error)",
+                        ]
+                    )
+                    throw TokenValidationError(
+                        kind: .keySourceUnavailable,
+                        reason: """
+                            cached JWKS is \(Int(age))s old, past the \(Int(maxStaleAge))s stale \
+                            limit, and the key source is still unreachable: \(error)
+                            """
+                    )
+                }
                 logger.warning(
                     "JWKS refresh failed; serving cached keys",
-                    metadata: ["reason": "\(error)"]
+                    metadata: [
+                        "reason": "\(error)",
+                        "age-seconds": "\(Int(age))",
+                        "limit-seconds": "\(Int(maxStaleAge))",
+                    ]
                 )
                 return current
             }

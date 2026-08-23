@@ -1,9 +1,9 @@
-/// The authenticated identity (design §2).
+/// The authenticated identity.
 ///
 /// A `Principal` is produced by a ``TokenValidator`` from an externally
 /// issued identity token. `roles`, `scopes`, and `claims` are surfaced
 /// directly from the validated token — Flight parses data it already has,
-/// it does not build an identity model (design §1).
+/// it does not build an identity model.
 public struct Principal: Sendable {
     /// The IdP's stable user id (JWT `sub`).
     public let subject: String
@@ -48,14 +48,14 @@ public struct Principal: Sendable {
 }
 
 extension Principal {
-    /// The ambient principal for the current task tree (design §4).
+    /// The ambient principal for the current task tree.
     ///
     /// Bound with `Principal.$current.withValue(...)`, most conveniently via
     /// `RequestContext.withPrincipal { ... }` inside a handler. The value
     /// propagates to structured child tasks (`async let`, task groups) but
     /// **not** across `Task.detached` boundaries — which is correct: a
     /// detached background job should not silently inherit the requester's
-    /// identity (design §4).
+    /// identity.
     ///
     /// Note: because Flight Web middleware runs as a flat chain (each
     /// middleware returns before the next runs), the authentication

@@ -9,7 +9,7 @@ import Testing
 
 /// Registers an OIDC validator wired to an in-memory JWKS (real validation
 /// path, no network) — standing in for Flight Security OIDC configuring the
-/// generic validator (§3.3). State travels on the instance (TestContainer
+/// generic validator. State travels on the instance (TestContainer
 /// substitutes provided instances by type), so parallel tests never share
 /// key material.
 private final class InMemoryOIDCModule: FlightModule {
@@ -42,7 +42,7 @@ private final class InMemoryOIDCModule: FlightModule {
     }
 }
 
-/// Application routes exercising the design's §4/§5.1 patterns.
+/// Application routes exercising the authenticate-then-enforce patterns.
 private final class RoutesModule: FlightModule {
     init() {}
 
@@ -55,14 +55,14 @@ private final class RoutesModule: FlightModule {
             return .text(principal.subject)
         }
         container.registerRoute(.post, "/admin/users", source: "RoutesModule") { context in
-            // The design §5.1 manual authorization check, verbatim shape.
+            // The design manual authorization check, verbatim shape.
             guard context.principal?.hasRole("admin") == true else {
                 throw SecurityError.forbidden
             }
             return .text("created")
         }
         container.registerRoute(.get, "/documents", source: "RoutesModule") { context in
-            // §4: handler binds the task-local; a "service" reads the
+            //: handler binds the task-local; a "service" reads the
             // ambient principal without it being threaded through.
             try await context.withPrincipal {
                 guard let principal = Principal.current else {
@@ -74,7 +74,7 @@ private final class RoutesModule: FlightModule {
     }
 }
 
-@Suite("End to end through Flight Web's real pipeline (§4, §5, §6)")
+@Suite("End to end through Flight Web's real pipeline")
 struct EndToEndTests {
     let clock = TestClock()
     let identity = TestIdentity(kid: "e2e-key")
@@ -108,7 +108,7 @@ struct EndToEndTests {
         #expect(response.bodyText == "user-123")
     }
 
-    @Test("no token: public routes stay public, guarded routes 401 (§5)")
+    @Test("no token: public routes stay public, guarded routes 401")
     func anonymousRequests() async throws {
         let client = try makeClient()
         #expect(await client.get("/public").status == .ok)
@@ -116,7 +116,7 @@ struct EndToEndTests {
         let denied = await client.get("/whoami")
         #expect(denied.status == .unauthorized)
         let body = denied.bodyText
-        #expect(!body.lowercased().contains("token"), "generic 401, no detail (§3.2)")
+        #expect(!body.lowercased().contains("token"), "generic 401, no detail")
     }
 
     @Test("a forged token is a generic 401 on guarded routes, anonymous on public ones")
@@ -129,7 +129,7 @@ struct EndToEndTests {
 
         let denied = await client.get("/whoami", headers: bearer(forged))
         #expect(denied.status == .unauthorized)
-        #expect(!denied.bodyText.lowercased().contains("signature"), "no detail on the wire (§3.2)")
+        #expect(!denied.bodyText.lowercased().contains("signature"), "no detail on the wire")
     }
 
     @Test("an expired token does not authenticate")
@@ -140,7 +140,7 @@ struct EndToEndTests {
         #expect(response.status == .unauthorized)
     }
 
-    @Test("manual role authorization in a handler (§5.1): admin passes, others 403")
+    @Test("manual role authorization in a handler: admin passes, others 403")
     func roleCheck() async throws {
         let client = try makeClient()
 
@@ -158,7 +158,7 @@ struct EndToEndTests {
         #expect(anonymous.status == .forbidden, "no principal, no role — same generic outcome")
     }
 
-    @Test("withPrincipal carries the identity into service-style code (§4)")
+    @Test("withPrincipal carries the identity into service-style code")
     func ambientPrincipal() async throws {
         let client = try makeClient()
         let token = try await identity.sign(standardClaims(now: clock.now))

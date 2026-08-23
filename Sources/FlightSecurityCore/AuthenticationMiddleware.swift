@@ -1,11 +1,11 @@
 import FlightWeb
 import HTTPTypes
 
-/// The authentication middleware (design §4): extracts the bearer token,
+/// The authentication middleware: extracts the bearer token,
 /// validates it, and — on success — publishes the ``Principal`` on the
 /// request's scope (via the scoped ``PrincipalHolder`` bean).
 ///
-/// Authentication is deliberately not enforcement (design §5): requests
+/// Authentication is deliberately not enforcement: requests
 /// with no token, and requests whose token fails validation, both
 /// `.continue` as unauthenticated. Rejection is ``requireAuthentication``'s
 /// job (or a handler-level guard), so public routes stay public.
@@ -14,7 +14,10 @@ import HTTPTypes
 /// request (a post-freeze dictionary read). It is what
 /// ``FlightSecurityModule`` registers.
 public func authenticationMiddleware() -> Middleware {
-    { context in
+    // A request-only step: it inspects the credential and either continues or
+    // answers, never needing to see the response. `middleware(from:)` adapts
+    // that shape, and `.continue` cannot be forgotten the way `next` can.
+    middleware(from: { context in
         guard let validator = try? context.resolve((any TokenValidator).self) else {
             // A wiring bug, not a client error: fail closed, say nothing
             // token-specific to the wire.
@@ -24,15 +27,15 @@ public func authenticationMiddleware() -> Middleware {
             return .respond(.problem(status: .internalServerError, message: "Internal Server Error"))
         }
         return await authenticate(&context, using: validator)
-    }
+    })
 }
 
 /// ``authenticationMiddleware()`` with an explicit validator, for manual
 /// wiring or tests.
 public func authenticationMiddleware(validator: any TokenValidator) -> Middleware {
-    { context in
+    middleware(from: { context in
         await authenticate(&context, using: validator)
-    }
+    })
 }
 
 private func authenticate(
@@ -40,7 +43,7 @@ private func authenticate(
     using validator: any TokenValidator
 ) async -> MiddlewareResult {
     guard let token = context.request.bearerToken else {
-        // No credential: unauthenticated, not an error (design §4).
+        // No credential: unauthenticated, not an error.
         return .continue
     }
     guard let holder = try? context.resolve(PrincipalHolder.self) else {
@@ -58,7 +61,7 @@ private func authenticate(
         context.logger[metadataKey: "auth.subject"] = "\(principal.subject)"
         return .continue
     } catch {
-        // Error hygiene (design §3.2): the specific reason stays in the
+        // Error hygiene: the specific reason stays in the
         // internal log; the wire sees nothing here, and enforcement points
         // return a generic 401.
         context.logger.info(
@@ -70,7 +73,7 @@ private func authenticate(
     }
 }
 
-/// Rejects requests with no valid principal (design §5.1). Enforcement of
+/// Rejects requests with no valid principal. Enforcement of
 /// *authentication*, not authorization — "is there anyone here", not "is
 /// this the right someone".
 ///
@@ -81,8 +84,8 @@ private func authenticate(
 ///
 /// Responses carry an RFC 6750 `WWW-Authenticate: Bearer` challenge;
 /// `error="invalid_token"` distinguishes a rejected credential from an
-/// absent one — and nothing more (design §3.2: no detail reaches the wire).
-public let requireAuthentication: Middleware = { context in
+/// absent one — and nothing more (design: no detail reaches the wire).
+public let requireAuthentication: Middleware = middleware(from: { context in
     switch context.authenticationState {
     case .authenticated:
         return .continue
@@ -97,4 +100,4 @@ public let requireAuthentication: Middleware = { context in
                 .settingHeader(.wwwAuthenticate, #"Bearer error="invalid_token""#)
         )
     }
-}
+})

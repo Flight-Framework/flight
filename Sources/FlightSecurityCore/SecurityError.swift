@@ -1,11 +1,11 @@
 import FlightWeb
 
 /// Enforcement errors thrown by application code and the request-context
-/// guards (design §4/§5.1).
+/// guards.
 ///
 /// Conforms to `HTTPErrorRepresentable`, so a throw from a handler renders
 /// as a bare 401/403 with a generic message — never validation detail
-/// (design §3.2 error hygiene).
+/// (design error hygiene).
 public enum SecurityError: Error, Sendable, Equatable, CustomStringConvertible {
     /// No authenticated principal on the current request.
     case unauthenticated
@@ -21,7 +21,7 @@ public enum SecurityError: Error, Sendable, Equatable, CustomStringConvertible {
 }
 
 extension SecurityError: HTTPErrorRepresentable {
-    public var httpStatus: Status {
+    public var httpStatus: HTTPResponse.Status {
         switch self {
         case .unauthenticated: .unauthorized
         case .forbidden: .forbidden

@@ -3,7 +3,7 @@ import Testing
 
 @testable import FlightSecurityCore
 
-@Suite("Claim parsing and extraction (§2)")
+@Suite("Claim parsing and extraction")
 struct ClaimsTests {
     private func decode(_ json: String) throws -> RawClaims {
         try JSONDecoder().decode(RawClaims.self, from: Data(json.utf8))

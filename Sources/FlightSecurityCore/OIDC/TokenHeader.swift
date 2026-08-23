@@ -1,9 +1,9 @@
 import Foundation
 
 /// The JOSE header fields Flight needs *before* verification: `kid` decides
-/// whether a JWKS refresh is warranted (design §3.2), `alg` is screened
+/// whether a JWKS refresh is warranted, `alg` is screened
 /// defensively. This is structural parsing only — no cryptography; signature
-/// verification stays with JWTKit (design §3.1).
+/// verification stays with JWTKit.
 struct TokenHeader: Sendable, Equatable {
     let algorithm: String?
     let keyID: String?

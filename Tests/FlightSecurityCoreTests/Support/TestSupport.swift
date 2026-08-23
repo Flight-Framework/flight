@@ -177,7 +177,7 @@ struct StubValidator: TokenValidator {
 
 /// Registers a caller-supplied validator (plus the `PrincipalHolder` scoped
 /// bean) — the "custom validator installed before FlightSecurityModule"
-/// shape from design §3.3.
+/// shape from design
 final class CustomValidatorModule: FlightModule {
     static let defaultValidator = Mutex<(any TokenValidator)?>(nil)
 

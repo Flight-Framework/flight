@@ -1,6 +1,6 @@
 import Synchronization
 
-/// The authentication outcome for one request (design §4/§5.1).
+/// The authentication outcome for one request.
 ///
 /// Distinguishes "nobody presented a credential" from "a credential was
 /// presented and rejected" — `requireAuthentication` uses the distinction to
@@ -9,7 +9,7 @@ public enum AuthenticationState: Sendable {
     /// No bearer token was presented.
     case anonymous
     /// A bearer token was presented but failed validation. The failure
-    /// detail stays in the internal log (design §3.2 error hygiene).
+    /// detail stays in the internal log (design error hygiene).
     case invalidCredential
     /// A bearer token was presented and validated.
     case authenticated(Principal)
@@ -20,7 +20,7 @@ public enum AuthenticationState: Sendable {
     }
 }
 
-/// Per-request carrier for the authentication state (design §4).
+/// Per-request carrier for the authentication state.
 ///
 /// Registered by ``FlightSecurityModule`` as a `.scoped` bean, so each
 /// request's `Scope` holds exactly one. The authentication middleware writes

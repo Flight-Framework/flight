@@ -1,7 +1,7 @@
 // swift-tools-version: 6.1
 // Flight Security Core — federated authentication for Flight: token
 // validation (JWTKit-backed), Principal plumbing, and the authentication
-// enforcement seam (flight-security-core-design.md).
+// enforcement seam.
 import PackageDescription
 
 let package = Package(
@@ -18,11 +18,11 @@ let package = Package(
     dependencies: [
         .package(path: "../../../Core/flight-core"),
         .package(path: "../../../Web/flight-web"),
-        // The one security-critical primitive is delegated (design §3.1):
+        // The one security-critical primitive is delegated:
         // JWTKit is SSWG Graduated and SwiftCrypto-backed. Flight owns
         // orchestration only.
         .package(url: "https://github.com/vapor/jwt-kit.git", from: "5.6.0"),
-        // JWKS fetching (design §3.2). SSWG-graduated client; already in the
+        // JWKS fetching. SSWG-graduated client; already in the
         // Flight dependency graph transitively via hummingbird.
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.21.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),

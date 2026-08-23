@@ -2,7 +2,7 @@ import Testing
 
 @testable import FlightSecurityCore
 
-@Suite("Principal — the authenticated identity (§2)")
+@Suite("Principal — the authenticated identity")
 struct PrincipalTests {
     @Test("hasRole reflects the roles set")
     func hasRole() {
@@ -52,7 +52,7 @@ struct PrincipalTests {
         #expect(Principal.current == nil)
     }
 
-    @Test("Principal.current propagates to structured children but not Task.detached (§4)")
+    @Test("Principal.current propagates to structured children but not Task.detached")
     func taskLocalPropagation() async {
         let principal = testPrincipal(subject: "task-local-user")
         await Principal.$current.withValue(principal) {
@@ -69,7 +69,7 @@ struct PrincipalTests {
             }
 
             // Task.detached deliberately does not — a detached background
-            // job must not silently inherit the requester's identity (§4).
+            // job must not silently inherit the requester's identity.
             let detached = Task.detached { Principal.current?.subject }
             #expect(await detached.value == nil)
         }

@@ -6,7 +6,7 @@ import Testing
 
 @testable import FlightSecurityCore
 
-@Suite("Module wiring and configuration (§6)")
+@Suite("Module wiring and configuration")
 struct ModuleTests {
     private var minimalConfig: Configuration {
         Configuration(values: [
@@ -40,7 +40,7 @@ struct ModuleTests {
         #expect(module.service != nil, "OIDC path owns the JWKS maintenance service")
     }
 
-    @Test("missing required configuration fails at startup, not first request (§6)")
+    @Test("missing required configuration fails at startup, not first request")
     func missingConfiguration() {
         #expect(throws: (any Error).self) {
             try TestContainer.build { FlightSecurityModule() }
@@ -52,7 +52,7 @@ struct ModuleTests {
         }
     }
 
-    @Test("a custom TokenValidator registered first wins — the §3.3 seam")
+    @Test("a custom TokenValidator registered first wins — the seam")
     func customValidatorWins() throws {
         let stub = StubValidator(principalsByToken: ["t": testPrincipal()])
         let securityModule = FlightSecurityModule()
@@ -86,7 +86,7 @@ struct ModuleTests {
         #expect(config.scopesClaims == ["scope", "scp"])
     }
 
-    @Test("every documented key is read (§6)")
+    @Test("every documented key is read")
     func configurationOverrides() throws {
         let config = try OIDCSecurityConfiguration(
             configuration: Configuration(values: [
@@ -118,7 +118,7 @@ struct ModuleTests {
         }
     }
 
-    @Test("the JWKS maintenance service pre-warms the cache at startup (§6)")
+    @Test("the JWKS maintenance service pre-warms the cache at startup")
     func maintenancePrewarm() async throws {
         let identity = TestIdentity(kid: "svc-key")
         let source = try InMemoryJWKSSource(json: jwksJSON([identity]))

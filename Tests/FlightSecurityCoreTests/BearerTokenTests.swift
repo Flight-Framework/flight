@@ -4,7 +4,7 @@ import Testing
 
 @testable import FlightSecurityCore
 
-@Suite("Bearer token extraction (§4, RFC 6750)")
+@Suite("Bearer token extraction (RFC 6750)")
 struct BearerTokenTests {
     private func request(authorization: String?) -> Request {
         var headers: HTTPFields = [:]

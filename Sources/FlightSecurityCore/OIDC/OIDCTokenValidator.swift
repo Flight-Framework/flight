@@ -2,23 +2,23 @@ import Foundation
 import JWTKit
 import Logging
 
-/// The generic OIDC token validator (design §3).
+/// The generic OIDC token validator.
 ///
 /// JWTKit owns the cryptographic core — signature verification, JWS
-/// structure, JWK parsing (§3.1). This type owns the orchestration (§3.2):
+/// structure, JWK parsing. This type owns the orchestration:
 /// JWKS fetching and rotation via ``JWKSCache``, and the claim policy —
 /// issuer must match, audience must include this application, `exp`/`nbf`
 /// enforced with configurable clock-skew leeway, `sub` required.
 ///
 /// One instance serves all OIDC-compliant providers; Descope, Keycloak,
-/// Auth0, Okta, and Entra are configuration, not code (§3.3).
+/// Auth0, Okta, and Entra are configuration, not code.
 public final class OIDCTokenValidator: TokenValidator {
     private let configuration: OIDCSecurityConfiguration
     private let cache: JWKSCache
     private let now: @Sendable () -> Date
 
     /// - Parameters:
-    ///   - configuration: Issuer/audience/claim policy (design §6).
+    ///   - configuration: Issuer/audience/claim policy.
     ///   - jwksSource: Where keys come from. Defaults to HTTPS fetching with
     ///     OIDC discovery; injectable for tests and non-standard setups.
     ///   - now: Clock, injectable for tests.
@@ -30,11 +30,15 @@ public final class OIDCTokenValidator: TokenValidator {
         self.configuration = configuration
         let source =
             jwksSource
-            ?? HTTPJWKSSource(issuer: configuration.issuer, jwksURL: configuration.jwksURL)
+            ?? HTTPJWKSSource(
+                issuer: configuration.issuer,
+                jwksURL: configuration.jwksURL,
+                transportPolicy: configuration.jwksTransport)
         self.cache = JWKSCache(
             source: source,
             ttl: configuration.jwksCacheTTL,
             refreshCooldown: configuration.jwksRefreshCooldown,
+            maxStaleAge: configuration.jwksMaxStaleAge,
             now: now
         )
         self.now = now
@@ -54,7 +58,7 @@ public final class OIDCTokenValidator: TokenValidator {
         }
 
         // 2. Current keys; an unrecognized `kid` triggers one (cooldown-
-        //    gated) refresh — the key-rotation path (design §3.2).
+        //    gated) refresh — the key-rotation path.
         var keys = try await cache.snapshot()
         if let kid = header.keyID, !keys.keyIDs.contains(kid) {
             keys = try await cache.snapshot(.unknownKeyID)
@@ -66,7 +70,7 @@ public final class OIDCTokenValidator: TokenValidator {
             }
         }
 
-        // 3. Signature verification and payload decoding — JWTKit (§3.1).
+        // 3. Signature verification and payload decoding — JWTKit.
         //    Tokens without a `kid` are tried against every key rather than
         //    trusting JWTKit's silent default-key fallback.
         let claims: RawClaims
@@ -78,10 +82,10 @@ public final class OIDCTokenValidator: TokenValidator {
             throw Self.mapJWTError(error)
         }
 
-        // 4. Claim policy (§3.2).
+        // 4. Claim policy.
         try enforcePolicy(on: claims)
 
-        // 5. The policy passed; surface what the token already carries (§2).
+        // 5. The policy passed; surface what the token already carries.
         return makePrincipal(from: claims)
     }
 
@@ -114,7 +118,7 @@ public final class OIDCTokenValidator: TokenValidator {
             )
         }
 
-        // Audience: must include this application. RFC 7519 §4.1.3 allows a
+        // Audience: must include this application. RFC 7519 allows a
         // single string or an array of strings.
         switch claims.values["aud"] {
         case .string(let audience):
@@ -170,7 +174,7 @@ public final class OIDCTokenValidator: TokenValidator {
         }
     }
 
-    // MARK: - Principal assembly (§2)
+    // MARK: - Principal assembly
 
     /// Claims consumed by validation and surfaced as dedicated `Principal`
     /// fields; everything else lands in `Principal.claims`.

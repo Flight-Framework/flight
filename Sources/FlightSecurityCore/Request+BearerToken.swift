@@ -2,7 +2,7 @@ import FlightWeb
 import Foundation
 
 extension Request {
-    /// The bearer token from the `Authorization` header, per RFC 6750 §2.1,
+    /// The bearer token from the `Authorization` header, per RFC 6750,
     /// or `nil` when the header is absent, uses another scheme, or is
     /// malformed.
     ///
@@ -10,7 +10,7 @@ extension Request {
     /// the credential itself is returned verbatim. A malformed value (empty
     /// token, embedded whitespace) yields `nil` — i.e. the request is
     /// treated as unauthenticated rather than rejected here; enforcement is
-    /// a separate concern (design §5).
+    /// a separate concern.
     public var bearerToken: String? {
         guard let header = headers[.authorization] else { return nil }
         return Self.parseBearer(header)

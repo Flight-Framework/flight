@@ -3,12 +3,12 @@ import FlightWeb
 import Logging
 import ServiceLifecycle
 
-/// Module wiring (design §6).
+/// Module wiring.
 ///
 /// Registers:
 /// - the ``TokenValidator`` singleton — the generic ``OIDCTokenValidator``
 ///   configured from `security.oidc.*`, unless the application registered
-///   its own `(any TokenValidator)` bean first (the §3.3 seam: configure a
+///   its own `(any TokenValidator)` bean first (the seam: configure a
 ///   custom-validator module *before* this one in the bootstrap module
 ///   list);
 /// - the request-scoped ``PrincipalHolder`` carrying the principal;
@@ -18,7 +18,7 @@ import ServiceLifecycle
 ///   refreshes it on the cache-TTL cadence.
 ///
 /// ``requireAuthentication`` is deliberately *not* registered — apps add it
-/// where wanted (design §5.1).
+/// where wanted.
 ///
 /// Missing required configuration (`security.oidc.issuer`/`audience`) fails
 /// at container freeze — startup, not first request.
@@ -39,7 +39,7 @@ public final class FlightSecurityModule: FlightModule {
             PrincipalHolder()
         }
 
-        // The §3.3 seam: an already-registered validator wins; the generic
+        // The seam: an already-registered validator wins; the generic
         // OIDC implementation is the default, not a mandate.
         // String(reflecting:) matches how the container names bean types.
         let validatorTypeName = String(reflecting: (any TokenValidator).self)
@@ -69,7 +69,7 @@ public final class FlightSecurityModule: FlightModule {
     }
 }
 
-/// Keeps the process-wide JWKS cache warm (design §3.2, §6): one fetch at
+/// Keeps the process-wide JWKS cache warm: one fetch at
 /// startup so the first request never pays IdP latency, then a refresh per
 /// cache-TTL. Fetch failures are logged and retried on the next tick —
 /// token validation falls back to lazy fetching (and stale-serving), so an

@@ -38,7 +38,7 @@ private final class FakeHTTPGetter: HTTPGetting, Sendable {
     }
 }
 
-@Suite("JWKS fetching over HTTP — explicit URL and OIDC discovery (§3.2, §3.3)")
+@Suite("JWKS fetching over HTTP — explicit URL and OIDC discovery")
 struct HTTPJWKSSourceTests {
     private let identity = TestIdentity(kid: "http-key")
     private let issuer = "https://idp.example.com"
@@ -71,7 +71,7 @@ struct HTTPJWKSSourceTests {
         #expect(getter.requested == [jwksURL])
     }
 
-    @Test("without an explicit URL, jwks_uri comes from OIDC discovery (§3.3)")
+    @Test("without an explicit URL, jwks_uri comes from OIDC discovery")
     func discovery() async throws {
         let getter = FakeHTTPGetter()
         getter.respond(to: discoveryURL, with: discoveryDocument(issuer: issuer, jwksURI: jwksURL))
@@ -107,7 +107,7 @@ struct HTTPJWKSSourceTests {
         #expect(getter.requested.first == discoveryURL)
     }
 
-    @Test("a discovery document asserting a different issuer is rejected (OIDC Discovery §4.3)")
+    @Test("a discovery document asserting a different issuer is rejected (OIDC Discovery)")
     func discoveryIssuerMismatch() async throws {
         let getter = FakeHTTPGetter()
         getter.respond(

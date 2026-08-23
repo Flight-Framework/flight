@@ -3,7 +3,7 @@ import Testing
 
 @testable import FlightSecurityCore
 
-@Suite("OIDC token validation — the one security-critical component (§3)")
+@Suite("OIDC token validation — the one security-critical component")
 struct OIDCValidatorTests {
     let clock = TestClock()
     let identity = TestIdentity(kid: "key-1")
@@ -15,6 +15,7 @@ struct OIDCValidatorTests {
         jwksCacheTTL: TimeInterval = 3600,
         clockSkewLeeway: TimeInterval = 60,
         jwksRefreshCooldown: TimeInterval = 30,
+        jwksMaxStaleAge: TimeInterval = 6 * 60 * 60,
         rolesClaims: [String] = ["roles", "groups", "realm_access.roles"],
         scopesClaims: [String] = ["scope", "scp"]
     ) throws -> (OIDCTokenValidator, InMemoryJWKSSource) {
@@ -25,6 +26,7 @@ struct OIDCValidatorTests {
             jwksCacheTTL: jwksCacheTTL,
             clockSkewLeeway: clockSkewLeeway,
             jwksRefreshCooldown: jwksRefreshCooldown,
+            jwksMaxStaleAge: jwksMaxStaleAge,
             rolesClaims: rolesClaims,
             scopesClaims: scopesClaims
         )
@@ -48,7 +50,7 @@ struct OIDCValidatorTests {
         }
     }
 
-    // MARK: Happy path (§2, §3.2)
+    // MARK: Happy path
 
     @Test("a valid token produces a fully populated Principal")
     func validToken() async throws {
@@ -73,7 +75,7 @@ struct OIDCValidatorTests {
         #expect(principal.claim("email", as: String.self) == "user@example.com")
     }
 
-    @Test("claims consumed by validation do not reappear in Principal.claims (§2)")
+    @Test("claims consumed by validation do not reappear in Principal.claims")
     func consumedClaims() async throws {
         let (validator, _) = try makeValidator()
         let token = try await identity.sign(standardClaims(now: clock.now))
@@ -83,7 +85,7 @@ struct OIDCValidatorTests {
         }
     }
 
-    @Test("audience may be an array that includes this application (RFC 7519 §4.1.3)")
+    @Test("audience may be an array that includes this application (RFC 7519)")
     func audienceArray() async throws {
         let (validator, _) = try makeValidator()
         let token = try await identity.sign(
@@ -111,7 +113,7 @@ struct OIDCValidatorTests {
         await expectValidationError(.signatureInvalid) { try await validator.validate(token) }
     }
 
-    @Test("custom roles/scopes claim configuration is honored (§3.3)")
+    @Test("custom roles/scopes claim configuration is honored")
     func customClaimNames() async throws {
         let (validator, _) = try makeValidator(
             rolesClaims: ["https://example.com/roles"], scopesClaims: ["permissions"]
@@ -131,7 +133,7 @@ struct OIDCValidatorTests {
         #expect(principal.scopes == ["read:all"])
     }
 
-    // MARK: Claim policy (§3.2)
+    // MARK: Claim policy
 
     @Test("wrong issuer is rejected")
     func issuerMismatch() async throws {
@@ -170,7 +172,7 @@ struct OIDCValidatorTests {
         await expectValidationError(.audienceMismatch) { try await validator.validate(token) }
     }
 
-    @Test("an expired token is rejected; within leeway it is accepted (§3.2)")
+    @Test("an expired token is rejected; within leeway it is accepted")
     func expiry() async throws {
         let (validator, _) = try makeValidator(clockSkewLeeway: 60)
 
@@ -218,7 +220,7 @@ struct OIDCValidatorTests {
         await expectValidationError(.missingRequiredClaim) { try await validator.validate(token) }
     }
 
-    // MARK: Signature and structure (§3.1 delegation)
+    // MARK: Signature and structure (delegated to JWTKit)
 
     @Test("a token signed by the wrong key under a known kid is rejected")
     func wrongKey() async throws {
@@ -270,7 +272,7 @@ struct OIDCValidatorTests {
         #expect(source.fetchCount == 0, "rejected before touching the key source")
     }
 
-    // MARK: JWKS orchestration (§3.2)
+    // MARK: JWKS orchestration
 
     @Test("keys are fetched once and cached across validations")
     func cachesKeys() async throws {
@@ -298,7 +300,7 @@ struct OIDCValidatorTests {
         #expect(source.fetchCount == 2, "past TTL: revalidating refetch")
     }
 
-    @Test("an unrecognized kid triggers a refresh — the key-rotation path (§3.2)")
+    @Test("an unrecognized kid triggers a refresh — the key-rotation path")
     func rotationRefresh() async throws {
         let (validator, source) = try makeValidator()
         let oldToken = try await identity.sign(standardClaims(now: clock.now))
@@ -363,6 +365,29 @@ struct OIDCValidatorTests {
         clock.advance(by: 400)  // TTL elapsed; refresh will fail
         let principal = try await validator.validate(token)
         #expect(principal.subject == "user-123", "stale keys still validate")
+    }
+
+    @Test("stale-serving is bounded — a long outage stops honoring old keys")
+    func staleServingIsBounded() async throws {
+        // Serving cached keys through an outage was unbounded: an IdP that
+        // stayed down kept its last key set authoritative forever, so a
+        // revoked key went on verifying tokens for the whole outage — exactly
+        // the window revocation exists to close.
+        let (validator, source) = try makeValidator(jwksCacheTTL: 300, jwksMaxStaleAge: 3600)
+        let token = try await identity.sign(standardClaims(now: clock.now))
+        _ = try await validator.validate(token)
+
+        source.setError(JWKSSourceError(reason: "IdP down"))
+
+        // Within the stale window, availability wins.
+        clock.advance(by: 400)
+        #expect(try await validator.validate(token).subject == "user-123")
+
+        // Past it, the keys stop being trusted rather than being trusted
+        // indefinitely.
+        clock.advance(by: 4000)
+        let fresh = try await identity.sign(standardClaims(now: clock.now))
+        await expectValidationError(.keySourceUnavailable) { try await validator.validate(fresh) }
     }
 
     @Test("no keys at all — fetch failing from the start — is keySourceUnavailable")
@@ -466,7 +491,7 @@ struct OIDCValidatorTests {
         await expectValidationError(.keySourceUnavailable) { try await validator.validate(token) }
     }
 
-    // MARK: Error hygiene (§3.2)
+    // MARK: Error hygiene
 
     @Test("attacker-controlled header values cannot forge log lines")
     func logInjectionNeutralized() async throws {
