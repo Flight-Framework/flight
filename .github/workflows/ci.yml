@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        swift: ["6.2"]
+        swift: ["6.2.3"]
 
     steps:
       - uses: actions/checkout@v4
@@ -29,8 +29,10 @@ jobs:
       # --enable-all-traits: a root build compiles every target, but only
       # traits that are enabled bring their dependencies. Without this the
       # Security target would be built with JWTKit pruned and fail.
-      - name: Build (warnings are errors)
-        run: swift build --enable-all-traits -Xswiftc -warnings-as-errors
+      - name: Build (Flight's own warnings are errors)
+        env:
+          FLIGHT_STRICT_WARNINGS: "1"
+        run: swift build --enable-all-traits
 
       - name: Test
         run: swift test --enable-all-traits
@@ -55,7 +57,7 @@ jobs:
 
       - uses: swift-actions/setup-swift@v2
         with:
-          swift-version: "6.2"
+          swift-version: "6.2.3"
 
       - name: Check formatting
         run: swift format lint --recursive --strict Sources Tests

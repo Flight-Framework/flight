@@ -428,3 +428,20 @@ if ProcessInfo.processInfo.environment["FLIGHT_BUILD_DOCS"] != nil {
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.3.0")
     )
 }
+
+// Strict warnings, opt-in and scoped to Flight's own targets.
+//
+// `swift build -Xswiftc -warnings-as-errors` cannot be used for this: it
+// applies to every module in the build, dependencies included, so a warning
+// in third-party code that a newer compiler has already fixed fails the
+// build. This setting reaches only the targets declared above.
+//
+//     FLIGHT_STRICT_WARNINGS=1 swift build --enable-all-traits
+if ProcessInfo.processInfo.environment["FLIGHT_STRICT_WARNINGS"] != nil {
+    // Plugin targets reject build settings outright.
+    for target in package.targets where target.type != .plugin {
+        var settings = target.swiftSettings ?? []
+        settings.append(.treatAllWarnings(as: .error))
+        target.swiftSettings = settings
+    }
+}
