@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Swift ${{ matrix.swift }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        swift: ["6.2"]
+
+    steps:
+      - name: Check the sibling-repository token is present
+        run: |
+          if [ -z "${{ secrets.SWIFTFLIGHT_CI_TOKEN }}" ]; then
+            echo "::error::SWIFTFLIGHT_CI_TOKEN is not set. flight-channels resolves"
+            echo "::error::flight-config, flight-core, flight-pubsub, flight-web by relative path, and these repositories are"
+            echo "::error::private, so CI needs a token with read access to them."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          path: Channels/flight-channels
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Swift-Flight/flight-config
+          token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
+          path: Config/flight-config
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Swift-Flight/flight-core
+          token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
+          path: Core/flight-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Swift-Flight/flight-pubsub
+          token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
+          path: PubSub/flight-pubsub
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Swift-Flight/flight-web
+          token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
+          path: Web/flight-web
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: ${{ matrix.swift }}
+
+      - name: Build (warnings are errors)
+        working-directory: Channels/flight-channels
+        run: swift build -Xswiftc -warnings-as-errors
+
+      # Building the test target separately: a package whose sources compile
+      # while its tests do not is exactly what a cached local build hides.
+      - name: Build tests
+        working-directory: Channels/flight-channels
+        run: swift build --build-tests
+
+      - name: Test
+        working-directory: Channels/flight-channels
+        run: swift test
