@@ -2,7 +2,7 @@ import FlightChannelsClient
 import FlightPresenceProtocol
 import struct Foundation.UUID
 
-/// The Swift client presence helper (design §6, Channels §7.2): consumes a
+/// The Swift client presence helper (design, Channels): consumes a
 /// channel's message stream, applies `flight:presence_state` /
 /// `flight:presence_diff` payloads through the shared `PresenceSync` rules,
 /// and hands application code a maintained list — never raw diff plumbing.
@@ -24,7 +24,7 @@ public actor ChannelPresence {
 
     /// One observed change: the maintained list after applying a message,
     /// plus the net joins/leaves that message caused (meta updates appear
-    /// in `joins` only — normalized, §6).
+    /// in `joins` only — normalized).
     public struct Change: Sendable, Equatable {
         public let list: [PresenceEntry]
         public let joins: [String: [PresenceMeta]]

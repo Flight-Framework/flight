@@ -13,7 +13,7 @@ public struct PresenceConfiguration: Sendable, Equatable {
     public var nodeName: String
 
     /// How often this node re-announces its full own-presence state. In
-    /// degraded mode (§5.2) this is the heartbeat that keeps its entries
+    /// degraded mode this is the heartbeat that keeps its entries
     /// alive on peers; in membership mode it is anti-entropy repairing any
     /// gossip delta the at-most-once transport dropped.
     public var heartbeatInterval: Duration
@@ -21,12 +21,12 @@ public struct PresenceConfiguration: Sendable, Equatable {
     /// Degraded mode only: a replica not heard from for this long is
     /// marked down and its entries leave the visible list. Must be
     /// comfortably larger than `heartbeatInterval` — a single missed
-    /// heartbeat must not flap a node (§5.2).
+    /// heartbeat must not flap a node.
     public var downAfter: Duration
 
     /// Both modes: a replica continuously down for this long is purged —
     /// entries deleted, context forgotten. Until then its state is kept
-    /// hidden, so a wrongly-evicted node that resumes gossiping (§5.2's
+    /// hidden, so a wrongly-evicted node that resumes gossiping ('s
     /// flap) comes back as joins without data loss.
     public var permdownAfter: Duration
 
@@ -34,18 +34,42 @@ public struct PresenceConfiguration: Sendable, Equatable {
     /// `downAfter`, floored at 100ms.
     public var sweepInterval: Duration
 
+    /// Membership mode only: how long a replica may stay silent before it is
+    /// marked down anyway, in spite of the monitor not having said so.
+    ///
+    /// Membership mode trusts the monitor for fast, precise detection, and it
+    /// should — an orchestrator knows a pod died long before a timeout could.
+    /// But it used to trust it *exclusively*: the expiry branch of the sweep
+    /// ran only in degraded mode, so a death the monitor missed — its own
+    /// outage, a partition between it and this node, a bug — left that node's
+    /// presences visible forever, with nothing logged and no way back short
+    /// of a restart. The mode the documentation steers people toward was the
+    /// one with no backstop.
+    ///
+    /// This is the backstop. Deliberately much longer than `downAfter` so the
+    /// monitor stays authoritative in every normal case; reaching it means
+    /// the monitor missed something, and it is logged as such. `nil` restores
+    /// the old behaviour of trusting the monitor completely.
+    public var membershipFallbackAfter: Duration?
+
     public init(
         nodeName: String? = nil,
         heartbeatInterval: Duration = .seconds(5),
         downAfter: Duration = .seconds(15),
         permdownAfter: Duration = .seconds(300),
-        sweepInterval: Duration? = nil
+        sweepInterval: Duration? = nil,
+        membershipFallbackAfter: Duration?? = nil
     ) {
         self.nodeName = nodeName ?? "node-\(UUID().uuidString.prefix(8).lowercased())"
         self.heartbeatInterval = heartbeatInterval
         self.downAfter = downAfter
         self.permdownAfter = permdownAfter
         self.sweepInterval = sweepInterval ?? max(.milliseconds(100), downAfter / 4)
+        // Four times `downAfter`, and at least a minute: long enough that a
+        // working monitor always wins the race, short enough that a ghost
+        // does not outlive the incident that made it.
+        self.membershipFallbackAfter =
+            membershipFallbackAfter ?? max(downAfter * 4, .seconds(60))
     }
 
     /// Keys, under Flight's usual dotted namespace:
@@ -55,12 +79,16 @@ public struct PresenceConfiguration: Sendable, Equatable {
     /// - `flight.presence.permdown-after-seconds` (Double, default 300)
     /// - `flight.presence.sweep-interval-seconds` (Double, default:
     ///   `down-after / 4`, floored at 0.1)
+    /// - `flight.presence.membership-fallback-after-seconds` (Double,
+    ///   default: `max(down-after * 4, 60)`; `0` disables the backstop)
     public init(configuration: Configuration) throws {
         let nodeName = try configuration.getIfPresent("flight.presence.node-name", as: String.self)
         let heartbeat = configuration.get("flight.presence.heartbeat-interval-seconds", default: 5.0)
         let downAfter = configuration.get("flight.presence.down-after-seconds", default: 15.0)
         let permdown = configuration.get("flight.presence.permdown-after-seconds", default: 300.0)
         let sweep = try configuration.getIfPresent("flight.presence.sweep-interval-seconds", as: Double.self)
+        let fallback = try configuration.getIfPresent(
+            "flight.presence.membership-fallback-after-seconds", as: Double.self)
 
         guard heartbeat > 0, downAfter > 0, permdown > 0 else {
             throw PresenceConfigurationError.nonPositiveInterval
@@ -75,7 +103,9 @@ public struct PresenceConfiguration: Sendable, Equatable {
             heartbeatInterval: .seconds(heartbeat),
             downAfter: .seconds(downAfter),
             permdownAfter: .seconds(permdown),
-            sweepInterval: sweep.map { .seconds($0) }
+            sweepInterval: sweep.map { .seconds($0) },
+            // An explicit 0 means "trust the monitor completely".
+            membershipFallbackAfter: fallback.map { $0 > 0 ? .seconds($0) : nil }
         )
     }
 }
@@ -92,7 +122,7 @@ public enum PresenceConfigurationError: Error, CustomStringConvertible, Sendable
             return """
             flight.presence.down-after-seconds (\(downAfter)) must exceed \
             flight.presence.heartbeat-interval-seconds (\(heartbeat)); otherwise every \
-            heartbeat gap flaps the node (design §5.2).
+            heartbeat gap flaps the node.
             """
         }
     }

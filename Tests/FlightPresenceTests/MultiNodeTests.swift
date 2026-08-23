@@ -6,14 +6,14 @@ import FlightPubSubTesting
 import Testing
 @testable import FlightPresence
 
-/// Distributed presence over the real seams (design §4, §5): two complete
+/// Distributed presence over the real seams: two complete
 /// Flight apps — separate containers, separate LocalPubSubs, their own
 /// presence services — joined only by PubSub's distributed adapter over an
 /// in-memory cluster wire.
-@Suite("Multi-node presence (§4, §5)", .timeLimit(.minutes(2)))
+@Suite("Multi-node presence", .timeLimit(.minutes(2)))
 struct MultiNodeTests {
 
-    // MARK: - Convergence across nodes (§4)
+    // MARK: - Convergence across nodes
 
     @Test("presences converge across nodes and reach remote clients as diffs")
     func crossNodePresence() async throws {
@@ -33,7 +33,7 @@ struct MultiNodeTests {
         let diff = try await alice.next(event: PresenceEvent.diff)
         #expect(PresenceWire.entries(from: diff.payload["joins"] ?? .null).keys.sorted() == ["bob"])
 
-        // …and both nodes' merged views agree (§4).
+        // …and both nodes' merged views agree.
         try await eventually("views converge") {
             let viewA = await nodeA.presence.list(topic: "room:1").map(\.key)
             let viewB = await nodeB.presence.list(topic: "room:1").map(\.key)
@@ -45,7 +45,7 @@ struct MultiNodeTests {
     func lateBootSync() async throws {
         let cluster = InMemoryCluster()
         // Slow heartbeats: convergence within the assertion window can only
-        // come from the startup syncRequest/snapshot exchange (§9).
+        // come from the startup syncRequest/snapshot exchange.
         var slow = PresenceNode.fastConfig
         slow["flight.presence.heartbeat-interval-seconds"] = "30"
         slow["flight.presence.down-after-seconds"] = "90"
@@ -91,7 +91,7 @@ struct MultiNodeTests {
         }
     }
 
-    // MARK: - Node failure, degraded mode (§5.2)
+    // MARK: - Node failure, degraded mode
 
     @Test("degraded mode: a crashed node's users leave after the timeout — delayed, as documented")
     func degradedNodeDeath() async throws {
@@ -111,7 +111,7 @@ struct MultiNodeTests {
         nodeB.crash()
 
         // Removal is delayed by up to down-after (0.5s here) — the
-        // documented degraded-mode window (§5.2).
+        // documented degraded-mode window.
         let diff = try await alice.next(event: PresenceEvent.diff)
         #expect(PresenceWire.entries(from: diff.payload["leaves"] ?? .null).keys.sorted() == ["bob"])
         #expect(await nodeA.presence.list(topic: "room:1").map(\.key) == ["alice"])
@@ -122,7 +122,77 @@ struct MultiNodeTests {
         }
     }
 
-    @Test("degraded mode: a wrongly-evicted node that resumes gossiping flaps back in (§5.2)")
+    @Test("membership mode: a death the monitor misses still expires eventually")
+    func membershipFallbackExpiry() async throws {
+        // Membership mode trusts the monitor for fast, precise detection —
+        // and it used to trust it exclusively. The expiry branch of the sweep
+        // ran only in degraded mode, so a death the monitor missed (its own
+        // outage, a partition between it and this node, a bug) left that
+        // node's presences visible forever, with nothing logged and no way
+        // back short of a restart. The mode the documentation steers people
+        // toward was the one with no backstop.
+        let config = PresenceConfiguration(
+            nodeName: "a",
+            heartbeatInterval: .milliseconds(100),
+            downAfter: .seconds(30),          // the monitor is meant to beat this
+            permdownAfter: .seconds(30),
+            membershipFallbackAfter: .milliseconds(300)
+        )
+        let (tracker, _) = makeTracker(name: "a", mode: .membership, configuration: config)
+
+        let remote = PresenceReplicaID(name: "b", boot: "boot-b")
+        var remoteState = PresenceCRDTState()
+        _ = remoteState.add(
+            PresenceRecord(topic: "room:1", key: "bob", ref: "rb-1", payload: [:]),
+            at: PresenceDot(replica: remote, counter: 1)
+        )
+        let snapshot = PresenceGossipMessage.snapshot(
+            from: remote, state: remoteState.snapshot(of: remote, clock: 1))
+        await tracker.receiveGossip(
+            Message(topic: PresenceGossip.topic, payload: PresenceGossipFrame.encode(snapshot)!))
+        #expect(await tracker.list(topic: "room:1").map(\.key) == ["bob"])
+
+        // The node dies. The monitor never says so — no membershipEvent here,
+        // which is the whole scenario.
+        try await Task.sleep(for: .milliseconds(400))
+        await tracker.sweep()
+
+        #expect(
+            await tracker.list(topic: "room:1").isEmpty,
+            "a ghost the monitor never reported must not stay visible forever")
+        #expect(await tracker.knownPeers() == [remote: false])
+    }
+
+    @Test("membership mode: the fallback can be switched off for a trusted monitor")
+    func membershipFallbackDisabled() async throws {
+        let config = PresenceConfiguration(
+            nodeName: "a",
+            heartbeatInterval: .milliseconds(100),
+            downAfter: .milliseconds(200),
+            permdownAfter: .seconds(30),
+            membershipFallbackAfter: Duration?.none
+        )
+        let (tracker, _) = makeTracker(name: "a", mode: .membership, configuration: config)
+
+        let remote = PresenceReplicaID(name: "b", boot: "boot-b")
+        var remoteState = PresenceCRDTState()
+        _ = remoteState.add(
+            PresenceRecord(topic: "room:1", key: "bob", ref: "rb-1", payload: [:]),
+            at: PresenceDot(replica: remote, counter: 1)
+        )
+        let snapshot = PresenceGossipMessage.snapshot(
+            from: remote, state: remoteState.snapshot(of: remote, clock: 1))
+        await tracker.receiveGossip(
+            Message(topic: PresenceGossip.topic, payload: PresenceGossipFrame.encode(snapshot)!))
+
+        try await Task.sleep(for: .milliseconds(300))
+        await tracker.sweep()
+        #expect(
+            await tracker.list(topic: "room:1").map(\.key) == ["bob"],
+            "with the backstop off, only the monitor may declare a node down")
+    }
+
+    @Test("degraded mode: a wrongly-evicted node that resumes gossiping flaps back in")
     func degradedFlapRecovery() async throws {
         // Tracker-level: drive gossip by hand so "the node went silent but
         // did not die" is precisely controllable.
@@ -163,7 +233,7 @@ struct MultiNodeTests {
         #expect(rejoins.keys.sorted() == ["bob"])
     }
 
-    // MARK: - Node failure, membership mode (§5.1)
+    // MARK: - Node failure, membership mode
 
     @Test("membership mode: node death is prompt — the monitor, not a timeout, drives eviction")
     func membershipNodeDeath() async throws {
@@ -214,7 +284,7 @@ struct MultiNodeTests {
         #expect(await tracker.list(topic: "room:1").map(\.key) == ["bob"])
 
         // SWIM says down: hidden promptly, and resumed gossip alone must
-        // NOT resurrect — the monitor is authoritative (§5.1).
+        // NOT resurrect — the monitor is authoritative.
         await tracker.membershipEvent(.down(node: "b"))
         #expect(await tracker.list(topic: "room:1").isEmpty)
         await tracker.receiveGossip(frame)

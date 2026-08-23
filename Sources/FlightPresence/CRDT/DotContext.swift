@@ -1,5 +1,5 @@
 /// The set of dots a state has *observed* — present or since removed
-/// (design §4: "tracks which additions it has observed"). This is what
+/// (design: "tracks which additions it has observed"). This is what
 /// makes removal safe without tombstones: an entry is live iff its dot is
 /// in `entries`; a dot in the context but not in `entries` was observed
 /// and removed, so a stale re-delivery of its add can never resurrect it.
@@ -30,7 +30,7 @@ public struct DotContext: Sendable, Equatable, Codable {
 
     /// Observe the whole contiguous prefix `(replica, 1...counter)` — the
     /// claim only `replica` itself can make, and exactly what its snapshot
-    /// carries (§4 / tracker anti-entropy): "everything I have ever added
+    /// carries ( / tracker anti-entropy): "everything I have ever added
     /// up to `counter` is either in this snapshot's entries or removed."
     public mutating func extend(_ replica: PresenceReplicaID, through counter: UInt64) {
         versions[replica] = max(versions[replica, default: 0], counter)
@@ -52,7 +52,7 @@ public struct DotContext: Sendable, Equatable, Codable {
         for replica in Set(cloud.map(\.replica)) { compact(replica) }
     }
 
-    /// Forget a replica entirely — the permdown purge (§5). Only safe
+    /// Forget a replica entirely — the permdown purge. Only safe
     /// because a purged replica never returns: its boot id is unique per
     /// process, so no future dot can collide with a forgotten one.
     public mutating func forget(_ replica: PresenceReplicaID) {

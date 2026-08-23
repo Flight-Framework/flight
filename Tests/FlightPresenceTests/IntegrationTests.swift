@@ -7,10 +7,10 @@ import FlightPubSubTesting
 import Testing
 @testable import FlightPresence
 
-/// The client protocol, end to end through the real stack (design §6):
+/// The client protocol, end to end through the real stack:
 /// upgrade handshake, ChannelSocketHandler, SocketSession, PubSub — with
 /// wire-level assertions on exactly what a browser would receive.
-@Suite("Full-stack client protocol (§6, §7)", .timeLimit(.minutes(1)))
+@Suite("Full-stack client protocol", .timeLimit(.minutes(1)))
 struct IntegrationTests {
 
     @Test("on join: reply first, then flight:presence_state with the joiner included")
@@ -49,7 +49,7 @@ struct IntegrationTests {
         #expect(leaves.isEmpty)
     }
 
-    @Test("socket close is a leave diff for remaining members; last meta only (§2)")
+    @Test("socket close is a leave diff for remaining members; last meta only")
     func closeEmitsLeave() async throws {
         let node = try PresenceNode(name: "solo")
         defer { Task { await node.shutdown() } }
@@ -104,7 +104,7 @@ struct IntegrationTests {
         #expect(await node.presence.list(topic: "room:2").map(\.key) == ["bob"])
     }
 
-    @Test("an update flows as leave+join of the same ref and normalizes client-side (§6)")
+    @Test("an update flows as leave+join of the same ref and normalizes client-side")
     func updateNormalization() async throws {
         let node = try PresenceNode(name: "solo")
         defer { Task { await node.shutdown() } }
@@ -153,8 +153,8 @@ struct IntegrationTests {
     }
 }
 
-/// Module wiring and mode detection (design §9).
-@Suite("Module wiring (§9)", .timeLimit(.minutes(1)))
+/// Module wiring and mode detection.
+@Suite("Module wiring", .timeLimit(.minutes(1)))
 struct ModuleTests {
 
     @Test("no adapter ⇒ single-node mode; presence resolves; module contributes a service")
@@ -165,7 +165,7 @@ struct ModuleTests {
         #expect(node.presence is PresenceTracker)
     }
 
-    @Test("adapter without membership monitor ⇒ degraded heartbeat mode (§5.2)")
+    @Test("adapter without membership monitor ⇒ degraded heartbeat mode")
     func degradedDetection() async throws {
         let cluster = InMemoryCluster()
         let node = try PresenceNode(name: "a", cluster: cluster)
@@ -173,7 +173,7 @@ struct ModuleTests {
         #expect(node.tracker.mode == .heartbeatExpiry)
     }
 
-    @Test("adapter plus membership monitor ⇒ membership mode (§5.1)")
+    @Test("adapter plus membership monitor ⇒ membership mode")
     func membershipDetection() async throws {
         let cluster = InMemoryCluster()
         let node = try PresenceNode(name: "a", cluster: cluster, monitor: FakeMembershipMonitor())
@@ -181,7 +181,7 @@ struct ModuleTests {
         #expect(node.tracker.mode == .membership)
     }
 
-    @Test("replica identity: configured name, fresh boot per process (§4 restart safety)")
+    @Test("replica identity: configured name, fresh boot per process (restart safety)")
     func replicaIdentity() async throws {
         let node = try PresenceNode(name: "web-1")
         defer { Task { await node.shutdown() } }

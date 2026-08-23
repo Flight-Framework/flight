@@ -57,7 +57,7 @@ final class PresenceNode: Sendable {
         }
 
         var services: [any Service] = []
-        for moduleType in try resolveModuleOrder([NodeModule.self]) {
+        for moduleType in try Flight.resolveModuleOrder([NodeModule.self]) {
             let module = moduleType.init()
             try module.configure(container)
             if let service = module.service { services.append(service) }
@@ -66,7 +66,7 @@ final class PresenceNode: Sendable {
         container.registerChannel("room:*") { container in
             PresenceRoomChannel(presence: try container.resolve((any Presence).self))
         }
-        // Upgrade-time authentication (Channels §5): `?user=` names the
+        // Upgrade-time authentication (Channels): `?user=` names the
         // principal; absent means an anonymous (watch-only) socket.
         container.registerChannelSocket("/socket") { context in
             context.request.queryParam("user").map { BasicPrincipal(subject: $0) }

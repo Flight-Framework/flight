@@ -1,7 +1,7 @@
 @_spi(FlightInternal) import FlightChannels
 import FlightPresenceProtocol
 
-/// The application-facing surface (design §3). Resolve `(any Presence)`
+/// The application-facing surface. Resolve `(any Presence)`
 /// from the container; call it from channel handlers:
 ///
 ///     struct RoomChannel: Channel {
@@ -18,10 +18,10 @@ import FlightPresenceProtocol
 ///     }
 ///
 /// A node's own connections are the only thing it observes directly;
-/// everything else it knows is what other nodes have told it (§4).
+/// everything else it knows is what other nodes have told it.
 public protocol Presence: Sendable {
     /// Register a presence for the life of a connection's membership of
-    /// `topic`. Untracking is automatic and structural (§7): when the
+    /// `topic`. Untracking is automatic and structural: when the
     /// membership ends — client leave, or the socket closing on any path —
     /// the metas are removed and the leave diff broadcast. No manual
     /// cleanup.
@@ -34,17 +34,17 @@ public protocol Presence: Sendable {
     /// Update an existing meta in place (e.g. status changed to "away").
     /// The meta keeps its `ref`; on the wire the change travels as a leave
     /// of the old meta plus a join of the new one for that same ref, which
-    /// the client helpers normalize back into an update (§6). A no-op with
+    /// the client helpers normalize back into an update. A no-op with
     /// a warning log when nothing is tracked for the triple.
     func update(topic: String, key: String, payload: [String: String], socket: Socket) async
 
     /// Explicitly remove one tracked meta before the membership ends.
-    /// Rarely needed — cleanup is automatic (§7) — but "stop appearing
+    /// Rarely needed — cleanup is automatic — but "stop appearing
     /// present, stay in the room" is a legitimate application choice.
     func untrack(topic: String, key: String, socket: Socket) async
 
     /// Push the full current presence list for `topic` to one socket as a
-    /// `flight:presence_state` message (§6). Call it alongside `track` in
+    /// `flight:presence_state` message. Call it alongside `track` in
     /// the channel's `join` (or alone, for a watch-only member): delivery
     /// waits for the membership to be fully established, so the client
     /// sees join-reply, then state, then diffs — no gap a change could
@@ -52,6 +52,6 @@ public protocol Presence: Sendable {
     func sendState(topic: String, to socket: Socket) async
 
     /// Current merged view of a topic: local + all known remote nodes,
-    /// excluding nodes currently considered down (§5). Sorted by key.
+    /// excluding nodes currently considered down. Sorted by key.
     func list(topic: String) async -> [PresenceEntry]
 }

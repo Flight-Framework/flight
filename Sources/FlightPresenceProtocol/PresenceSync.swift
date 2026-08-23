@@ -15,7 +15,7 @@ public struct PresenceSyncChange: Sendable, Equatable {
     }
 }
 
-/// The client-side presence state machine (design §6): applies one
+/// The client-side presence state machine: applies one
 /// `flight:presence_state` and any number of `flight:presence_diff`
 /// payloads to a maintained (key → metas) map, so application code sees a
 /// list, not diff plumbing. Pure and platform-free — the Swift client
@@ -25,7 +25,7 @@ public struct PresenceSyncChange: Sendable, Equatable {
 /// Normalization rules, shared by every helper:
 /// - Within one diff, **leaves apply before joins.** A meta-only update
 ///   travels as a leave of the old meta and a join of the new one for the
-///   same `ref` (§6); leaves-first makes that an in-place replacement.
+///   same `ref`; leaves-first makes that an in-place replacement.
 /// - Joins **upsert by ref**: a re-delivered join for a known ref replaces
 ///   that meta rather than duplicating it, so overlap between an initial
 ///   state and a concurrent diff is harmless.
@@ -47,7 +47,7 @@ public struct PresenceSync: Sendable, Equatable {
 
     /// Replaces the whole view with a `flight:presence_state` payload.
     /// The change reports the difference from the previous view — so a
-    /// rejoin's fresh state (Channels §6, reconnect-and-rejoin) surfaces
+    /// rejoin's fresh state (Channels, reconnect-and-rejoin) surfaces
     /// exactly who came and went while the client was away.
     @discardableResult
     public mutating func applyState(_ payload: JSONValue) -> PresenceSyncChange {

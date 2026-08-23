@@ -1,9 +1,9 @@
-/// Identifies one presence replica — one process's tracker (design §4).
+/// Identifies one presence replica — one process's tracker.
 ///
 /// Two parts, both load-bearing:
 /// - `name` is the *node* identity: stable across restarts, configured (or
 ///   generated) per deployment, and the vocabulary failure detection speaks
-///   (a membership monitor reports names, §5.1).
+///   (a membership monitor reports names).
 /// - `boot` is unique per process start. A restarted node is a *new
 ///   replica*: its counters restart from zero, and without a fresh boot id
 ///   its new dots would collide with the dots every other node already
@@ -22,7 +22,7 @@ public struct PresenceReplicaID: Hashable, Sendable, Codable, CustomStringConver
 }
 
 /// One observed addition: `(replica, counter)` — the unit of add/remove in
-/// the CRDT (§4). Counters are per-replica and monotonic within one boot.
+/// the CRDT. Counters are per-replica and monotonic within one boot.
 public struct PresenceDot: Hashable, Sendable, Codable, Comparable {
     public let replica: PresenceReplicaID
     public let counter: UInt64

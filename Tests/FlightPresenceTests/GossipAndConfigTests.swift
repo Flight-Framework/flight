@@ -75,7 +75,7 @@ struct PresenceConfigurationTests {
         #expect(configuration.sweepInterval == .milliseconds(500))
     }
 
-    @Test("down-after must exceed the heartbeat interval — a heartbeat gap must not flap a node (§5.2)")
+    @Test("down-after must exceed the heartbeat interval — a heartbeat gap must not flap a node")
     func downAfterValidation() {
         #expect(throws: PresenceConfigurationError.downAfterNotAboveHeartbeat(heartbeat: 10, downAfter: 5)) {
             _ = try PresenceConfiguration(

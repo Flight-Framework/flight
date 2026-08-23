@@ -2,7 +2,7 @@
 // Flight Presence — "who is currently connected to this topic", kept correct
 // across every node in a cluster: CRDT-merged distributed state over Flight
 // PubSub, per-connection lifecycle over Flight Channels, initial-state-then-
-// diffs to clients (flight-presence-design.md). Top of the real-time family.
+// diffs to clients. Top of the real-time family.
 import PackageDescription
 
 let package = Package(
@@ -19,11 +19,11 @@ let package = Package(
         // The server: Presence protocol, PresenceTracker, the membership
         // seam, PresenceService, FlightPresenceModule.
         .library(name: "FlightPresence", targets: ["FlightPresence"]),
-        // The wire vocabulary (§6) on its own: event names, the
+        // The wire vocabulary on its own: event names, the
         // state/diff payload shapes, and the pure diff-applying state
         // machine shared by server tests and both client helpers.
         .library(name: "FlightPresenceProtocol", targets: ["FlightPresenceProtocol"]),
-        // The Swift client presence helper (design §6, Channels §7.2):
+        // The Swift client presence helper (design, Channels):
         // applies state/diff messages from a ChannelHandle to a maintained
         // list, so application code never touches raw diff plumbing.
         .library(name: "FlightPresenceClient", targets: ["FlightPresenceClient"]),
@@ -33,7 +33,7 @@ let package = Package(
         .package(path: "../../PubSub/flight-pubsub"),
         .package(path: "../../Channels/flight-channels"),
         .package(path: "../../Web/flight-web"),
-        // Dependency policy follows Flight Core §9: Apple-adjacent,
+        // Dependency policy follows Flight Core: Apple-adjacent,
         // SSWG-blessed only.
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),

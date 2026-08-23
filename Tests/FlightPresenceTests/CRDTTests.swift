@@ -1,12 +1,12 @@
 import Testing
 @testable import FlightPresence
 
-/// Direct unit coverage of the ORSWOT building blocks (design §4). The
+/// Direct unit coverage of the ORSWOT building blocks. The
 /// convergence *property* — commutativity, associativity, idempotence
 /// under arbitrary interleavings — is asserted wholesale in
 /// `CRDTConvergenceTests`; these pin the individual behaviors that make
 /// the property hold.
-@Suite("Presence CRDT — observed-remove semantics (§4)", .timeLimit(.minutes(1)))
+@Suite("Presence CRDT — observed-remove semantics", .timeLimit(.minutes(1)))
 struct CRDTTests {
 
     private let nodeA = PresenceReplicaID(name: "a", boot: "boot-a")
@@ -78,7 +78,7 @@ struct CRDTTests {
         #expect(origin == mirror)
     }
 
-    @Test("a remove delivered before its add wins — the add can never resurrect (§4)")
+    @Test("a remove delivered before its add wins — the add can never resurrect")
     func removeBeforeAdd() {
         var origin = PresenceCRDTState()
         var mirror = PresenceCRDTState()
@@ -92,7 +92,7 @@ struct CRDTTests {
         #expect(mirror.entries.isEmpty)
     }
 
-    @Test("a remote remove never destroys a concurrent add elsewhere (§4)")
+    @Test("a remote remove never destroys a concurrent add elsewhere")
     func concurrentAddSurvivesRemove() {
         var a = PresenceCRDTState()
         var b = PresenceCRDTState()
@@ -125,7 +125,7 @@ struct CRDTTests {
         #expect(mirror.entries.count == 1)
     }
 
-    @Test("replace carries the removal and the addition in one delta (§6 update)")
+    @Test("replace carries the removal and the addition in one delta")
     func replaceDelta() {
         var origin = PresenceCRDTState()
         var mirror = PresenceCRDTState()

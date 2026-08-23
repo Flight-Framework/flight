@@ -2,10 +2,10 @@ import FlightChannelsProtocol
 import FlightPresenceProtocol
 import Testing
 
-/// The shared client state machine (design §6): state-then-diffs, update
+/// The shared client state machine: state-then-diffs, update
 /// normalization, ref idempotence. The JS helper mirrors these rules; its
 /// test suite asserts the same cases.
-@Suite("PresenceSync — the client diff rules (§6)", .timeLimit(.minutes(1)))
+@Suite("PresenceSync — the client diff rules", .timeLimit(.minutes(1)))
 struct PresenceSyncTests {
 
     private func statePayload(_ entries: [String: [PresenceMeta]]) -> JSONValue {
@@ -35,7 +35,7 @@ struct PresenceSyncTests {
         #expect(sync.list.map(\.key) == ["user:9"])
     }
 
-    @Test("join diff adds a meta; leave diff removes by ref; key gone on last meta (§2)")
+    @Test("join diff adds a meta; leave diff removes by ref; key gone on last meta")
     func joinAndLeave() {
         var sync = PresenceSync()
         sync.applyDiff(diffPayload(joins: [
@@ -86,7 +86,7 @@ struct PresenceSyncTests {
         #expect(sync.entries.isEmpty)
     }
 
-    @Test("state overlap with a concurrent diff converges either way (§6 ordering)")
+    @Test("state overlap with a concurrent diff converges either way, whatever the order")
     func stateDiffOverlap() {
         // The state was computed after the join it overlaps with: applying
         // the (older) diff afterwards must not duplicate.
@@ -107,7 +107,7 @@ struct PresenceSyncTests {
         #expect(decoded == entries)
     }
 
-    @Test("the wire meta flattens payload beside ref, exactly as the design's example (§6)")
+    @Test("the wire meta flattens payload beside ref, exactly as the design's example")
     func wireShape() {
         let json = PresenceWire.json(meta: PresenceMeta(ref: "a1", payload: ["status": "online"]))
         #expect(json == .object(["ref": .string("a1"), "status": .string("online")]))

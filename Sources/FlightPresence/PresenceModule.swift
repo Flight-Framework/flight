@@ -4,7 +4,7 @@ import FlightPubSub
 import ServiceLifecycle
 import struct Foundation.UUID
 
-/// Registers Presence with the container (design §9). Depends on the
+/// Registers Presence with the container. Depends on the
 /// PubSub and Channels modules; registers:
 ///
 /// - `PresenceConfiguration` — node name and liveness intervals, read from
@@ -15,7 +15,7 @@ import struct Foundation.UUID
 ///   `FlightPubSubModule`): a registered `PresenceMembershipMonitor` means
 ///   membership mode; a `DistributedPubSubAdapter` without one means the
 ///   degraded heartbeat mode; neither means single-node.
-/// - `PresenceService` — the periodic work (§9), in the app
+/// - `PresenceService` — the periodic work, in the app
 ///   `ServiceGroup`. Logs the active failure-detection mode at startup.
 ///
 /// An app module declares the dependency and resolves `(any Presence)`
@@ -33,7 +33,7 @@ import struct Foundation.UUID
 ///
 /// A class, because it stashes the container during `configure` for the
 /// service to resolve from later, post-freeze — the same shape as any
-/// service-owning module (Core §4, Web's `FlightWebModule`).
+/// service-owning module (Core, Web's `FlightWebModule`).
 public final class FlightPresenceModule: FlightModule {
     public static var dependencies: [any FlightModule.Type] {
         [FlightPubSubModule.self, FlightChannelsModule.self]

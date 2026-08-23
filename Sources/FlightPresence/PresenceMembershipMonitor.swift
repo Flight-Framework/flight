@@ -9,8 +9,8 @@ public enum PresenceMembershipEvent: Sendable, Equatable {
     case down(node: String)
 }
 
-/// The membership seam (design §5.1): the thing a membership-aware PubSub
-/// adapter module (the SWIM adapter, PubSub §5.1) registers so Presence
+/// The membership seam: the thing a membership-aware PubSub
+/// adapter module (the SWIM adapter, PubSub) registers so Presence
 /// gets prompt, correct node-failure detection. When SWIM declares a node
 /// dead, Presence removes every entry that node asserted, in one
 /// operation, and pushes the resulting leave diffs.
@@ -19,7 +19,7 @@ public enum PresenceMembershipEvent: Sendable, Equatable {
 /// the adapter module's `configure`; `FlightPresenceModule` detects it at
 /// freeze and runs in membership mode. Without one — the Valkey-style
 /// fan-out-only adapter — Presence falls back to heartbeat-plus-expiry,
-/// the documented degraded mode (§5.2), and says so loudly at startup.
+/// the documented degraded mode, and says so loudly at startup.
 public protocol PresenceMembershipMonitor: Sendable {
     /// Membership transitions, from the monitor's start onward. Single
     /// consumer (the `PresenceService` run loop); nodes present before the

@@ -6,10 +6,10 @@ import Testing
 import struct Foundation.URL
 @testable import FlightPresence
 
-/// The Swift client presence helper against the real stack (design §6,
-/// Channels §7.2): ChannelClient over the in-process upgrade pipeline,
+/// The Swift client presence helper against the real stack (design,
+/// Channels): ChannelClient over the in-process upgrade pipeline,
 /// `ChannelPresence` maintaining the list.
-@Suite("ChannelPresence — Swift client helper (§6)", .timeLimit(.minutes(1)))
+@Suite("ChannelPresence — Swift client helper", .timeLimit(.minutes(1)))
 struct ClientHelperTests {
 
     @Test("state then diffs maintain the list; changes stream reports net effects")

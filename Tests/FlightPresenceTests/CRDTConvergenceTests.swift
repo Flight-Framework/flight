@@ -1,15 +1,15 @@
 import Testing
 @testable import FlightPresence
 
-/// The §10 property suite: CRDT convergence asserted as a *property*, not
+/// The property suite: CRDT convergence asserted as a *property*, not
 /// by example. Random sequences of track/untrack/update are generated
 /// across simulated replicas; their deltas are applied to every other
 /// replica in different orders, with duplication and (in the repair
 /// variant) drops healed by snapshots — and every replica must converge to
 /// the identical state. That is precisely the commutativity/associativity/
-/// idempotence claim of §4; every failure message carries the seed that
+/// idempotence claim of; every failure message carries the seed that
 /// reproduces it.
-@Suite("CRDT convergence (§4, §10)", .timeLimit(.minutes(2)))
+@Suite("CRDT convergence", .timeLimit(.minutes(2)))
 struct CRDTConvergenceTests {
 
     // MARK: - Simulated replica
@@ -92,7 +92,7 @@ struct CRDTConvergenceTests {
             for origin in replicas where origin !== receiver {
                 for delta in origin.deltas {
                     if dropRate > 0, UInt64.random(in: 0..<100, using: &rng) < dropRate {
-                        continue  // lost gossip (at-most-once, PubSub §8)
+                        continue  // lost gossip (at-most-once, PubSub)
                     }
                     incoming.append(delta)
                     if UInt64.random(in: 0..<100, using: &rng) < duplicateRate {

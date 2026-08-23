@@ -1,3 +1,4 @@
+import Synchronization
 @_spi(FlightInternal) import FlightChannels
 import FlightPresenceProtocol
 import FlightPubSub
@@ -5,19 +6,19 @@ import struct Foundation.Data
 import class Foundation.JSONEncoder
 import Logging
 
-/// Which failure-detection mode this deployment runs in (design §5) —
+/// Which failure-detection mode this deployment runs in —
 /// decided once at freeze from what the container holds, logged loudly at
-/// startup so nobody discovers the distinction from a bug report (§5.2).
+/// startup so nobody discovers the distinction from a bug report.
 public enum PresenceMode: Sendable, Equatable, CustomStringConvertible {
     /// No distributed PubSub adapter: one node, node failure is not a
     /// distributed concern, no gossip at all.
     case singleNode
     /// A `PresenceMembershipMonitor` is registered (the SWIM adapter,
-    /// §5.1): prompt, correct removal of a dead node's entries. The
+    ///): prompt, correct removal of a dead node's entries. The
     /// intended multi-node deployment mode.
     case membership
     /// A fan-out-only adapter (Valkey-style) and no membership signal:
-    /// heartbeat-plus-expiry, the documented degraded mode (§5.2) —
+    /// heartbeat-plus-expiry, the documented degraded mode —
     /// removal delayed up to the timeout, slow nodes may flap.
     case heartbeatExpiry
 
@@ -41,9 +42,9 @@ protocol PresenceSocket: Sendable {
 
 extension Socket: PresenceSocket {}
 
-/// The presence engine: local tracking (§3), the replicated CRDT state and
-/// its gossip (§4), replica liveness (§5), and diff/state delivery to
-/// clients (§6). One actor — every mutation, local or gossiped, is
+/// The presence engine: local tracking, the replicated CRDT state and
+/// its gossip, replica liveness, and diff/state delivery to
+/// clients. One actor — every mutation, local or gossiped, is
 /// serialized here, which is what makes "compute the diff for exactly this
 /// transition" trivial rather than racy.
 ///
@@ -63,7 +64,7 @@ public actor PresenceTracker: Presence {
     private let logger: Logger
     private let liveClock = ContinuousClock()
 
-    // MARK: - Replicated state (§4)
+    // MARK: - Replicated state
 
     private var counter: UInt64 = 0
     private var state = PresenceCRDTState()
@@ -71,7 +72,7 @@ public actor PresenceTracker: Presence {
     /// state pushes never scan unrelated topics.
     private var topicIndex: [String: Set<PresenceDot>] = [:]
 
-    // MARK: - Local connection bookkeeping (§3, §7)
+    // MARK: - Local connection bookkeeping
 
     private struct Membership: Hashable {
         let socketID: String
@@ -82,9 +83,43 @@ public actor PresenceTracker: Presence {
     private var localTracks: [Membership: [String: PresenceDot]] = [:]
     /// Memberships whose termination observer is registered — one observer
     /// per membership, re-registered after a leave/rejoin cycle.
-    private var cleanupRegistered: Set<Membership> = []
+    /// Which generation of each membership currently owns its cleanup.
+    ///
+    /// A membership is (socket, topic), and the same pair can end and begin
+    /// again — a client leaving a room and rejoining it. `onTopicTerminated`
+    /// fires a detached task, so that cleanup is unordered against a `track`
+    /// that arrives immediately after: the rejoin could run first, and the
+    /// *previous* membership's cleanup would then remove the entries the
+    /// rejoin had just added. The user was back, and invisible, with the
+    /// server believing they had left.
+    ///
+    /// The generation is what tells a cleanup whether it is still speaking
+    /// for the membership it was registered by.
+    private var membershipGeneration: [Membership: Int] = [:]
+    private var generationCounter = 0
 
-    // MARK: - Peer liveness (§5)
+    /// Set the instant a membership's topic terminates, before the cleanup
+    /// task has had a chance to run.
+    ///
+    /// The termination observer is synchronous and cannot touch actor state,
+    /// so it flips this and spawns the cleanup. A `track` arriving in between
+    /// can therefore *see* that the membership has ended, which is the one
+    /// thing it could not do before: it found `localTracks` still populated,
+    /// took the "update the existing meta" path, and left the stale cleanup
+    /// holding a generation that still matched — so the cleanup ran and
+    /// removed the rejoin.
+    private var membershipEnded: [Membership: MembershipEndFlag] = [:]
+
+    /// One diff waiting to reach the local bus.
+    private struct QueuedDiff: Sendable {
+        let topic: String
+        let payload: Data
+    }
+
+    /// Diffs computed but not yet on the bus, in computation order.
+    private var pendingDiffs: [QueuedDiff] = []
+
+    // MARK: - Peer liveness
 
     private struct Liveness {
         var lastSeen: ContinuousClock.Instant
@@ -94,7 +129,7 @@ public actor PresenceTracker: Presence {
     private var peers: [PresenceReplicaID: Liveness] = [:]
     /// Membership mode: node *names* currently declared down. Gossip from
     /// them is ignored until the monitor declares them up again — the
-    /// monitor is authoritative, resumed gossip alone is not (§5.1).
+    /// monitor is authoritative, resumed gossip alone is not.
     private var downNames: Set<String> = []
 
     public init(
@@ -113,7 +148,7 @@ public actor PresenceTracker: Presence {
         self.logger = logger
     }
 
-    // MARK: - Presence (the application surface, §3)
+    // MARK: - Presence (the application surface)
 
     public func track(topic: String, key: String, payload: [String: String], socket: Socket) async {
         await track(topic: topic, key: key, payload: payload, presenceSocket: socket)
@@ -142,6 +177,13 @@ public actor PresenceTracker: Presence {
         let payload = sanitized(payload)
         let membership = Membership(socketID: socket.id, topic: topic)
 
+        // If the previous membership has ended but its cleanup has not run,
+        // retire it now, in order, so this track begins a fresh one rather
+        // than adding to a membership that is about to be swept.
+        if membershipEnded[membership]?.hasEnded == true {
+            await retireMembership(membership)
+        }
+
         if let existing = localTracks[membership]?[key] {
             await replaceMeta(membership: membership, key: key, oldDot: existing, payload: payload)
         } else {
@@ -151,7 +193,8 @@ public actor PresenceTracker: Presence {
             let delta = state.add(record, at: dot)
             topicIndex[topic, default: []].insert(dot)
             localTracks[membership, default: [:]][key] = dot
-            await publishDiff(topic: topic, joins: [key: [meta(of: record)]], leaves: [:])
+            publishDiff(topic: topic, joins: [key: [meta(of: record)]], leaves: [:])
+            await flushDiffs()
             await gossip(.delta(from: replica, state: delta))
         }
 
@@ -205,25 +248,42 @@ public actor PresenceTracker: Presence {
         counter += 1
         let dot = PresenceDot(replica: replica, counter: counter)
         // Same ref, new payload: on the wire this is a leave of the old
-        // meta and a join of the new one for that same ref (§6).
+        // meta and a join of the new one for that same ref.
         let record = PresenceRecord(topic: membership.topic, key: key, ref: old.ref, payload: payload)
         let delta = state.replace(oldDot, with: record, at: dot)
         topicIndex[membership.topic]?.remove(oldDot)
         topicIndex[membership.topic, default: []].insert(dot)
         localTracks[membership]?[key] = dot
-        await publishDiff(
+        publishDiff(
             topic: membership.topic,
             joins: [key: [meta(of: record)]],
             leaves: [key: [meta(of: old)]]
         )
+        await flushDiffs()
         await gossip(.delta(from: replica, state: delta))
     }
 
-    private func membershipEnded(socketID: String, topic: String) async {
+    private func membershipEnded(socketID: String, topic: String, generation: Int) async {
         let membership = Membership(socketID: socketID, topic: topic)
-        cleanupRegistered.remove(membership)
+        guard membershipGeneration[membership] == generation else {
+            // A newer membership for this socket and topic replaced the one
+            // this cleanup was registered by — the client rejoined before the
+            // leave was processed. Removing now would erase the rejoin.
+            logger.debug(
+                "ignoring presence cleanup for a membership that has already been replaced",
+                metadata: ["topic": "\(topic)", "socket": "\(socketID)"]
+            )
+            return
+        }
+        await retireMembership(membership)
+    }
+
+    /// Drops a membership's local state and publishes its leaves. Idempotent.
+    private func retireMembership(_ membership: Membership) async {
+        membershipGeneration.removeValue(forKey: membership)
+        membershipEnded.removeValue(forKey: membership)
         guard let tracks = localTracks.removeValue(forKey: membership), !tracks.isEmpty else { return }
-        await removeLocalDots(Array(tracks.values), topic: topic)
+        await removeLocalDots(Array(tracks.values), topic: membership.topic)
     }
 
     private func removeLocalDots(_ dots: [PresenceDot], topic: String) async {
@@ -236,17 +296,38 @@ public actor PresenceTracker: Presence {
         for dot in dots { topicIndex[topic]?.remove(dot) }
         if topicIndex[topic]?.isEmpty == true { topicIndex.removeValue(forKey: topic) }
         guard !leaves.isEmpty else { return }
-        await publishDiff(topic: topic, joins: [:], leaves: leaves)
+        publishDiff(topic: topic, joins: [:], leaves: leaves)
+        await flushDiffs()
         await gossip(.delta(from: replica, state: delta))
     }
 
+    /// Registers cleanup for a membership, if it does not already have one.
+    ///
+    /// Keyed on whether this membership currently has a generation rather
+    /// than on a "already registered" set. A set keyed by (socket, topic)
+    /// went stale across a leave/rejoin: the rejoin found the old entry
+    /// present, skipped registering, and the new membership ended up with no
+    /// cleanup at all — so its entries outlived the socket.
+    ///
+    /// Registering twice for one generation would be harmless anyway;
+    /// `membershipEnded` is idempotent and generation-checked.
     private func registerCleanup(membership: Membership, socket: some PresenceSocket) {
-        guard !cleanupRegistered.contains(membership) else { return }
-        cleanupRegistered.insert(membership)
+        guard membershipGeneration[membership] == nil else { return }
+        generationCounter += 1
+        let generation = generationCounter
+        membershipGeneration[membership] = generation
+        let endFlag = MembershipEndFlag()
+        membershipEnded[membership] = endFlag
         socket.onTopicTerminated(membership.topic) { [weak self] in
+            // Flipped synchronously, so a `track` arriving before the task
+            // below runs can see that this membership is over.
+            endFlag.markEnded()
             guard let self else { return }
             Task {
-                await self.membershipEnded(socketID: membership.socketID, topic: membership.topic)
+                await self.membershipEnded(
+                    socketID: membership.socketID,
+                    topic: membership.topic,
+                    generation: generation)
             }
         }
     }
@@ -262,7 +343,7 @@ public actor PresenceTracker: Presence {
     private func sanitized(_ payload: [String: String]) -> [String: String] {
         var payload = payload
         if payload.removeValue(forKey: PresenceWire.refKey) != nil {
-            logger.warning("presence payload key 'ref' is reserved and was dropped (§2)")
+            logger.warning("presence payload key 'ref' is reserved and was dropped")
         }
         return payload
     }
@@ -294,7 +375,7 @@ public actor PresenceTracker: Presence {
         peers.mapValues { $0.downSince == nil }
     }
 
-    // MARK: - Gossip intake (§4) — driven by PresenceService
+    // MARK: - Gossip intake — driven by PresenceService
 
     func receiveGossip(_ raw: Message) async {
         let (decoded, unknownVersion) = PresenceGossipFrame.decode(raw.payload)
@@ -366,11 +447,12 @@ public actor PresenceTracker: Presence {
         }
 
         for topic in Set(joins.keys).union(leaves.keys).sorted() {
-            await publishDiff(topic: topic, joins: joins[topic] ?? [:], leaves: leaves[topic] ?? [:])
+            publishDiff(topic: topic, joins: joins[topic] ?? [:], leaves: leaves[topic] ?? [:])
         }
+        await flushDiffs()
     }
 
-    // MARK: - Liveness transitions (§5) — driven by PresenceService
+    // MARK: - Liveness transitions — driven by PresenceService
 
     func membershipEvent(_ event: PresenceMembershipEvent) async {
         switch event {
@@ -393,7 +475,7 @@ public actor PresenceTracker: Presence {
         }
     }
 
-    /// One liveness pass: degraded-mode expiry (§5.2) and, in both
+    /// One liveness pass: degraded-mode expiry and, in both
     /// clustered modes, the permdown purge.
     func sweep() async {
         let now = liveClock.now
@@ -403,8 +485,32 @@ public actor PresenceTracker: Presence {
                 now - liveness.lastSeen > configuration.downAfter
             {
                 logger.warning(
-                    "presence replica silent past down-after; hiding its entries (degraded mode, §5.2)",
+                    "presence replica silent past down-after; hiding its entries (degraded mode)",
                     metadata: ["replica": "\(peer)", "down-after": "\(configuration.downAfter)"]
+                )
+                await markDown(peer)
+            }
+
+            // Membership mode's backstop. The monitor is authoritative and
+            // normally marks a dead node down long before this — reaching it
+            // means the monitor did not, which is worth an error rather than
+            // a shrug: without this branch the entries stayed visible
+            // forever, and nothing anywhere said so.
+            if mode == .membership,
+                let fallback = configuration.membershipFallbackAfter,
+                liveness.downSince == nil,
+                now - liveness.lastSeen > fallback
+            {
+                logger.error(
+                    """
+                    presence replica silent far past the membership fallback and the monitor \
+                    never reported it down; hiding its entries anyway
+                    """,
+                    metadata: [
+                        "replica": "\(peer)",
+                        "silent-for": "\(now - liveness.lastSeen)",
+                        "fallback-after": "\(fallback)",
+                    ]
                 )
                 await markDown(peer)
             }
@@ -433,7 +539,7 @@ public actor PresenceTracker: Presence {
 
     /// Leave diffs when a replica goes down, join diffs when it comes
     /// back — its entries stay in the CRDT throughout (that is what makes
-    /// the §5.2 flap recoverable); only the visible view changes.
+    /// the flap recoverable); only the visible view changes.
     private func emitVisibility(of peer: PresenceReplicaID, visible: Bool) async {
         var byTopic: [String: [String: [PresenceMeta]]] = [:]
         for dot in state.dots(of: peer).sorted() {
@@ -441,15 +547,16 @@ public actor PresenceTracker: Presence {
             byTopic[record.topic, default: [:]][record.key, default: []].append(meta(of: record))
         }
         for (topic, entries) in byTopic.sorted(by: { $0.key < $1.key }) {
-            await publishDiff(
+            publishDiff(
                 topic: topic,
                 joins: visible ? entries : [:],
                 leaves: visible ? [:] : entries
             )
         }
+        await flushDiffs()
     }
 
-    // MARK: - Periodic announcements (§5.2, §9) — driven by PresenceService
+    // MARK: - Periodic announcements — driven by PresenceService
 
     /// The heartbeat / anti-entropy tick: this replica's full own-entry
     /// snapshot. In degraded mode it is what keeps our entries alive on
@@ -458,7 +565,7 @@ public actor PresenceTracker: Presence {
         await gossipOwnSnapshot()
     }
 
-    /// Startup (§9): ask the cluster for its state and announce our own —
+    /// Startup: ask the cluster for its state and announce our own —
     /// a fresh node converges without waiting a re-announce interval.
     func announceStartup() async {
         await gossip(.syncRequest(from: replica))
@@ -480,17 +587,56 @@ public actor PresenceTracker: Presence {
         await gossipBus.publish(Message(topic: PresenceGossip.topic, payload: data))
     }
 
+    /// Enqueues a diff for delivery, in the order it was computed.
+    ///
+    /// Publishing used to `await` inside the actor, which is a suspension
+    /// point: another actor method could interleave between one diff being
+    /// computed and it reaching the bus, so two diffs computed in order could
+    /// be delivered in the other. A client applying a stale leave after a
+    /// fresh join ended up with a ghost — and nothing repaired it, because
+    /// the *server's* state was correct and a correct server emits no
+    /// corrective diff.
+    ///
+    /// Enqueueing is synchronous, so the order diffs are computed in — which
+    /// the actor already serializes — is the order they go out in. One pump
+    /// task does the awaiting, outside the actor's mutable state.
     private func publishDiff(
         topic: String,
         joins: [String: [PresenceMeta]],
         leaves: [String: [PresenceMeta]]
-    ) async {
+    ) {
         guard !joins.isEmpty || !leaves.isEmpty else { return }
         let frame = BroadcastFrame(
             event: PresenceEvent.diff,
             payload: PresenceWire.diffJSON(joins: joins, leaves: leaves)
         )
         guard let data = try? JSONEncoder().encode(frame) else { return }
-        await localBus.publish(Message(topic: topic, payload: data))
+        pendingDiffs.append(QueuedDiff(topic: topic, payload: data))
     }
+
+    /// Sends every queued diff, oldest first.
+    ///
+    /// The queue is what fixes the ordering; draining it here — rather than
+    /// from a background task — is what keeps delivery where callers already
+    /// expect it. A joining member's own join diff, for instance, must go out
+    /// before that member subscribes, and deferring it to a pump delivered it
+    /// afterwards, so they saw a join for themselves on top of their state.
+    ///
+    /// Re-entrant by design: if another method interleaves during the
+    /// `await` and drains too, both loops take from the front of the same
+    /// queue, so nothing is sent twice and nothing is sent out of order.
+    private func flushDiffs() async {
+        while !pendingDiffs.isEmpty {
+            let queued = pendingDiffs.removeFirst()
+            await localBus.publish(Message(topic: queued.topic, payload: queued.payload))
+        }
+    }
+}
+
+/// One membership's "the topic terminated" signal, readable synchronously
+/// from the termination observer and from the actor.
+final class MembershipEndFlag: Sendable {
+    private let ended = Mutex(false)
+    func markEnded() { ended.withLock { $0 = true } }
+    var hasEnded: Bool { ended.withLock { $0 } }
 }

@@ -1,7 +1,7 @@
 import FlightChannelsProtocol
 
-/// The two reserved events Presence puts on a channel topic (design §6).
-/// `flight:`-namespaced like the Channels lifecycle events (Channels §4.2),
+/// The two reserved events Presence puts on a channel topic.
+/// `flight:`-namespaced like the Channels lifecycle events (Channels),
 /// so they can never collide with application events.
 public enum PresenceEvent {
     /// The full current presence list, sent once to a socket when its
@@ -9,11 +9,11 @@ public enum PresenceEvent {
     public static let state = "flight:presence_state"
     /// A change: `{"joins": <entries>, "leaves": <entries>}`. Everything
     /// after the initial state is diffs — re-sending the whole list on
-    /// every change is the obvious scaling failure (§6).
+    /// every change is the obvious scaling failure.
     public static let diff = "flight:presence_diff"
 }
 
-/// The wire shape of presence payloads (§6):
+/// The wire shape of presence payloads:
 ///
 ///     entries := { "<key>": { "metas": [ { "ref": "a1", ...payload } ] } }
 ///     diff    := { "joins": entries, "leaves": entries }
@@ -58,7 +58,7 @@ public enum PresenceWire {
 
     /// A meta from its wire object; nil when `ref` is missing — a meta
     /// without its identity is not applicable. Non-string payload values
-    /// are dropped (the server only ever emits strings, §2).
+    /// are dropped (the server only ever emits strings).
     public static func meta(from value: JSONValue) -> PresenceMeta? {
         guard let object = value.objectValue, let ref = object[refKey]?.stringValue else { return nil }
         var payload: [String: String] = [:]

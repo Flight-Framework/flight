@@ -1,5 +1,5 @@
 /// What one dot asserts: this connection, on this topic, under this key,
-/// with this meta. The `ref` is the client-visible meta identity (§2) and
+/// with this meta. The `ref` is the client-visible meta identity and
 /// survives updates; the dot is the CRDT-internal identity and does not.
 public struct PresenceRecord: Sendable, Equatable, Codable {
     public let topic: String
@@ -16,7 +16,7 @@ public struct PresenceRecord: Sendable, Equatable, Codable {
 }
 
 /// What applying a state changed — the tracker turns this into client
-/// diffs (§6). Order within each list is not meaningful.
+/// diffs. Order within each list is not meaningful.
 public struct PresenceStateChanges: Sendable {
     public var added: [(PresenceDot, PresenceRecord)] = []
     public var removed: [(PresenceDot, PresenceRecord)] = []
@@ -24,7 +24,7 @@ public struct PresenceStateChanges: Sendable {
     public var isEmpty: Bool { added.isEmpty && removed.isEmpty }
 }
 
-/// The replicated presence state (design §4): an observed-remove set
+/// The replicated presence state: an observed-remove set
 /// without tombstones (ORSWOT), the same construction Phoenix Presence
 /// uses, in its delta-state form. One type serves as both a replica's full
 /// state and every gossip payload — an add, a remove, an update, and a
@@ -34,7 +34,7 @@ public struct PresenceStateChanges: Sendable {
 /// `join` is commutative, associative, and idempotent, so duplicated or
 /// reordered gossip is harmless and any two replicas that have seen the
 /// same set of deltas agree — the property the convergence suite asserts
-/// wholesale rather than by example (§10).
+/// wholesale rather than by example.
 public struct PresenceCRDTState: Sendable, Equatable, Codable {
     public private(set) var context: DotContext
     public private(set) var entries: [PresenceDot: PresenceRecord]
@@ -65,7 +65,7 @@ public struct PresenceCRDTState: Sendable, Equatable, Codable {
     /// Removes the given observed dots (a local untrack — only ever this
     /// replica's own dots in practice). The delta carries the removed dots
     /// in its context and no entries: joining it elsewhere removes exactly
-    /// those observed additions, never a concurrent add (§4).
+    /// those observed additions, never a concurrent add.
     public mutating func remove(_ dots: some Sequence<PresenceDot>) -> PresenceCRDTState {
         var deltaContext = DotContext()
         for dot in dots where entries.removeValue(forKey: dot) != nil {
@@ -74,7 +74,7 @@ public struct PresenceCRDTState: Sendable, Equatable, Codable {
         return PresenceCRDTState(context: deltaContext, entries: [:])
     }
 
-    /// A meta update in place (§6): a fresh dot for the new payload, the
+    /// A meta update in place: a fresh dot for the new payload, the
     /// old dot removed, one delta carrying both — so remotely it applies
     /// as the same atomic replacement it was locally.
     public mutating func replace(
@@ -94,7 +94,7 @@ public struct PresenceCRDTState: Sendable, Equatable, Codable {
 
     // MARK: - Merge
 
-    /// The one merge operation (§4). Standard optimized-ORSet join:
+    /// The one merge operation. Standard optimized-ORSet join:
     /// - an entry we don't hold is added unless our context already
     ///   observed its dot (then it was removed here — stays removed);
     /// - an entry we hold is removed if the incoming state observed its
@@ -122,7 +122,7 @@ public struct PresenceCRDTState: Sendable, Equatable, Codable {
     /// range `1...clock`. Joining it repairs any lost delta from this
     /// replica — a missed add appears, a missed remove disappears — and
     /// touches nothing another replica asserted. The periodic re-announce
-    /// (§5.2 heartbeats; anti-entropy in membership mode) gossips exactly
+    /// (heartbeats; anti-entropy in membership mode) gossips exactly
     /// this.
     public func snapshot(of replica: PresenceReplicaID, clock: UInt64) -> PresenceCRDTState {
         var deltaContext = DotContext()
@@ -132,7 +132,7 @@ public struct PresenceCRDTState: Sendable, Equatable, Codable {
     }
 
     /// Removes everything a replica asserted, and forgets its context —
-    /// the permdown purge (§5). Not a CRDT operation: every node applies
+    /// the permdown purge. Not a CRDT operation: every node applies
     /// it independently on the same failure evidence. Safe because boot
     /// ids never recur (see `PresenceReplicaID`).
     @discardableResult
