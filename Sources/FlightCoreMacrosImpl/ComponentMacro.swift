@@ -112,7 +112,8 @@ extension RegistrationMacro {
                 }
             }
         }
-        let initBody = initLines.isEmpty ? "" : "\n " + initLines.joined(separator: "\n ") + "\n"
+        let initBody =
+            initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
         let resolvingInit: DeclSyntax = """
             internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
             """

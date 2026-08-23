@@ -8,42 +8,42 @@ import SwiftSyntaxMacros
 /// Shape of the expansion (the fixtures in FlightCoreMacroTests pin the exact
 /// text). Sync methods call the sync coordinator directly:
 ///
-/// let _flightTx = try FlightCore.FlightTransactions.coordinator.begin()
-/// do {
-/// let _flightResult: R = try { () throws -> R in
-/// <original body>
-/// }()
-/// try FlightCore.FlightTransactions.coordinator.commit(_flightTx)
-/// return _flightResult
-/// } catch {
-/// FlightCore.FlightTransactions.coordinator.rollback(_flightTx)
-/// throw error
-/// }
+///     let _flightTx = try FlightCore.FlightTransactions.coordinator.begin()
+///     do {
+///         let _flightResult: R = try { () throws -> R in
+///             <original body>
+///         }()
+///         try FlightCore.FlightTransactions.coordinator.commit(_flightTx)
+///         return _flightResult
+///     } catch {
+///         FlightCore.FlightTransactions.coordinator.rollback(_flightTx)
+///         throw error
+///     }
 ///
-/// Async methods route through the preferring-async helpers so an
+/// Async methods route through the preferring-async helpers (delta 14) so an
 /// async-native coordinator is awaited when bound, with fallback to the sync
 /// coordinator otherwise:
 ///
-/// let _flightTx = try await FlightCore.FlightTransactions.beginPreferringAsync()
-/// do {
-/// let _flightResult: R = try await { () async throws -> R in
-/// <original body>
-/// }()
-/// try await FlightCore.FlightTransactions.commitPreferringAsync(_flightTx)
-/// return _flightResult
-/// } catch {
-/// await FlightCore.FlightTransactions.rollbackPreferringAsync(_flightTx)
-/// throw error
-/// }
+///     let _flightTx = try await FlightCore.FlightTransactions.beginPreferringAsync()
+///     do {
+///         let _flightResult: R = try await { () async throws -> R in
+///             <original body>
+///         }()
+///         try await FlightCore.FlightTransactions.commitPreferringAsync(_flightTx)
+///         return _flightResult
+///     } catch {
+///         await FlightCore.FlightTransactions.rollbackPreferringAsync(_flightTx)
+///         throw error
+///     }
 ///
 /// Two details are load-bearing:
 /// - The original body is wrapped in an *immediately invoked* closure literal
-/// so that `return` statements inside it keep their meaning. Immediately
-/// invoked literals are non-escaping, so implicit `self` in the body stays
-/// legal.
+///   so that `return` statements inside it keep their meaning. Immediately
+///   invoked literals are non-escaping, so implicit `self` in the body stays
+///   legal.
 /// - The closure carries an explicit signature (`() async throws -> R`) so
-/// the wrapper never depends on inference from the body, and `try` on a
-/// body that happens not to throw doesn't warn.
+///   the wrapper never depends on inference from the body, and `try` on a
+///   body that happens not to throw doesn't warn.
 public struct TransactionalMacro: BodyMacro {
     public static func expansion(
         of node: AttributeSyntax,
@@ -93,7 +93,7 @@ public struct TransactionalMacro: BodyMacro {
         let bodyText = body.statements.trimmedDescription
 
         // Async methods route through FlightTransactions' preferring-async
-        // helpers: the async-native coordinator when one is bound,
+        // helpers (delta 14): the async-native coordinator when one is bound,
         // else the sync coordinator — selection at runtime, expansion flat.
         // Sync methods can't await, so they call the sync coordinator
         // directly, exactly as before.
@@ -114,26 +114,26 @@ public struct TransactionalMacro: BodyMacro {
         if isVoid {
             doCatch = """
                 do {
-                \(raw: effect) { \(raw: closureSignature) in
-                \(raw: bodyText)
-                }()
-                \(raw: commitCall)
+                    \(raw: effect) { \(raw: closureSignature) in
+                        \(raw: bodyText)
+                    }()
+                    \(raw: commitCall)
                 } catch {
-                \(raw: rollbackCall)
-                throw error
+                    \(raw: rollbackCall)
+                    throw error
                 }
                 """
         } else {
             doCatch = """
                 do {
-                let _flightResult: \(raw: normalizedReturn) = \(raw: effect) { \(raw: closureSignature) in
-                \(raw: bodyText)
-                }()
-                \(raw: commitCall)
-                return _flightResult
+                    let _flightResult: \(raw: normalizedReturn) = \(raw: effect) { \(raw: closureSignature) in
+                        \(raw: bodyText)
+                    }()
+                    \(raw: commitCall)
+                    return _flightResult
                 } catch {
-                \(raw: rollbackCall)
-                throw error
+                    \(raw: rollbackCall)
+                    throw error
                 }
                 """
         }
