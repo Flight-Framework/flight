@@ -30,8 +30,14 @@ dependencies: [
 ])
 ```
 
-Requires Swift 6.2+ (inherited from swift-configuration). Supports macOS 15+, iOS 18+, tvOS 18+, watchOS 11+,
-visionOS 2+, and Linux.
+Requires Swift 6.2+, inherited from swift-configuration.
+
+**Linux is the verified platform.** The manifest declares macOS 15+, iOS 18+,
+tvOS 18+, watchOS 11+ and visionOS 2+, but swift-configuration 1.2.0 does not
+currently compile against Apple's Foundation — it uses `Data.bytes`, which
+ships with the Linux toolchain's swift-foundation and is not in the macOS SDK.
+CI runs the Apple-platform job on every commit so the day that changes is
+visible, but it is not gating today.
 
 ## Layering
 
