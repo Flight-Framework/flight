@@ -7,9 +7,9 @@
 // one to comment out while fixing FlightCoreMacrosImpl — nothing else in
 // FlightCoreTests uses macros.
 
-import Testing
 import FlightCore
 import Synchronization
+import Testing
 
 // MARK: - Components under test
 
@@ -71,7 +71,7 @@ final class RecordingCoordinator: FlightTransactionCoordinator, Sendable {
     }
 }
 
-/// Async-native counterpart (delta 14). Distinct token id so tests can see
+/// Async-native counterpart. Distinct token id so tests can see
 /// which coordinator issued the frame.
 final class RecordingAsyncCoordinator: FlightAsyncTransactionCoordinator, Sendable {
     private let log = Mutex<[String]>([])
@@ -108,7 +108,7 @@ final class MacroLedger: Sendable {
 
 // MARK: - Tests
 
-@Suite("Macro integration (§5) — generated code against a live container")
+@Suite("Macro integration — generated code against a live container")
 struct MacroIntegrationTests {
 
     @Test("@Component registration + @Autowired resolution round-trip")
@@ -130,7 +130,7 @@ struct MacroIntegrationTests {
         #expect(ObjectIdentifier(registrable) == ObjectIdentifier(MacroClock.self))
     }
 
-    @Test("@Service/@Repository register like @Component, tagged with their layer (§5.1.1)")
+    @Test("@Service/@Repository register like @Component, tagged with their layer")
     func stereotypes() throws {
         let container = Container()
         try MacroClock._flightRegister(container)
@@ -205,10 +205,14 @@ struct MacroIntegrationTests {
     @Test("@Autowired qualifiers resolve distinct components of one type")
     func qualifiedInjection() throws {
         let container = Container()
-        // M-2 (SPIKE-FINDINGS): the generated init(_flight:) suppresses the
+        // M-2 : the generated init(_flight:) suppresses the
         // implicit init(), so hand-construction goes through it too.
-        container.register(MacroClock.self, qualifier: "primary", scope: .singleton) { c in try MacroClock(_flight: c) }
-        container.register(MacroClock.self, qualifier: "replica", scope: .singleton) { c in try MacroClock(_flight: c) }
+        container.register(MacroClock.self, qualifier: "primary", scope: .singleton) { c in
+            try MacroClock(_flight: c)
+        }
+        container.register(MacroClock.self, qualifier: "replica", scope: .singleton) { c in
+            try MacroClock(_flight: c)
+        }
         try MacroQualified._flightRegister(container)
         try container.freeze()
 
@@ -258,13 +262,13 @@ struct MacroIntegrationTests {
         #expect(coordinator.events == ["begin", "rollback#7"])
     }
 
-    // MARK: Async-native coordination (delta 14)
+    // MARK: Async-native coordination
     //
     // The two tests above double as the FALLBACK proof: they bind only the
     // sync coordinator, and the async method's preferring-async expansion
     // lands there when no async-native coordinator is bound.
 
-    @Test("an async @Transactional method prefers the async-native coordinator (delta 14)")
+    @Test("an async @Transactional method prefers the async-native coordinator")
     func transactionalAsyncPrefersAsyncCoordinator() async throws {
         let sync = RecordingCoordinator()
         let asyncNative = RecordingAsyncCoordinator()
@@ -275,7 +279,9 @@ struct MacroIntegrationTests {
             }
         }
         #expect(asyncNative.events == ["begin", "commit#9"])
-        #expect(sync.events.isEmpty, "sync coordinator must be untouched when an async-native one is bound")
+        #expect(
+            sync.events.isEmpty,
+            "sync coordinator must be untouched when an async-native one is bound")
     }
 
     @Test("async rollback rides the async-native coordinator too")

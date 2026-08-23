@@ -29,7 +29,7 @@ final class InvocationCounter: Sendable {
 
 // MARK: - LoggingModule
 //
-// The second, deliberately trivial FlightModule conformance required by §4:
+// The second, deliberately trivial FlightModule conformance required by :
 // its existence validates that the abstraction isn't secretly shaped around
 // the web starter. It registers one component and owns no service.
 
@@ -94,7 +94,7 @@ public struct FakeServerModule: FlightModule {
 }
 
 /// A module whose Service fails as soon as it runs — exercises the
-/// ModuleHealth .failed transition (§6.1).
+/// ModuleHealth .failed transition.
 public struct FailingServiceModule: FlightModule {
     public init() {}
     public func configure(_ container: Container) throws {}
@@ -103,7 +103,7 @@ public struct FailingServiceModule: FlightModule {
     }
 }
 
-/// A bounded, run-to-completion service module (delta 9): its Service returns
+/// A bounded, run-to-completion service module: its Service returns
 /// after doing its work, and .endsApp tells bootstrap that finishing is
 /// success (graceful group shutdown), not serviceFinishedUnexpectedly.
 public struct OneShotModule: FlightModule {

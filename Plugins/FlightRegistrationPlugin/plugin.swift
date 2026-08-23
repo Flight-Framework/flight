@@ -11,7 +11,7 @@
 // and the PackageManager symbol-graph service is only exposed to *command*
 // plugins (SE-0332). SE-0325 gives build tool plugins the package graph —
 // including dependency targets' source files — and the plugin sandbox allows
-// reading them. Full findings: SPIKE-FINDINGS.md.
+// reading them.
 //
 // Sandbox notes (spike question (b)): no network; writes restricted to this
 // plugin's work directory (both the manifest and the generated file live
@@ -33,7 +33,7 @@ struct FlightRegistrationPlugin: BuildToolPlugin {
         let modules: [Module]
         let output: String
         // Where flight.yaml lives (the package owning the target), for the
-        // Flight Config §5 compile-time @ConfigValue key check.
+        // Flight Config the compile-time @ConfigValue key check.
         let packageDirectory: String?
     }
 

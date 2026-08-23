@@ -1,11 +1,11 @@
 import ServiceLifecycle
 
-/// The one extension point (§4). Deliberately the smallest possible surface:
+/// The one extension point. Deliberately the smallest possible surface:
 /// register components in `configure`, optionally hand one `Service` to the
 /// lifecycle group. If a future starter seems to need more, extend this
 /// deliberately — never via a side channel.
 public protocol FlightModule {
-    /// Bootstrap instantiates modules itself (§7 step: `ordered.map { $0.init() }`),
+    /// Bootstrap instantiates modules itself }`),
     /// so conformances must be constructible without arguments. Configuration
     /// reaches modules through the container (bootstrap registers
     /// `Configuration` before any module configures), not through init.
@@ -21,12 +21,11 @@ public protocol FlightModule {
     func configure(_ container: Container) throws
 
     /// Present only if this module owns a long-running component. Handed to
-    /// the app-wide ServiceLifecycle `ServiceGroup` at bootstrap (§7).
+    /// the app-wide ServiceLifecycle `ServiceGroup` at bootstrap.
     var service: (any Service)? { get }
 
     /// What it means when this module's `service` *returns* from `run()`
-    /// without throwing. Deliberate §4 contract extension (SPIKE-FINDINGS
-    /// delta 9): without it, bootstrap could only host run-until-shutdown
+    /// without throwing. Deliberate the contract extension : without it, bootstrap could only host run-until-shutdown
     /// services — a bounded one-shot service (batch job, queue drain) would
     /// fail the whole group on completion.
     var serviceCompletion: ServiceCompletionPolicy { get }
@@ -55,7 +54,7 @@ extension FlightModule {
     public static var moduleName: String { String(describing: Self.self) }
 }
 
-// MARK: - Module health (§6.1)
+// MARK: - Module health
 
 /// Tracked externally by bootstrap — `FlightModule` stays unchanged. Coarse
 /// by design; finer-grained state is a deliberate additive extension to make
@@ -64,6 +63,31 @@ public enum ModuleHealth: Sendable {
     case notStarted
     case running
     case failed(any Error)
+
+    /// `true` when the module's service threw.
+    public var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+}
+
+extension ModuleHealth: Equatable {
+    /// Two failures are equal when their messages match.
+    ///
+    /// `any Error` cannot synthesize `Equatable`, and comparing existentials
+    /// by identity would make every failure unequal to every other — which is
+    /// useless in the place this is actually compared: a test asserting that a
+    /// module reported the failure it was supposed to.
+    public static func == (lhs: ModuleHealth, rhs: ModuleHealth) -> Bool {
+        switch (lhs, rhs) {
+        case (.notStarted, .notStarted), (.running, .running):
+            return true
+        case (.failed(let lhsError), .failed(let rhsError)):
+            return String(describing: lhsError) == String(describing: rhsError)
+        default:
+            return false
+        }
+    }
 }
 
 public struct ModuleStatus: Sendable {
@@ -71,7 +95,7 @@ public struct ModuleStatus: Sendable {
     public let health: ModuleHealth
 }
 
-// MARK: - Module DAG resolution (§7 step 5)
+// MARK: - Module DAG resolution
 
 public enum ModuleGraphError: Error, CustomStringConvertible, Sendable {
     case cycle([String])
@@ -88,13 +112,15 @@ public enum ModuleGraphError: Error, CustomStringConvertible, Sendable {
 /// Properties, all load-bearing:
 /// - Dependencies always precede dependents.
 /// - Order is stable: modules are visited in the order given, and each
-///   module's dependencies in their declared order — same input, same output,
-///   every run. ("Deterministic and checkable", §4.)
+/// module's dependencies in their declared order — same input, same output,
+/// every run. It is deterministic and checkable.
 /// - Transitive dependencies are auto-included: listing `WebModule` pulls in
-///   everything `WebModule.dependencies` declares, recursively. A module you
-///   depend on but forgot to list is a wiring bug this removes by design.
+/// everything `WebModule.dependencies` declares, recursively. A module you
+/// depend on but forgot to list is a wiring bug this removes by design.
 /// - Cycles are an error naming the full chain.
-public func resolveModuleOrder(_ modules: [any FlightModule.Type]) throws -> [any FlightModule.Type] {
+public func _flightResolveModuleOrder(_ modules: [any FlightModule.Type]) throws
+    -> [any FlightModule.Type]
+{
     var ordered: [any FlightModule.Type] = []
     var finished: Set<ObjectIdentifier> = []
     var inProgress: Set<ObjectIdentifier> = []

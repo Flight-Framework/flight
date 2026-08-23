@@ -1,20 +1,29 @@
 // Internal storage model shared by Container and Scope.
 //
-// The public contract (§2.1) deliberately does not expose these. The design
+// The public contract deliberately does not expose these. The design
 // doc reserves the right for storage to become a handle-indexed arena; the
 // dictionary form here is the measurable baseline. Post-freeze, `Frozen` is
 // immutable, so swapping the representation later is invisible to callers.
 
-/// Composite lookup key: type identity plus optional qualifier (§5.4 fixture 6:
-/// two components of the same type are disambiguated by an explicit qualifier).
+/// Composite lookup key: type identity plus optional qualifier.
 struct ComponentKey: Hashable, Sendable, CustomStringConvertible {
     let type: ObjectIdentifier
-    let typeName: String
     let qualifier: String?
+
+    /// Held so `typeName` can be demangled on demand.
+    ///
+    /// `String(reflecting:)` is expensive — it dominated `resolve`, which is
+    /// on the hot path of every request — and the result is only ever needed
+    /// for a diagnostic that is almost never emitted. Keeping the metatype
+    /// and demangling lazily makes key construction a pointer copy.
+    private let metatype: any Any.Type
+
+    /// The demangled type name, for diagnostics only.
+    var typeName: String { String(reflecting: metatype) }
 
     init<T>(_ type: T.Type, qualifier: String?) {
         self.type = ObjectIdentifier(type)
-        self.typeName = String(reflecting: type)
+        self.metatype = type
         self.qualifier = qualifier
     }
 
@@ -47,7 +56,7 @@ struct Registration: @unchecked Sendable {
 }
 
 /// The immutable, post-`freeze()` view. Built exactly once; never mutated.
-/// This immutability is what makes lock-free `resolve` sound (§2.1, §8).
+/// This immutability is what makes lock-free `resolve` sound.
 struct FrozenStorage: @unchecked Sendable {
     let registrations: [ComponentKey: Registration]
     let order: [ComponentKey]

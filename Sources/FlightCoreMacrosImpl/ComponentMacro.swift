@@ -3,21 +3,18 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-/// The shared expansion behind `@Component` and its stereotypes (§5.1,
-/// §5.1.1). Each conforming macro generates:
+/// The shared expansion behind `@Component` and its stereotypes. Each conforming macro generates:
 /// - `init(_flight:)` — constructs the type with every `@Autowired` property
-///   container-resolved and every `@ConfigValue` property config-resolved;
+/// container-resolved and every `@ConfigValue` property config-resolved;
 /// - `_flightRegister(_:)` — the registration thunk the build plugin's
-///   generated `_registerAll` calls;
+/// generated `_registerAll` calls;
 /// - `extension T: _FlightRegistrable {}`.
 ///
 /// Stereotypes expand *identically* to `@Component` — the only difference is
-/// the `stereotype:` argument on the generated register call (§5.1.1: the
-/// tag feeds Actuator's layer grouping and any future AOP pointcut; it never
-/// affects resolution).
+/// the `stereotype:` argument on the generated register call.
 ///
 /// The authoritative expansions are the fixtures in FlightCoreMacroTests
-/// (§5.4 — the expected-output strings *are* the spec).
+///.
 public protocol RegistrationMacro: MemberMacro, ExtensionMacro {
     /// Source text of the `stereotype:` argument in the generated register
     /// call, or nil to omit it (`@Component` — the parameter defaults to
@@ -33,13 +30,13 @@ public struct ComponentMacro: RegistrationMacro {
     public static let displayName = "@Component"
 }
 
-/// `@Service` (§5.1.1) — business logic, third-party clients.
+/// `@Service` — business logic, third-party clients.
 public struct ServiceMacro: RegistrationMacro {
     public static let stereotypeArgument: String? = ".service"
     public static let displayName = "@Service"
 }
 
-/// `@Repository` (§5.1.1) — data access.
+/// `@Repository` — data access.
 public struct RepositoryMacro: RegistrationMacro {
     public static let stereotypeArgument: String? = ".repository"
     public static let displayName = "@Repository"
@@ -75,13 +72,15 @@ extension RegistrationMacro {
 
         let properties = try collectInjectedProperties(from: declaration, in: context)
         guard validateQualifierDisambiguation(properties, in: context) else { return [] }
-        guard validateNonInjectedStorage(declaration, injected: properties, in: context) else { return [] }
+        guard validateNonInjectedStorage(declaration, injected: properties, in: context) else {
+            return []
+        }
 
         let (scopeExpr, qualifierExpr) = parseComponentArguments(node)
         let access = registrationAccess(for: declaration)
 
         // 1. Resolving initializer. Internal always: its only caller is the
-        //    thunk below, which lives on the same type.
+        // thunk below, which lives on the same type.
         var initLines: [String] = []
         for property in properties {
             switch property.kind {
@@ -113,27 +112,28 @@ extension RegistrationMacro {
                 }
             }
         }
-        let initBody = initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
+        let initBody = initLines.isEmpty ? "" : "\n " + initLines.joined(separator: "\n ") + "\n"
         let resolvingInit: DeclSyntax = """
-        internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
-        """
+            internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
+            """
 
         // 2. Registration thunk. Stereotypes differ from @Component only in
-        //    the trailing stereotype: argument (§5.1.1).
+        // the trailing stereotype: argument.
         let stereotypeSuffix = stereotypeArgument.map { ", stereotype: \($0)" } ?? ""
         let registerCall: String
         if let qualifierExpr {
-            registerCall = "container.register(Self.self, qualifier: \(qualifierExpr), scope: \(scopeExpr)\(stereotypeSuffix))"
+            registerCall =
+                "container.register(Self.self, qualifier: \(qualifierExpr), scope: \(scopeExpr)\(stereotypeSuffix))"
         } else {
             registerCall = "container.register(Self.self, scope: \(scopeExpr)\(stereotypeSuffix))"
         }
         let thunk: DeclSyntax = """
-        \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
+            \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
             \(raw: registerCall) { c in
-                try Self(_flight: c)
+            try Self(_flight: c)
             }
-        }
-        """
+            }
+            """
 
         return [resolvingInit, thunk]
     }
@@ -151,8 +151,8 @@ extension RegistrationMacro {
         // type already declares _FlightRegistrable, this list is empty.
         guard !protocols.isEmpty else { return [] }
         let ext: DeclSyntax = """
-        extension \(type.trimmed): FlightCore._FlightRegistrable {}
-        """
+            extension \(type.trimmed): FlightCore._FlightRegistrable {}
+            """
         guard let extensionDecl = ext.as(ExtensionDeclSyntax.self) else { return [] }
         return [extensionDecl]
     }
@@ -163,7 +163,7 @@ extension RegistrationMacro {
     /// resolving init to make `Self(_flight:)` legal in a static context —
     /// deliberately unsupported in v1 rather than silently generating
     /// subclass-hostile code. Actors are deferred: container-managed actors
-    /// are a Flight-wide design question (§7's "where actors do belong"), not
+    /// are a Flight-wide design question, not
     /// a macro detail to improvise.
     private static func validateAttachmentTarget(
         _ declaration: some DeclGroupSyntax,
@@ -190,7 +190,7 @@ extension RegistrationMacro {
         return false
     }
 
-    /// §5.4 fixture 6 decision: two `@Autowired` properties of the same type
+    /// the fixture 6 decision: two `@Autowired` properties of the same type
     /// are a compile error unless each carries a distinct explicit qualifier.
     private static func validateQualifierDisambiguation(
         _ properties: [InjectedProperty],
@@ -218,7 +218,7 @@ extension RegistrationMacro {
         return valid
     }
 
-    /// M-3 (SPIKE-FINDINGS): the generated `init(_flight:)` assigns only
+    /// M-3 : the generated `init(_flight:)` assigns only
     /// injected properties, so any other stored property must carry a default
     /// value (or be an implicitly-nil optional `var`). Without this check the
     /// failure is a "return from initializer without initializing all stored
@@ -240,14 +240,15 @@ extension RegistrationMacro {
             let isVar = variable.bindingSpecifier.tokenKind == .keyword(.var)
             for binding in variable.bindings {
                 guard binding.accessorBlock == nil,
-                      binding.initializer == nil,
-                      let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
-                      !injectedNames.contains(pattern.identifier.text)
+                    binding.initializer == nil,
+                    let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
+                    !injectedNames.contains(pattern.identifier.text)
                 else { continue }
                 // An optional `var` is implicitly nil-initialized.
                 if isVar, let type = binding.typeAnnotation?.type,
-                   type.is(OptionalTypeSyntax.self)
-                    || type.as(IdentifierTypeSyntax.self)?.name.text == "Optional" {
+                    type.is(OptionalTypeSyntax.self)
+                        || type.as(IdentifierTypeSyntax.self)?.name.text == "Optional"
+                {
                     continue
                 }
                 context.diagnoseError(
@@ -272,7 +273,7 @@ extension RegistrationMacro {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
             guard let kind = injectionKind(of: variable, in: context) else { continue }
             guard let binding = variable.bindings.first,
-                  let pattern = binding.pattern.as(IdentifierPatternSyntax.self)
+                let pattern = binding.pattern.as(IdentifierPatternSyntax.self)
             else { continue }
             guard let typeAnnotation = binding.typeAnnotation else {
                 context.diagnoseError(
@@ -300,7 +301,7 @@ extension RegistrationMacro {
     ) -> InjectedProperty.Kind? {
         for attribute in variable.attributes {
             guard let attr = attribute.as(AttributeSyntax.self),
-                  let name = attr.attributeName.as(IdentifierTypeSyntax.self)?.name.text
+                let name = attr.attributeName.as(IdentifierTypeSyntax.self)?.name.text
             else { continue }
             switch name {
             case "Autowired":
@@ -314,7 +315,8 @@ extension RegistrationMacro {
                     )
                     return nil
                 }
-                return .configValue(key: key, defaultValue: labeledArgumentSource(of: attr, label: "default"))
+                return .configValue(
+                    key: key, defaultValue: labeledArgumentSource(of: attr, label: "default"))
             default:
                 continue
             }
@@ -327,7 +329,7 @@ extension RegistrationMacro {
     /// re-embeds it verbatim, so escapes survive untouched.
     private static func firstArgumentSource(of attribute: AttributeSyntax) -> String? {
         guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
-              let first = arguments.first, first.label == nil
+            let first = arguments.first, first.label == nil
         else { return nil }
         let text = first.expression.trimmedDescription
         return text == "nil" ? nil : text
@@ -335,8 +337,12 @@ extension RegistrationMacro {
 
     /// Source text of a labeled argument (e.g. `default:` on @ConfigValue),
     /// or nil. Same verbatim re-embedding rationale as above.
-    private static func labeledArgumentSource(of attribute: AttributeSyntax, label: String) -> String? {
-        guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self) else { return nil }
+    private static func labeledArgumentSource(of attribute: AttributeSyntax, label: String)
+        -> String?
+    {
+        guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self) else {
+            return nil
+        }
         for argument in arguments where argument.label?.text == label {
             return argument.expression.trimmedDescription
         }

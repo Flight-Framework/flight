@@ -1,7 +1,7 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@Autowired` (§5.1). A pure marker: all generated code lives in
+/// `@Autowired`. A pure marker: all generated code lives in
 /// `@Component`'s expansion (which reads this attribute off the property).
 /// Its own expansion is empty; its job is validating the attachment site at
 /// the point of use so misuse fails on the property, not somewhere in the
@@ -17,7 +17,7 @@ public struct AutowiredMacro: PeerMacro {
     }
 }
 
-/// `@ConfigValue` (§5.1). Same marker pattern as `@Autowired`; the key
+/// `@ConfigValue`. Same marker pattern as `@Autowired`; the key
 /// argument is consumed by `@Component`'s expansion.
 public struct ConfigValueMacro: PeerMacro {
     public static func expansion(

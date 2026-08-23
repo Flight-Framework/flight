@@ -1,20 +1,20 @@
-// §5.4 — the macro expansion spike, resolved as fixtures.
+// — the macro expansion spike, resolved as fixtures.
 //
 // These expected-output strings ARE the specification of Flight's macro
 // expansions; the design doc's prose examples are illustrative, these are
-// normative. Design decisions they pin (recorded in SPIKE-FINDINGS.md):
+// normative. Design decisions they pin:
 //
-//  M-1  The resolving initializer is `init(_flight:)`, macro-generated.
-//       The doc's `init() {}` alongside non-optional @Autowired stored
-//       properties cannot compile in real Swift — exactly the kind of
-//       looks-obvious-doesn't-compile gap this fixture process exists to
-//       catch. Component types should not declare their own initializers.
-//  F-6  Two @Autowired properties of one type without distinct explicit
-//       qualifiers are a compile error (fixture 6a) — Flight refuses to
-//       guess positionally. With qualifiers, resolution is explicit (6b).
-//  T-1  @Transactional requires `throws`; the body is wrapped in an
-//       immediately-invoked, explicitly-typed closure so `return` and
-//       implicit `self` keep their meaning.
+// M-1 The resolving initializer is `init(_flight:)`, macro-generated.
+// The doc's `init() {}` alongside non-optional @Autowired stored
+// properties cannot compile in real Swift — exactly the kind of
+// looks-obvious-doesn't-compile gap this fixture process exists to
+// catch. Component types should not declare their own initializers.
+// F-6 Two @Autowired properties of one type without distinct explicit
+// qualifiers are a compile error (fixture 6a) — Flight refuses to
+// guess positionally. With qualifiers, resolution is explicit (6b).
+// T-1 @Transactional requires `throws`; the body is wrapped in an
+// immediately-invoked, explicitly-typed closure so `return` and
+// implicit `self` keep their meaning.
 //
 // NOTE ON FIRST RUN: expected strings were written without a toolchain to
 // verify against (see README). assertMacroExpansion output formatting
@@ -35,9 +35,11 @@ import XCTest
 // which diverges from real compilation (first-run finding; the runtime
 // integration suite proves the compiler path emits the conformance).
 private let testMacros: [String: MacroSpec] = [
-    "Component": MacroSpec(type: ComponentMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
+    "Component": MacroSpec(
+        type: ComponentMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
     "Service": MacroSpec(type: ServiceMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
-    "Repository": MacroSpec(type: RepositoryMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
+    "Repository": MacroSpec(
+        type: RepositoryMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
     "Autowired": MacroSpec(type: AutowiredMacro.self),
     "ConfigValue": MacroSpec(type: ConfigValueMacro.self),
     "Transactional": MacroSpec(type: TransactionalMacro.self),
@@ -52,26 +54,26 @@ final class MacroFixtureTests: XCTestCase {
             """
             @Component
             final class ClockService {
-                func now() -> Int { 0 }
+            func now() -> Int { 0 }
             }
             """,
             expandedSource: """
-            final class ClockService {
+                final class ClockService {
                 func now() -> Int { 0 }
 
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, scope: .singleton) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension ClockService: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension ClockService: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -84,62 +86,62 @@ final class MacroFixtureTests: XCTestCase {
             """
             @Component
             public final class UserService {
-                @Autowired let repository: UserRepository
-                @Autowired let logger: AppLogger
+            @Autowired let repository: UserRepository
+            @Autowired let logger: AppLogger
             }
             """,
             expandedSource: """
-            public final class UserService {
+                public final class UserService {
                 let repository: UserRepository
                 let logger: AppLogger
 
                 internal init(_flight container: FlightCore.Container) throws {
-                    self.repository = try container.resolve(UserRepository.self)
-                    self.logger = try container.resolve(AppLogger.self)
+                self.repository = try container.resolve(UserRepository.self)
+                self.logger = try container.resolve(AppLogger.self)
                 }
 
                 public static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, scope: .singleton) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension UserService: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension UserService: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
 
-    // MARK: Stereotypes (§5.1.1) — identical expansion, tagged register call
+    // MARK: Stereotypes — identical expansion, tagged register call
 
     func testServiceStereotype() {
         assertMacroExpansion(
             """
             @Service
             final class BillingService {
-                @Autowired let repository: InvoiceRepository
+            @Autowired let repository: InvoiceRepository
             }
             """,
             expandedSource: """
-            final class BillingService {
+                final class BillingService {
                 let repository: InvoiceRepository
 
                 internal init(_flight container: FlightCore.Container) throws {
-                    self.repository = try container.resolve(InvoiceRepository.self)
+                self.repository = try container.resolve(InvoiceRepository.self)
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton, stereotype: .service) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, scope: .singleton, stereotype: .service) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension BillingService: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension BillingService: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -153,21 +155,21 @@ final class MacroFixtureTests: XCTestCase {
             }
             """,
             expandedSource: """
-            public final class InvoiceRepository {
+                public final class InvoiceRepository {
 
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
                 public static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, qualifier: "replica", scope: .singleton, stereotype: .repository) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, qualifier: "replica", scope: .singleton, stereotype: .repository) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension InvoiceRepository: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension InvoiceRepository: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -180,15 +182,16 @@ final class MacroFixtureTests: XCTestCase {
             }
             """,
             expandedSource: """
-            class OpenRepository {
-            }
+                class OpenRepository {
+                }
 
-            extension OpenRepository: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension OpenRepository: FlightCore._FlightRegistrable {
+                }
+                """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "@Repository requires a final class (or a struct). Mark 'OpenRepository' final.",
+                    message:
+                        "@Repository requires a final class (or a struct). Mark 'OpenRepository' final.",
                     line: 2,
                     column: 7
                 )
@@ -203,38 +206,38 @@ final class MacroFixtureTests: XCTestCase {
         assertMacroExpansion(
             """
             final class Ledger {
-                @Transactional
-                func post(_ amount: Int) throws -> Int {
-                    try store.append(amount)
-                    return amount
-                }
+            @Transactional
+            func post(_ amount: Int) throws -> Int {
+            try store.append(amount)
+            return amount
+            }
             }
             """,
             expandedSource: """
-            final class Ledger {
+                final class Ledger {
                 func post(_ amount: Int) throws -> Int {
-                    let _flightTx = try FlightCore.FlightTransactions.coordinator.begin()
-                    do {
-                        let _flightResult: Int = try { () throws -> Int in
-                            try store.append(amount)
-                            return amount
-                        }()
-                        try FlightCore.FlightTransactions.coordinator.commit(_flightTx)
-                        return _flightResult
-                    } catch {
-                        FlightCore.FlightTransactions.coordinator.rollback(_flightTx)
-                        throw error
-                    }
+                let _flightTx = try FlightCore.FlightTransactions.coordinator.begin()
+                do {
+                let _flightResult: Int = try { () throws -> Int in
+                try store.append(amount)
+                return amount
+                }()
+                try FlightCore.FlightTransactions.coordinator.commit(_flightTx)
+                return _flightResult
+                } catch {
+                FlightCore.FlightTransactions.coordinator.rollback(_flightTx)
+                throw error
                 }
-            }
-            """,
+                }
+                }
+                """,
             macroSpecs: testMacros
         )
     }
 
     // MARK: Fixture 4 — @Transactional on an async throwing method (Void)
     //
-    // Async methods route through the preferring-async helpers (delta 14):
+    // Async methods route through the preferring-async helpers:
     // the async-native coordinator when one is bound, the sync coordinator
     // otherwise — selected at runtime, awaited rather than blocked on.
 
@@ -242,30 +245,30 @@ final class MacroFixtureTests: XCTestCase {
         assertMacroExpansion(
             """
             final class Mover {
-                @Transactional
-                func transfer(_ amount: Int) async throws {
-                    try await debit(amount)
-                    try await credit(amount)
-                }
+            @Transactional
+            func transfer(_ amount: Int) async throws {
+            try await debit(amount)
+            try await credit(amount)
+            }
             }
             """,
             expandedSource: """
-            final class Mover {
+                final class Mover {
                 func transfer(_ amount: Int) async throws {
-                    let _flightTx = try await FlightCore.FlightTransactions.beginPreferringAsync()
-                    do {
-                        try await { () async throws -> Void in
-                            try await debit(amount)
-                            try await credit(amount)
-                        }()
-                        try await FlightCore.FlightTransactions.commitPreferringAsync(_flightTx)
-                    } catch {
-                        await FlightCore.FlightTransactions.rollbackPreferringAsync(_flightTx)
-                        throw error
-                    }
+                let _flightTx = try await FlightCore.FlightTransactions.beginPreferringAsync()
+                do {
+                try await { () async throws -> Void in
+                try await debit(amount)
+                try await credit(amount)
+                }()
+                try await FlightCore.FlightTransactions.commitPreferringAsync(_flightTx)
+                } catch {
+                await FlightCore.FlightTransactions.rollbackPreferringAsync(_flightTx)
+                throw error
                 }
-            }
-            """,
+                }
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -280,21 +283,21 @@ final class MacroFixtureTests: XCTestCase {
             }
             """,
             expandedSource: """
-            final class RequestContext {
+                final class RequestContext {
 
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .scoped) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, scope: .scoped) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension RequestContext: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension RequestContext: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -306,22 +309,23 @@ final class MacroFixtureTests: XCTestCase {
             """
             @Component
             final class ReportService {
-                @Autowired var primary: DataSource
-                @Autowired var replica: DataSource
+            @Autowired var primary: DataSource
+            @Autowired var replica: DataSource
             }
             """,
             expandedSource: """
-            final class ReportService {
+                final class ReportService {
                 var primary: DataSource
                 var replica: DataSource
-            }
+                }
 
-            extension ReportService: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension ReportService: FlightCore._FlightRegistrable {
+                }
+                """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "Two @Autowired properties of type 'DataSource' require distinct explicit qualifiers, e.g. @Autowired(\"primary\").",
+                    message:
+                        "Two @Autowired properties of type 'DataSource' require distinct explicit qualifiers, e.g. @Autowired(\"primary\").",
                     line: 4,
                     column: 5
                 )
@@ -337,30 +341,30 @@ final class MacroFixtureTests: XCTestCase {
             """
             @Component
             final class ReportService {
-                @Autowired("primary") var primary: DataSource
-                @Autowired("replica") var replica: DataSource
+            @Autowired("primary") var primary: DataSource
+            @Autowired("replica") var replica: DataSource
             }
             """,
             expandedSource: """
-            final class ReportService {
+                final class ReportService {
                 var primary: DataSource
                 var replica: DataSource
 
                 internal init(_flight container: FlightCore.Container) throws {
-                    self.primary = try container.resolve(DataSource.self, qualifier: "primary")
-                    self.replica = try container.resolve(DataSource.self, qualifier: "replica")
+                self.primary = try container.resolve(DataSource.self, qualifier: "primary")
+                self.replica = try container.resolve(DataSource.self, qualifier: "replica")
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, scope: .singleton) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension ReportService: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension ReportService: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -372,32 +376,32 @@ final class MacroFixtureTests: XCTestCase {
             """
             @Component
             final class ServerSettings {
-                @ConfigValue("server.port") let port: Int
+            @ConfigValue("server.port") let port: Int
             }
             """,
             expandedSource: """
-            final class ServerSettings {
+                final class ServerSettings {
                 let port: Int
 
                 internal init(_flight container: FlightCore.Container) throws {
-                    self.port = try container.resolve(FlightCore.Configuration.self).get("server.port", as: Int.self)
+                self.port = try container.resolve(FlightCore.Configuration.self).get("server.port", as: Int.self)
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, scope: .singleton) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension ServerSettings: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension ServerSettings: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
 
-    // MARK: Supplementary — @ConfigValue with default: (Flight Config §5)
+    // MARK: Supplementary — @ConfigValue with default: (Flight Config)
     //
     // Resolves through getIfPresent, not get(_:default:): absence applies the
     // default, but a present-and-malformed value still throws — failing the
@@ -410,27 +414,27 @@ final class MacroFixtureTests: XCTestCase {
             """
             @Component
             final class PoolSettings {
-                @ConfigValue("datasource.pool_size", default: 10) let poolSize: Int
+            @ConfigValue("datasource.pool_size", default: 10) let poolSize: Int
             }
             """,
             expandedSource: """
-            final class PoolSettings {
+                final class PoolSettings {
                 let poolSize: Int
 
                 internal init(_flight container: FlightCore.Container) throws {
-                    self.poolSize = try container.resolve(FlightCore.Configuration.self).getIfPresent("datasource.pool_size", as: Int.self) ?? (10)
+                self.poolSize = try container.resolve(FlightCore.Configuration.self).getIfPresent("datasource.pool_size", as: Int.self) ?? (10)
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, scope: .singleton) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension PoolSettings: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension PoolSettings: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -445,21 +449,21 @@ final class MacroFixtureTests: XCTestCase {
             }
             """,
             expandedSource: """
-            final class PrimarySource {
+                final class PrimarySource {
 
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, qualifier: "primary", scope: .singleton) { c in
-                        try Self(_flight: c)
-                    }
+                container.register(Self.self, qualifier: "primary", scope: .singleton) { c in
+                try Self(_flight: c)
                 }
-            }
+                }
+                }
 
-            extension PrimarySource: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension PrimarySource: FlightCore._FlightRegistrable {
+                }
+                """,
             macroSpecs: testMacros
         )
     }
@@ -474,15 +478,16 @@ final class MacroFixtureTests: XCTestCase {
             }
             """,
             expandedSource: """
-            class OpenService {
-            }
+                class OpenService {
+                }
 
-            extension OpenService: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension OpenService: FlightCore._FlightRegistrable {
+                }
+                """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "@Component requires a final class (or a struct). Mark 'OpenService' final.",
+                    message:
+                        "@Component requires a final class (or a struct). Mark 'OpenService' final.",
                     line: 2,
                     column: 7
                 )
@@ -499,20 +504,21 @@ final class MacroFixtureTests: XCTestCase {
             """
             @Component
             final class Tracer {
-                let id: Int
+            let id: Int
             }
             """,
             expandedSource: """
-            final class Tracer {
+                final class Tracer {
                 let id: Int
-            }
+                }
 
-            extension Tracer: FlightCore._FlightRegistrable {
-            }
-            """,
+                extension Tracer: FlightCore._FlightRegistrable {
+                }
+                """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "Stored property 'id' of a @Component type needs a default value — the generated init(_flight:) assigns only @Autowired/@ConfigValue properties.",
+                    message:
+                        "Stored property 'id' of a @Component type needs a default value — the generated init(_flight:) assigns only @Autowired/@ConfigValue properties.",
                     line: 3,
                     column: 5
                 )
@@ -525,22 +531,23 @@ final class MacroFixtureTests: XCTestCase {
         assertMacroExpansion(
             """
             final class Quiet {
-                @Transactional
-                func run() {
-                    work()
-                }
+            @Transactional
+            func run() {
+            work()
+            }
             }
             """,
             expandedSource: """
-            final class Quiet {
+                final class Quiet {
                 func run() {
-                    work()
+                work()
                 }
-            }
-            """,
+                }
+                """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "@Transactional requires a throwing method — mark it 'throws' (rollback needs an error path).",
+                    message:
+                        "@Transactional requires a throwing method — mark it 'throws' (rollback needs an error path).",
                     line: 3,
                     column: 10
                 )

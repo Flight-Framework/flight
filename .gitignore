@@ -6,3 +6,6 @@
 *.swiftmodule
 Package.resolved
 .vscode/
+
+# Exploration scratch, not part of the shipped package
+spikes/

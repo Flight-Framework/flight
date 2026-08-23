@@ -1,4 +1,5 @@
 import Testing
+
 @testable import FlightCore
 
 // Mutually referential singleton pair for runtime cycle checks.
@@ -11,7 +12,7 @@ private final class Boros: @unchecked Sendable {
     init(other: Ouro) { self.other = other }
 }
 
-@Suite("Cycle detection (§2.2)")
+@Suite("Cycle detection")
 struct CycleDetectionTests {
 
     @Test("singleton cycle surfaces at freeze() with the full chain named")
@@ -65,7 +66,7 @@ struct CycleDetectionTests {
     @Test("module dependency cycle is rejected with the chain named")
     func moduleCycle() {
         do {
-            _ = try resolveModuleOrder([CycleModX.self])
+            _ = try Flight.resolveModuleOrder([CycleModX.self])
             Issue.record("expected ModuleGraphError.cycle")
         } catch let error as ModuleGraphError {
             guard case .cycle(let names) = error else {

@@ -1,12 +1,13 @@
 import Testing
+
 @testable import FlightCore
 
-@Suite("Bootstrap sequence (§7) and module health (§6.1)")
+@Suite("Bootstrap sequence and module health")
 struct BootstrapTests {
 
     @Test("assemble wires modules in DAG order and freezes the container")
     func happyPath() throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(values: ["flight.test": "1"]),
             modules: [FakeServerModule.self]  // LoggingModule arrives transitively
         )
@@ -22,7 +23,7 @@ struct BootstrapTests {
 
     @Test("Configuration is a resolvable component before any module configures")
     func configurationFirst() throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(values: ["server.port": "8080"]),
             modules: [LoggingModule.self]
         )
@@ -33,7 +34,8 @@ struct BootstrapTests {
 
     @Test("configure-only modules report .running after assembly")
     func healthRunning() throws {
-        let app = try assemble(configuration: Configuration(), modules: [FakeServerModule.self])
+        let app = try Flight.assemble(
+            configuration: Configuration(), modules: [FakeServerModule.self])
         let statuses = app.container.moduleStatuses()
         #expect(statuses.count == 2)
         for status in statuses {
@@ -47,7 +49,8 @@ struct BootstrapTests {
     @Test("a module throwing in configure fails bootstrap and names itself")
     func configureFailure() {
         do {
-            _ = try assemble(configuration: Configuration(), modules: [BrokenConfigureModule.self])
+            _ = try Flight.assemble(
+                configuration: Configuration(), modules: [BrokenConfigureModule.self])
             Issue.record("expected moduleConfigurationFailed")
         } catch let error as BootstrapError {
             guard case .moduleConfigurationFailed(let module, _) = error else {
@@ -60,9 +63,10 @@ struct BootstrapTests {
         }
     }
 
-    @Test("a failing Service flips its module to .failed (§6.1)")
+    @Test("a failing Service flips its module to .failed")
     func serviceFailureHealth() async throws {
-        let app = try assemble(configuration: Configuration(), modules: [FailingServiceModule.self])
+        let app = try Flight.assemble(
+            configuration: Configuration(), modules: [FailingServiceModule.self])
         let entry = try #require(app.services.first)
 
         await #expect(throws: TestServiceError.self) {
@@ -89,7 +93,7 @@ struct BootstrapTests {
             }
         }
         do {
-            _ = try assemble(configuration: Configuration(), modules: [ExplodingModule.self])
+            _ = try Flight.assemble(configuration: Configuration(), modules: [ExplodingModule.self])
             Issue.record("expected singletonConstructionFailed")
         } catch let error as BootstrapError {
             guard case .singletonConstructionFailed = error else {
@@ -103,13 +107,13 @@ struct BootstrapTests {
 
     @Test("bootstrap returns immediately when no module owns a service")
     func serviceLessBootstrap() async throws {
-        // Valid shape for one-shot CLI-style Flight apps (§7).
-        try await bootstrap(configuration: Configuration(), modules: [LoggingModule.self])
+        // Valid shape for one-shot CLI-style Flight apps.
+        try await Flight.bootstrap(configuration: Configuration(), modules: [LoggingModule.self])
     }
 
-    @Test("a .endsApp service finishing shuts the app down gracefully (delta 9)")
+    @Test("a .endsApp service finishing shuts the app down gracefully")
     func oneShotServiceBootstrap() async throws {
         // Default (.failsApp) would make bootstrap throw serviceFinishedUnexpectedly here.
-        try await bootstrap(configuration: Configuration(), modules: [OneShotModule.self])
+        try await Flight.bootstrap(configuration: Configuration(), modules: [OneShotModule.self])
     }
 }

@@ -1,7 +1,8 @@
 import Testing
+
 @testable import FlightCore
 
-@Suite("Container — two-phase model (§2)")
+@Suite("Container — two-phase model")
 struct ContainerTests {
 
     @Test("singleton resolves to the same instance every time")

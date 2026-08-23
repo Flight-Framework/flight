@@ -1,6 +1,6 @@
 import Synchronization
 
-/// A bounded lifetime that some number of components live and die with (§3).
+/// A bounded lifetime that some number of components live and die with.
 /// Core has no opinion about what creates or ends one — request, job, CLI
 /// invocation are all Web/consumer-layer *interpretations* of this primitive.
 public final class Scope: Sendable {
@@ -13,7 +13,7 @@ public final class Scope: Sendable {
         let value: Any
     }
 
-    // "Internally synchronized; short-lived, low contention expected" (§8).
+    // "Internally synchronized; short-lived, low contention expected".
     // A Mutex (not an actor) because instance lookup must stay synchronous —
     // scoped resolution happens inside synchronous factory bodies.
     private let storage = Mutex<[ComponentKey: StoredInstance]?>([:])
@@ -28,7 +28,7 @@ public final class Scope: Sendable {
     /// concurrent first-touch of the same component, discarded in favor of the
     /// first insert. For request/job-shaped scopes that race is effectively
     /// unreachable; if profiling ever says otherwise, per-key once-flags are
-    /// the upgrade path (measure first — §8).
+    /// the upgrade path (measure first).
     internal func instance(for key: ComponentKey, create: () throws -> Any) throws -> Any {
         let existing = try storage.withLock { map -> StoredInstance? in
             guard let map else { throw ScopeError.closed }
@@ -47,7 +47,7 @@ public final class Scope: Sendable {
         return winner.value
     }
 
-    /// Ends the scope: instances become eligible for cleanup (§3). Called by
+    /// Ends the scope: instances become eligible for cleanup. Called by
     /// `withScope`'s defer; safe to call more than once.
     internal func close() {
         storage.withLock { $0 = nil }
@@ -57,18 +57,18 @@ public final class Scope: Sendable {
 public enum ScopeError: Error, Sendable, CustomStringConvertible {
     case closed
     public var description: String {
-        "Scope used after its withScope body returned — a Scope's lifetime is exactly its body (§3)."
+        "Scope used after its withScope body returned — a Scope's lifetime is exactly its body."
     }
 }
 
 extension Scope {
-    /// The scope the current resolution is running against, if any (delta 11).
+    /// The scope the current resolution is running against, if any.
     ///
     /// Component factories receive only the `Container` — deliberately, so that a
     /// component's dependencies never outlive it by accident. But that left scoped
     /// components unable to *depend on each other*: a scoped repository's factory
     /// had no path to the scope's connection. Flight Data — the second Scope
-    /// consumer (§3) — is what surfaced the gap.
+    /// consumer — is what surfaced the gap.
     ///
     /// `Container.resolve(_:qualifier:in:)` binds this task-local for the
     /// duration of the resolution, so factories running underneath it can
@@ -81,7 +81,7 @@ extension Scope {
 
 extension Container {
     /// Opens a scope, runs `body`, and releases the scope's instances when
-    /// `body` returns. Core has no idea what `body` represents (§3).
+    /// `body` returns. Core has no idea what `body` represents.
     public func withScope<T>(_ body: (Scope) throws -> T) rethrows -> T {
         let scope = Scope()
         defer { scope.close() }
@@ -94,7 +94,7 @@ extension Container {
         return try await body(scope)
     }
 
-    /// Resolution against the ambient scope (delta 11) — the factory-side
+    /// Resolution against the ambient scope — the factory-side
     /// counterpart of `resolve(_:qualifier:in:)`.
     ///
     /// For use inside component factories, which receive only the `Container`: a
@@ -106,15 +106,18 @@ extension Container {
     /// fail loudly at `freeze()` instead of silently pinning one connection
     /// for the app's lifetime.
     ///
-    /// Since delta 12, plain `resolve` performs the same fallback for
+    /// Now plain `resolve` performs the same fallback for
     /// `.scoped` registrations (throwing `scopeRequired` with no scope
     /// bound), so `@Autowired` covers this shape too. This method remains as
     /// the *explicit* spelling: it declares "I expect an ambient scope", and
     /// its distinct `noActiveScope` error names the captive-dependency case
     /// precisely.
-    public func resolveInActiveScope<T>(_ type: T.Type = T.self, qualifier: String? = nil) throws -> T {
+    public func resolveInActiveScope<T: Sendable>(_ type: T.Type = T.self, qualifier: String? = nil)
+        throws -> T
+    {
         guard let scope = Scope.active else {
-            throw ResolutionError.noActiveScope(ComponentKey(type, qualifier: qualifier).description)
+            throw ResolutionError.noActiveScope(
+                ComponentKey(type, qualifier: qualifier).description)
         }
         return try resolve(type, qualifier: qualifier, in: scope)
     }

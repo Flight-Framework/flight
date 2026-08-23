@@ -1,7 +1,8 @@
 import Testing
+
 @testable import FlightCore
 
-@Suite("Scope (§3)")
+@Suite("Scope")
 struct ScopeTests {
 
     private func makeContainer() throws -> Container {
@@ -47,7 +48,7 @@ struct ScopeTests {
             leaked = instance
             #expect(leaked != nil)
         }
-        #expect(leaked == nil, "scope end should make instances eligible for cleanup (§3)")
+        #expect(leaked == nil, "scope end should make instances eligible for cleanup")
     }
 
     @Test("async withScope variant behaves identically")
@@ -75,13 +76,13 @@ struct ScopeTests {
     }
 }
 
-// MARK: - Ambient scope (delta 11)
+// MARK: - Ambient scope
 
 /// A scoped component depending on another scoped component — the shape Flight Data's
-/// scope-bound connections need (its design §3), and the case that surfaced
+/// scope-bound connections need, and the case that surfaced
 /// the gap: factories receive only the Container, so without an ambient
 /// scope a scoped dependency was unreachable from any factory.
-@Suite("Ambient scope (delta 11) — scoped components as dependencies")
+@Suite("Ambient scope — scoped components as dependencies")
 struct ActiveScopeTests {
 
     /// Delta depends on Gamma; both scoped. Epsilon depends on Gamma; transient.
@@ -175,7 +176,7 @@ struct ActiveScopeTests {
     }
 }
 
-// MARK: - Ambient fallback (delta 12)
+// MARK: - Ambient fallback
 
 /// Plain `resolve` — the call `@Autowired` expands to — rides the ambient
 /// scope for `.scoped` registrations. This is the general form of delta 11:
@@ -185,7 +186,7 @@ struct ActiveScopeTests {
 /// a `.scoped` repository. The captive-dependency guarantee is untouched —
 /// no ambient scope (in particular: eager singleton construction at
 /// `freeze()`) still fails loudly.
-@Suite("Ambient fallback (delta 12) — plain resolve rides the active scope")
+@Suite("Ambient fallback — plain resolve rides the active scope")
 struct AmbientFallbackTests {
 
     /// Depends on Gamma through PLAIN resolve — exactly the assignment an
@@ -242,7 +243,9 @@ struct AmbientFallbackTests {
         }
     }
 
-    @Test("a singleton factory plain-resolving a scoped component still fails at freeze (captive dependency)")
+    @Test(
+        "a singleton factory plain-resolving a scoped component still fails at freeze (captive dependency)"
+    )
     func captiveStillCaught() throws {
         final class Captor: Sendable {
             let gamma: Gamma

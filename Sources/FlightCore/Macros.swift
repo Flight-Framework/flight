@@ -1,22 +1,22 @@
 import FlightConfig
 
-/// Compiler-visible marker attached by `@Component` (§5.1). The build
+/// Compiler-visible marker attached by `@Component`. The build
 /// plugin's generator enumerates conformances of this protocol (via source
-/// scanning — see SPIKE-FINDINGS.md for why not symbol graphs) and the
+/// scanning) and the
 /// generated `_registerAll` calls each type's `_flightRegister`.
 public protocol _FlightRegistrable {
     static func _flightRegister(_ container: Container) throws
 }
 
-/// Marks a type as container-managed (§5.1). Expansion:
+/// Marks a type as container-managed. Expansion:
 /// 1. a memberwise resolving initializer `init(_flight:)` that constructs the
-///    type with every `@Autowired` property resolved against the container
-///    and every `@ConfigValue` property resolved against `Configuration`;
+/// type with every `@Autowired` property resolved against the container
+/// and every `@ConfigValue` property resolved against `Configuration`;
 /// 2. a static registration thunk `_flightRegister(_:)`;
 /// 3. conformance to `_FlightRegistrable`.
 ///
 /// The exact expansions are pinned by Tests/FlightCoreMacroTests — those
-/// fixtures are the spec (§5.4), more precise than this comment.
+/// fixtures are the spec, more precise than this comment.
 @attached(member, names: named(init), named(_flightRegister))
 @attached(extension, conformances: _FlightRegistrable)
 public macro Component(
@@ -24,7 +24,7 @@ public macro Component(
     qualifier: String? = nil
 ) = #externalMacro(module: "FlightCoreMacrosImpl", type: "ComponentMacro")
 
-/// Stereotype for business logic and third-party clients (§5.1.1). Expands
+/// Stereotype for business logic and third-party clients. Expands
 /// *identically* to `@Component` except the registration is tagged
 /// `.service` — the tag feeds Actuator's layer grouping and any future AOP
 /// pointcut; resolution never consults it. Lives in Core (not Web/Data)
@@ -37,7 +37,7 @@ public macro Service(
     qualifier: String? = nil
 ) = #externalMacro(module: "FlightCoreMacrosImpl", type: "ServiceMacro")
 
-/// Stereotype for data access (§5.1.1). Same expansion as `@Component`,
+/// Stereotype for data access. Same expansion as `@Component`,
 /// tagged `.repository`. (`@Controller` is deliberately NOT here — it lives
 /// in Flight Web, carrying route metadata meaningless outside HTTP dispatch;
 /// only the `Stereotype.controller` case belongs to Core's vocabulary.)
@@ -48,20 +48,19 @@ public macro Repository(
     qualifier: String? = nil
 ) = #externalMacro(module: "FlightCoreMacrosImpl", type: "RepositoryMacro")
 
-/// Marks a property as container-resolved at construction time (§5.1).
+/// Marks a property as container-resolved at construction time.
 /// A pure marker: the generated code lives in `@Component`'s expansion; this
 /// macro's own expansion is empty and exists to validate the attachment site.
 /// When two properties share a type, explicit qualifiers are *required* —
-/// `@Component` emits a compile error otherwise (§5.4 fixture 6: Flight picks
-/// "compile error forcing a qualifier" over silent positional guessing).
+/// `@Component` emits a compile error otherwise.
 @attached(peer)
 public macro Autowired(_ qualifier: String? = nil) =
     #externalMacro(module: "FlightCoreMacrosImpl", type: "AutowiredMacro")
 
-/// Marks a property as config-resolved instead (§5.1). Same macro family,
+/// Marks a property as config-resolved instead. Same macro family,
 /// same registration thunk.
 ///
-/// The no-default form is a *required* key: per Flight Config §5, the build
+/// The no-default form is a *required* key: per Flight Config, the build
 /// plugin checks it against flight.yaml (the base layer) at compile time —
 /// absent there and with no default is a build error at this site. A key
 /// present in base but overridden per-environment still resolves normally;
@@ -71,7 +70,7 @@ public macro Autowired(_ qualifier: String? = nil) =
 public macro ConfigValue(_ key: String) =
     #externalMacro(module: "FlightCoreMacrosImpl", type: "ConfigValueMacro")
 
-/// The optional-key form (Flight Config §5): `default:` applies when the key
+/// The optional-key form (Flight Config): `default:` applies when the key
 /// is absent from every source. A key that is present but *malformed* still
 /// fails module configuration loudly — the expansion resolves through
 /// `Configuration.getIfPresent`, so a bad value throws instead of being
@@ -81,7 +80,7 @@ public macro ConfigValue<T: ConfigDecodable>(_ key: String, default: T) =
     #externalMacro(module: "FlightCoreMacrosImpl", type: "ConfigValueMacro")
 
 /// Wraps a method body in begin/commit/rollback against the task-local
-/// `FlightTransactions.coordinator` (§5.2). A flat compile-time expansion —
+/// `FlightTransactions.coordinator`. A flat compile-time expansion —
 /// no runtime proxy, fully inspectable. Requires a `throws` method (rollback
 /// semantics are meaningless without an error path); works on both sync and
 /// `async` methods.

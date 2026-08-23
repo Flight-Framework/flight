@@ -17,7 +17,7 @@ struct FlightCoreMacrosPlugin: CompilerPlugin {
 
 /// Shared diagnostic shape. Every Flight macro diagnostic names the fix, not
 /// just the problem — these fire at build time and are the first impression
-/// of the compile-time-first pitch (§5.3).
+/// of the compile-time-first pitch.
 struct FlightMacroDiagnostic: DiagnosticMessage {
     let message: String
     let id: String

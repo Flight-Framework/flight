@@ -2,6 +2,7 @@
 // Flight Core — DI container + compile-time-first registration.
 // See README.md for build status and known-risk notes.
 import PackageDescription
+import Foundation
 import CompilerPluginSupport
 
 let package = Package(
@@ -83,6 +84,11 @@ let package = Package(
             dependencies: ["flight-registration-gen"]
         ),
         .testTarget(
+            name: "FlightRegistrationGenTests",
+            dependencies: ["flight-registration-gen"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
             name: "FlightCoreTests",
             dependencies: [
                 "FlightCore",
@@ -103,3 +109,10 @@ let package = Package(
         ),
     ]
 )
+
+// Documentation tooling only, gated so consumers never resolve it.
+if ProcessInfo.processInfo.environment["FLIGHT_CORE_BUILD_DOCS"] != nil {
+    package.dependencies.append(
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.3.0")
+    )
+}

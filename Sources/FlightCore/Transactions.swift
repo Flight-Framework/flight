@@ -1,4 +1,4 @@
-/// The seam `@Transactional`'s expansion targets (§5.2).
+/// The seam `@Transactional`'s expansion targets.
 ///
 /// Core owns only the *shape* of transaction coordination — begin, commit,
 /// rollback around a wrapped body — never a datasource. Flight Data supplies
@@ -6,13 +6,13 @@
 /// pipelines can carry different coordinators); Core ships a no-op default so
 /// `@Transactional` code is runnable and testable without Flight Data.
 ///
-/// The coordinator's methods are synchronous on purpose: §5.4's fixture list
+/// The coordinator's methods are synchronous on purpose: 's fixture list
 /// requires `@Transactional` to work on *synchronous* throwing methods, and a
 /// sync method body cannot await. A coordinator that fronts async I/O bridges
 /// internally (connection checkout at begin is Flight Data's concern). If
 /// that bridge proves ugly in practice, the deliberate fix is a second
 /// async-native coordinator protocol — recorded as an open question in
-/// SPIKE-FINDINGS.md, not silently designed around here.
+/// the design notes, not silently designed around here.
 public protocol FlightTransactionCoordinator: Sendable {
     func begin() throws -> FlightTransactionToken
     func commit(_ token: FlightTransactionToken) throws
@@ -26,10 +26,11 @@ public struct FlightTransactionToken: Sendable, Hashable {
     public init(id: UInt64) { self.id = id }
 }
 
-/// Async-native coordination (delta 14) — the resolution of SPIKE-FINDINGS'
-/// "sync vs async coordinator" open question, chosen deliberately once the
-/// sync bridge had a real cost to point at (Flight Data Postgres delta P2:
-/// every BEGIN/COMMIT/ROLLBACK blocked a thread on an `EventLoopFuture`).
+/// Async-native transaction coordination.
+///
+/// The synchronous coordinator came first, and it had a real cost: a
+/// database adapter's `BEGIN`/`COMMIT`/`ROLLBACK` each blocked a thread on a
+/// future. This is the async-native path adapters should implement.
 ///
 /// `@Transactional` on an *async* method prefers this coordinator when one
 /// is bound, so control statements are awaited instead of blocked on; on a
@@ -48,10 +49,11 @@ public protocol FlightAsyncTransactionCoordinator: Sendable {
 public enum FlightTransactions {
     /// Task-local so coordinators compose with structured concurrency; the
     /// default makes @Transactional a no-op wrapper outside Flight Data.
-    @TaskLocal public static var coordinator: any FlightTransactionCoordinator = NoopTransactionCoordinator()
+    @TaskLocal public static var coordinator: any FlightTransactionCoordinator =
+        NoopTransactionCoordinator()
 
     /// The async-native coordinator, when the bound datasource offers one
-    /// (delta 14). `nil` by default — an async `@Transactional` method then
+    ///. `nil` by default — an async `@Transactional` method then
     /// falls back to `coordinator`, so sync-only coordinators (and Core's
     /// no-op default) keep working unchanged.
     @TaskLocal public static var asyncCoordinator: (any FlightAsyncTransactionCoordinator)?
@@ -78,11 +80,19 @@ public enum FlightTransactions {
     }
 
     public static func rollbackPreferringAsync(_ token: FlightTransactionToken) async {
-        if let asyncCoordinator {
-            await asyncCoordinator.rollback(token)
-        } else {
+        guard let asyncCoordinator else {
             coordinator.rollback(token)
+            return
         }
+        // A transaction body that threw CancellationError leaves this task
+        // already cancelled, and a coordinator whose rollback performs real
+        // I/O would have that I/O fail immediately — leaving the transaction
+        // open, silently, because rollback is deliberately non-throwing.
+        // Run it in a detached task so the cleanup gets an uncancelled
+        // context, and wait for it so the guarantee still holds on return.
+        await Task.detached(priority: Task.currentPriority) {
+            await asyncCoordinator.rollback(token)
+        }.value
     }
 }
 

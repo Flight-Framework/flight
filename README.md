@@ -1,168 +1,168 @@
-# Flight Core
+# flight-core
 
-The DI container and compile-time-first registration layer of Flight — a
-Spring Boot analogue for server-side Swift. Implements the flight-core design
-doc: two-phase `Container`, `Scope`, `FlightModule` + deterministic module
-DAG, `@Component` (+ `@Service`/`@Repository` stereotypes, §5.1.1) /
-`@Autowired`/`@ConfigValue`/`@Transactional` macros, the
-`FlightRegistrationPlugin` build plugin, ServiceLifecycle-based bootstrap, and
-introspection (`ComponentDescriptor`, `ModuleHealth`).
+Dependency injection and application bootstrap for Swift servers.
 
-## Build status
-
-**Builds and passes all tests** — verified 2026-07-15 against Swift 6.2.3 on
-Linux (x86_64): `swift build` clean, 59/59 tests green (43 swift-testing
-runtime tests, 16 XCTest macro fixtures), and the §10 spike probes executed
-(results recorded in SPIKE-FINDINGS.md → "Empirical run results").
-
-**Flight Config is wired in** (2026-07-14): the placeholder `Configuration`
-seam (delta 5) is resolved — Core now depends on the real package at
-[`../../Config/flight-config`](../../Config/flight-config/README.md) and
-re-exports it, so `import FlightCore` provides the full config API
-(`Configuration.load()`, YAML layering, `FlightEnvironment`, sources).
-With it came the rest of the Flight Config §5 surface: `@ConfigValue` gained
-the `default:` form, and `FlightRegistrationPlugin` now checks no-default
-`@ConfigValue` keys against the app's `flight.yaml` at build time — a
-missing key is a compile error at the property, not a startup surprise.
-
-The package was originally written to spec without a toolchain; the shakedown
-run needed only four mechanical fixes, all recorded in SPIKE-FINDINGS.md:
-`@MainActor` on two generator helpers, a `sending`-compliant instance box in
-`Scope`, the fixture harness moving to `macroSpecs:` (so declared conformances
-reach the extension macro), and the predicted one-pass fixture whitespace
-alignment. The feared swift-syntax / PackagePlugin / ServiceLifecycle API
-churn did not materialize.
-
-Constraints surfaced by the run (details in SPIKE-FINDINGS.md):
-
-- **M-2**: `@Component`'s generated `init(_flight:)` suppresses a type's
-  implicit default `init()`; construct components by hand via
-  `try T(_flight: container)` or declare an init.
-- **M-3**: non-injected stored properties of a `@Component` need default
-  values; `@Component` diagnoses this at the property (`component.uninitialized`).
-- **Delta 9**: `FlightModule.serviceCompletion` (default `.failsApp`) lets a
-  bounded one-shot service end the app gracefully instead of failing the group.
-
-A runnable end-to-end tour — including the build plugin, which nothing in the
-test suite exercises — lives in [`../flight-demo`](../flight-demo/README.md)
-(`swift run` from that directory).
-
-**Registration-scan generalization** (2026-07-15, for Flight Web §4): the
-generator's source scan now recognizes `@Controller` alongside `@Component`
-(`ComponentVisitor.registrableAttributes`) — the "one registration pipeline,
-different entry kinds" extension point. Name-level only; Core references no
-Flight Web types.
-
-**Ambient-scope fallback** (2026-07-17, delta 12): plain `resolve` — the call
-`@Autowired` expands to — now rides the ambient scope for `.scoped`
-registrations, so a `.scoped` component can `@Autowired` another `.scoped` component
-(`@Service(scope: .scoped)` over a scoped repository, the shape Flight Data
-needs). Previously only hand-written factories could bridge this, via
-`resolveInActiveScope` (delta 11). Resolving a scoped component with *no* ambient
-scope still throws `scopeRequired`, so captive dependencies still fail loudly
-at `freeze()`. Pinned by `AmbientFallbackTests`.
-
-**Async-native transactions** (2026-07-17, delta 14): the "sync vs async
-coordinator" open question is resolved. `FlightAsyncTransactionCoordinator` +
-`FlightTransactions.asyncCoordinator` (nil-default task-local) let a
-datasource offer awaited begin/commit/rollback; `@Transactional` on an
-*async* method routes through `begin/commit/rollbackPreferringAsync` — the
-async-native coordinator when bound, the sync coordinator otherwise — so
-async transactional work no longer rides a thread-blocking bridge. Sync
-methods and their expansion are unchanged.
-
-**Stereotypes** (2026-07-15, design §5.1.1): `@Service` and `@Repository`
-live in Core and expand *identically* to `@Component` — same
-`_FlightRegistrable` marker, same thunk — tagging the registration with a
-`Stereotype` carried on `ComponentDescriptor` (Actuator groups its dashboard by
-layer; the tag is also the pointcut for any future default AOP policy).
-Hand registrations take `register(_:qualifier:scope:stereotype:)`, defaulting
-to `.component`. The `@Controller` *macro* is Flight Web's; Core holds only
-the enum case and the generator scan. Delta 10 in SPIKE-FINDINGS.md.
-
-## Requirements
-
-- Swift 6.1+ toolchain (`@attached(body)` for `@Transactional` shipped in 6.0;
-  the plugin URL APIs and tools-version want 6.1).
-- macOS 15+ or Linux with a Swift 6.1 toolchain.
-
-## Build & test
-
-```sh
-swift build
-swift test                                   # runtime + macro fixture suites
-./spikes/BuildPluginSpike/run-spike.sh       # empirical §10 probes (see EXPECTED.md)
-```
-
-## Using it
+Components declare themselves with an attribute. A build plugin wires them
+together and checks the graph at compile time. Bootstrap builds the container
+once, freezes it, and runs your services under a `ServiceGroup`.
 
 ```swift
-import FlightCore
-
-@Component
-final class GreetingService {
-    @ConfigValue("greeting.name") let name: String          // required — build-checked against flight.yaml
-    @ConfigValue("greeting.excitement", default: 1) let excitement: Int
-    func greet() -> String { "hello, \(name)" + String(repeating: "!", count: excitement) }
+@Service
+final class UserService: Sendable {
+    @Autowired var repository: any UserRepository
+    @ConfigValue("features.signup_enabled", default: true) var signupEnabled: Bool
 }
 
-@Component
-public final class Greeter {
-    @Autowired let service: GreetingService
-}
-
-struct AppModule: FlightModule {
-    func configure(_ container: Container) throws {
-        // Generated by FlightRegistrationPlugin from every @Component in
-        // this target + Flight-based dependency targets:
-        try flightRegisterAll(container)
-    }
-}
-
-@main struct Main {
+@main
+struct App {
     static func main() async throws {
-        try await bootstrap(
-            // FLIGHT_ENV → flight.yaml + flight-{env}.yaml + FLIGHT_* env
-            // vars, resolved once into an immutable value (Flight Config).
-            // Tests use Configuration(values: ["greeting.name": "flight"]).
+        try await Flight.bootstrap(
             configuration: try Configuration.load(),
-            modules: [AppModule.self]
+            modules: [WebModule.self, DataModule.self]
         )
     }
 }
 ```
 
-Wire the plugin on the app target:
+## Installation
 
 ```swift
-.executableTarget(
-    name: "App",
+dependencies: [
+    .package(url: "https://github.com/Swift-Flight/flight-core", from: "0.1.0")
+]
+```
+
+```swift
+.target(
+    name: "MyApp",
     dependencies: [.product(name: "FlightCore", package: "flight-core")],
     plugins: [.plugin(name: "FlightRegistrationPlugin", package: "flight-core")]
 )
 ```
 
-## Layout
+Requires Swift 6.2+. Linux and macOS 15+.
 
+## Two phases, and why it matters
+
+A container is mutable while it registers and immutable afterwards.
+
+**Registration.** Modules run in dependency order and register what they
+provide. Single-threaded, by construction — no concurrency exists yet.
+
+**Frozen.** `freeze()` eagerly constructs every singleton, then seals the
+container. From that point resolution is a dictionary read with no lock, safe
+from any thread, and a factory that was going to fail has already failed —
+during startup, where you can see it.
+
+That split is what makes resolution cheap enough to do per request, and it is
+why a registration after `freeze()` is a programmer error rather than a
+supported operation.
+
+## Components are `Sendable`
+
+`register` and `resolve` both require it. A dependency container that vends a
+mutable, non-`Sendable` singleton to two actors has handed them a data race
+with no diagnostic — the container is exactly the place where shared state
+gets shared, so the requirement belongs here.
+
+```swift
+@Service final class UserService: Sendable { }        // ✅
+final class Counter { var count = 0 }                 // ❌ won't compile
 ```
-Sources/FlightCore/            runtime: Container, Scope, modules, bootstrap,
-                               transactions seam, macro declarations
-Sources/FlightCoreMacrosImpl/  compiler plugin: Component/Autowired/ConfigValue/
-                               Transactional implementations
-Sources/flight-registration-gen/  SwiftParser-based codegen tool
-Plugins/FlightRegistrationPlugin/ build tool plugin invoking the tool
-Tests/FlightCoreTests/         swift-testing runtime suites (+ Support/LoggingModule,
-                               the §4-mandated second FlightModule conformance)
-Tests/FlightCoreMacroTests/    the §5.4 fixture suite — normative expansions
-spikes/BuildPluginSpike/       ready-to-run §10 probes + EXPECTED.md predictions
-SPIKE-FINDINGS.md              research-backed spike answers + design deltas
+
+For per-request mutable state, use `.scoped` — one instance per request,
+never shared across them.
+
+## Lifetimes
+
+| Lifetime | One instance per | Constructed |
+|---|---|---|
+| `.singleton` | application | eagerly, at `freeze()` |
+| `.scoped` | request (or explicit `Scope`) | on first resolve in the scope |
+| `.transient` | resolution | every time |
+
+Resolving a `.scoped` component with no active scope throws rather than
+silently handing back a singleton — the captive-dependency bug is a real one
+and it is worth a hard error.
+
+## Compile-time wiring
+
+The build plugin scans your sources, generates the registration code, and
+checks the graph before anything runs:
+
+- **Missing registrations** are reported at build time, not at first request.
+- **Dependency cycles** are reported with the cycle named.
+- **`@ConfigValue` keys** are checked against `flight.yaml`.
+- **Existential bridges** are synthesized: a protocol with exactly one
+  conformer is resolvable as `any Protocol` without hand-written glue.
+
+A component that is registered by hand rather than scanned is acknowledged
+with a comment, so the check does not have to choose between false positives
+and silence:
+
+```swift
+// flight:hand-registered
+@Autowired var external: SomethingFromAnotherLibrary
 ```
 
-## Deliberately not here
+> The plugin is a `BuildToolPlugin` and runs under SwiftPM. Xcode projects do
+> not run it, so an Xcode-only target needs its registrations written by hand.
 
-Flight Web/NIO transport, Actuator endpoints, and real transaction
-coordinators (Flight Data). Core registers no opinion about any of them
-beyond the seams they plug into. (Flight Config *used* to be on this list as
-a placeholder seam — it is now the real package at
-`../../Config/flight-config`, and Core's `Configuration.swift` is just the
-re-export.)
+## Modules
+
+A module declares what it needs and registers what it provides:
+
+```swift
+struct DataModule: FlightModule {
+    static let dependencies: [any FlightModule.Type] = [ConfigModule.self]
+
+    static func configure(_ container: Container) throws {
+        container.register(DataSource.self, scope: .singleton) { c in
+            PostgresDataSource(configuration: try c.resolve(Configuration.self))
+        }
+    }
+}
+```
+
+Order is resolved from the declared dependencies and is deterministic: the
+same module set always produces the same order. A cycle is a startup error
+naming the modules involved.
+
+## Transactions
+
+`@Transactional` wraps a method in a coordinator-managed transaction:
+
+```swift
+@Transactional
+func transfer(from: Account, to: Account, amount: Decimal) async throws {
+    try await debit(from, amount)
+    try await credit(to, amount)   // a throw here rolls back the debit
+}
+```
+
+The coordinator is supplied by your data layer. Rollback runs in a detached
+task so that a body which threw `CancellationError` — a client disconnecting
+mid-request, a shutdown — still gets its transaction closed rather than
+leaving it open on a cancelled task.
+
+## Testing
+
+`Flight.assemble` builds and freezes without running anything:
+
+```swift
+let app = try Flight.assemble(configuration: config, modules: [AppModule.self])
+let service = try app.container.resolve(UserService.self)
+```
+
+Registering a test double is an ordinary registration — no special support
+needed, because the container is just a container.
+
+## Documentation
+
+```bash
+FLIGHT_CORE_BUILD_DOCS=1 swift package generate-documentation --target FlightCore
+```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

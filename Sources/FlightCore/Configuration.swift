@@ -1,6 +1,6 @@
 /// Flight Config's `Configuration`, re-exported.
 ///
-/// This file was the placeholder seam (SPIKE-FINDINGS delta 5) while Flight
+/// This file was the placeholder seam while Flight
 /// Config was a separate, not-yet-built package. The real package now lives
 /// at `Config/flight-config` and Core depends on it; as designed, the seam
 /// swap changed no Core API — `bootstrap(configuration:)`'s signature and the

@@ -5,7 +5,7 @@
 // module in scope (the target itself plus its recursive source-module
 // dependencies that sit atop FlightCore), and the output path.
 //
-// Mechanism note (§10, revised — see SPIKE-FINDINGS.md): symbol graphs are
+// Mechanism note: symbol graphs are
 // not available to build tool plugins, so this tool scans *source text* with
 // SwiftParser. It emits one flat `flightRegisterAll(_:)` for the whole graph
 // visible from the target, which preserves the aggregation contract ("one
@@ -77,7 +77,7 @@ struct ScannedComponent {
 
 /// One `@ConfigValue` site. `key` is nil when the key expression isn't a
 /// plain string literal (interpolation) — not statically checkable, so the
-/// §5 check skips it and the runtime throw remains the backstop.
+/// the check skips it and the runtime throw remains the backstop.
 struct ScannedConfigValue {
     let key: String?
     let hasDefault: Bool
@@ -92,12 +92,14 @@ struct ScannedConfigValue {
 /// is easy to add; supporting it silently before deciding it's wanted is not).
 final class ComponentVisitor: SyntaxVisitor {
     /// Attribute names that mark a type as `_FlightRegistrable`. This is the
-    /// Flight Web §4 "one registration pipeline, different entry kinds"
+    /// Flight Web's "one registration pipeline, different entry kinds"
     /// extension point: `@Controller` expands to the same `_flightRegister`
     /// thunk as `@Component`, so the generator's only job is knowing the
     /// *name* — it never references another package's types, keeping the
     /// "Core imports nothing above it" boundary intact at the code level.
-    static let registrableAttributes: Set<String> = ["Component", "Service", "Repository", "Controller"]
+    static let registrableAttributes: Set<String> = [
+        "Component", "Service", "Repository", "Controller",
+    ]
 
     let module: String
     let file: String
@@ -116,25 +118,28 @@ final class ComponentVisitor: SyntaxVisitor {
     }
 
     override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
-        collect(name: node.name.text, attributes: node.attributes,
-                modifiers: node.modifiers, members: node.memberBlock,
-                inheritanceClause: node.inheritanceClause, position: node.position)
+        collect(
+            name: node.name.text, attributes: node.attributes,
+            modifiers: node.modifiers, members: node.memberBlock,
+            inheritanceClause: node.inheritanceClause, position: node.position)
         return .skipChildren
     }
 
     override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
-        collect(name: node.name.text, attributes: node.attributes,
-                modifiers: node.modifiers, members: node.memberBlock,
-                inheritanceClause: node.inheritanceClause, position: node.position)
+        collect(
+            name: node.name.text, attributes: node.attributes,
+            modifiers: node.modifiers, members: node.memberBlock,
+            inheritanceClause: node.inheritanceClause, position: node.position)
         return .skipChildren
     }
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
         if let clause = node.inheritanceClause, !clause.inheritedTypes.isEmpty {
-            extensionConformances.append((
-                typeName: node.extendedType.trimmedDescription,
-                protocols: clause.inheritedTypes.map { $0.type.trimmedDescription }
-            ))
+            extensionConformances.append(
+                (
+                    typeName: node.extendedType.trimmedDescription,
+                    protocols: clause.inheritedTypes.map { $0.type.trimmedDescription }
+                ))
         }
         return .skipChildren
     }
@@ -150,7 +155,9 @@ final class ComponentVisitor: SyntaxVisitor {
         let registrable = attributes.lazy
             .compactMap { $0.as(AttributeSyntax.self) }
             .first {
-                guard let name = $0.attributeName.as(IdentifierTypeSyntax.self)?.name.text else { return false }
+                guard let name = $0.attributeName.as(IdentifierTypeSyntax.self)?.name.text else {
+                    return false
+                }
                 return Self.registrableAttributes.contains(name)
             }
         guard let registrable else { return }
@@ -163,7 +170,8 @@ final class ComponentVisitor: SyntaxVisitor {
         for member in members.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
             if hasAttribute(variable.attributes, named: "Autowired"),
-               let type = variable.bindings.first?.typeAnnotation?.type.trimmedDescription {
+                let type = variable.bindings.first?.typeAnnotation?.type.trimmedDescription
+            {
                 // `member.description` spans the member's leading trivia
                 // through its last token's trailing trivia, so the marker is
                 // found whether it sits on the line above the property or as
@@ -176,35 +184,41 @@ final class ComponentVisitor: SyntaxVisitor {
             }
             if let attribute = attribute(of: variable.attributes, named: "ConfigValue") {
                 let propertyLocation = converter.location(for: variable.position)
-                configValues.append(ScannedConfigValue(
-                    key: literalKey(of: attribute),
-                    hasDefault: hasLabeledArgument(attribute, label: "default"),
-                    file: file,
-                    line: propertyLocation.line
-                ))
+                configValues.append(
+                    ScannedConfigValue(
+                        key: literalKey(of: attribute),
+                        hasDefault: hasLabeledArgument(attribute, label: "default"),
+                        file: file,
+                        line: propertyLocation.line
+                    ))
             }
         }
         let location = converter.location(for: position)
-        components.append(ScannedComponent(
-            module: module,
-            typeName: name,
-            isPublic: isPublic,
-            scopeText: labeledArgumentSource(of: registrable, label: "scope") ?? ".singleton",
-            qualifierText: labeledArgumentSource(of: registrable, label: "qualifier"),
-            conformanceNames: inheritanceClause?.inheritedTypes.map { $0.type.trimmedDescription } ?? [],
-            autowiredTypeNames: autowired,
-            acknowledgedTypeNames: acknowledged,
-            configValues: configValues,
-            file: file,
-            line: location.line
-        ))
+        components.append(
+            ScannedComponent(
+                module: module,
+                typeName: name,
+                isPublic: isPublic,
+                scopeText: labeledArgumentSource(of: registrable, label: "scope") ?? ".singleton",
+                qualifierText: labeledArgumentSource(of: registrable, label: "qualifier"),
+                conformanceNames: inheritanceClause?.inheritedTypes.map {
+                    $0.type.trimmedDescription
+                } ?? [],
+                autowiredTypeNames: autowired,
+                acknowledgedTypeNames: acknowledged,
+                configValues: configValues,
+                file: file,
+                line: location.line
+            ))
     }
 
     private func hasAttribute(_ attributes: AttributeListSyntax, named name: String) -> Bool {
         attribute(of: attributes, named: name) != nil
     }
 
-    private func attribute(of attributes: AttributeListSyntax, named name: String) -> AttributeSyntax? {
+    private func attribute(of attributes: AttributeListSyntax, named name: String)
+        -> AttributeSyntax?
+    {
         for element in attributes {
             guard let attribute = element.as(AttributeSyntax.self) else { continue }
             if attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text == name {
@@ -218,8 +232,8 @@ final class ComponentVisitor: SyntaxVisitor {
     /// literal, which makes the site unverifiable statically.
     private func literalKey(of attribute: AttributeSyntax) -> String? {
         guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
-              let first = arguments.first, first.label == nil,
-              let literal = first.expression.as(StringLiteralExprSyntax.self)
+            let first = arguments.first, first.label == nil,
+            let literal = first.expression.as(StringLiteralExprSyntax.self)
         else { return nil }
         var key = ""
         for segment in literal.segments {
@@ -230,7 +244,9 @@ final class ComponentVisitor: SyntaxVisitor {
     }
 
     private func hasLabeledArgument(_ attribute: AttributeSyntax, label: String) -> Bool {
-        guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self) else { return false }
+        guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self) else {
+            return false
+        }
         return arguments.contains { $0.label?.text == label }
     }
 
@@ -238,7 +254,9 @@ final class ComponentVisitor: SyntaxVisitor {
     /// mirroring the macro's labeledArgumentSource, so generated bridges can
     /// never disagree with the thunk about scope or qualifier.
     private func labeledArgumentSource(of attribute: AttributeSyntax, label: String) -> String? {
-        guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self) else { return nil }
+        guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self) else {
+            return nil
+        }
         for argument in arguments where argument.label?.text == label {
             let text = argument.expression.trimmedDescription
             return text == "nil" ? nil : text
@@ -256,7 +274,8 @@ var errorCount = 0
 // single-threaded top-level code either way).
 @MainActor
 func emit(_ severity: String, _ message: String, file: String, line: Int) {
-    FileHandle.standardError.write("\(file):\(line):1: \(severity): \(message)\n".data(using: .utf8)!)
+    FileHandle.standardError.write(
+        "\(file):\(line):1: \(severity): \(message)\n".data(using: .utf8)!)
     if severity == "error" { errorCount += 1 }
 }
 
@@ -264,7 +283,8 @@ func emit(_ severity: String, _ message: String, file: String, line: Int) {
 
 let arguments = CommandLine.arguments
 guard arguments.count == 2 else {
-    FileHandle.standardError.write("usage: flight-registration-gen <manifest.json>\n".data(using: .utf8)!)
+    FileHandle.standardError.write(
+        "usage: flight-registration-gen <manifest.json>\n".data(using: .utf8)!)
     exit(2)
 }
 
@@ -273,7 +293,8 @@ do {
     let data = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
     manifest = try JSONDecoder().decode(Manifest.self, from: data)
 } catch {
-    FileHandle.standardError.write("flight-registration-gen: cannot read manifest: \(error)\n".data(using: .utf8)!)
+    FileHandle.standardError.write(
+        "flight-registration-gen: cannot read manifest: \(error)\n".data(using: .utf8)!)
     exit(2)
 }
 
@@ -281,8 +302,11 @@ var components: [ScannedComponent] = []
 var extensionConformances: [(typeName: String, protocols: [String])] = []
 for module in manifest.modules {
     for file in module.files {
-        guard let source = try? String(contentsOf: URL(fileURLWithPath: file), encoding: .utf8) else {
-            emit("warning", "Flight codegen could not read source file (skipped).", file: file, line: 1)
+        guard let source = try? String(contentsOf: URL(fileURLWithPath: file), encoding: .utf8)
+        else {
+            emit(
+                "warning", "Flight codegen could not read source file (skipped).", file: file,
+                line: 1)
             continue
         }
         // Cheap pre-filter before full parse; scanning is on the hot path of
@@ -291,8 +315,10 @@ for module in manifest.modules {
         // this admits most real files, but the parse it saves was always the
         // cheap part; the filter's remaining job is skipping generated and
         // resource-adjacent sources.
-        guard ComponentVisitor.registrableAttributes.contains(where: { source.contains("@\($0)") })
-                || source.contains("extension") else { continue }
+        guard
+            ComponentVisitor.registrableAttributes.contains(where: { source.contains("@\($0)") })
+                || source.contains("extension")
+        else { continue }
         let tree = Parser.parse(source: source)
         let visitor = ComponentVisitor(module: module.name, file: file, tree: tree)
         visitor.walk(tree)
@@ -321,7 +347,7 @@ if !extensionConformances.isEmpty {
     }
 }
 
-// MARK: - Existential bridge synthesis (§5.3, demand-driven)
+// MARK: - Existential bridge synthesis
 //
 // The stereotype macros register a component under its CONCRETE type key;
 // `@Autowired var x: (any P)` resolves the EXISTENTIAL key. Nothing used to
@@ -356,7 +382,7 @@ func existentialProtocolName(_ typeText: String) -> String? {
     guard text.hasPrefix("any ") else { return nil }
     let name = String(text.dropFirst("any ".count)).trimmingCharacters(in: .whitespaces)
     guard !name.isEmpty,
-          name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." })
+        name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." })
     else { return nil }
     return name
 }
@@ -401,7 +427,8 @@ func synthesizeBridges() -> [SynthesizedBridge] {
         case 0:
             continue  // The missing-registration warning below covers this.
         case 1:
-            bridges.append(SynthesizedBridge(protocolName: demand.protocolName, component: conformers[0]))
+            bridges.append(
+                SynthesizedBridge(protocolName: demand.protocolName, component: conformers[0]))
         default:
             emit(
                 "warning",
@@ -415,7 +442,7 @@ func synthesizeBridges() -> [SynthesizedBridge] {
 let bridges = synthesizeBridges()
 let bridgedProtocolBaseNames = Set(bridges.map { baseName($0.protocolName) })
 
-// MARK: - Validation (§5.3, best-effort at name level)
+// MARK: - Validation
 
 // Missing-registration checks are *warnings*: components registered by hand inside
 // a module's configure(_:) are invisible to a source scanner, so an unknown
@@ -430,8 +457,12 @@ for component in components {
     for dependency in component.autowiredTypeNames {
         // Demands satisfied by a synthesized bridge are no longer suspicious.
         if let name = existentialProtocolName(dependency),
-           bridgedProtocolBaseNames.contains(baseName(name)) { continue }
-        let base = dependency
+            bridgedProtocolBaseNames.contains(baseName(name))
+        {
+            continue
+        }
+        let base =
+            dependency
             .replacingOccurrences(of: "?", with: "")
             .trimmingCharacters(in: .whitespaces)
         if !knownTypeNames.contains(base) && !alwaysAvailable.contains(base) {
@@ -457,7 +488,9 @@ func detectCycles() {
         if inProgress.contains(name) {
             let cycleStart = stack.firstIndex(of: name) ?? 0
             let chain = (stack[cycleStart...] + [name]).joined(separator: " → ")
-            emit("error", "Dependency cycle among @Component types: \(chain)", file: component.file, line: component.line)
+            emit(
+                "error", "Dependency cycle among @Component types: \(chain)", file: component.file,
+                line: component.line)
             return
         }
         inProgress.insert(name)
@@ -489,7 +522,7 @@ where component.module != manifest.targetModuleName && !component.isPublic {
     )
 }
 
-// MARK: - @ConfigValue key check (Flight Config §5, compile-time case)
+// MARK: - @ConfigValue key check (compile-time case)
 //
 // A @ConfigValue key with no `default:` must exist in flight.yaml — the base
 // layer, present in every environment. Absent from both is a *compile error*
@@ -521,11 +554,15 @@ func checkConfigKeys() {
             )
             errorCount += 1
         } else {
-            emit("error", "flight.yaml could not be loaded for the @ConfigValue key check: \(error)", file: baseURL.path, line: 1)
+            emit(
+                "error", "flight.yaml could not be loaded for the @ConfigValue key check: \(error)",
+                file: baseURL.path, line: 1)
         }
         return
     } catch {
-        emit("error", "flight.yaml could not be loaded for the @ConfigValue key check: \(error)", file: baseURL.path, line: 1)
+        emit(
+            "error", "flight.yaml could not be loaded for the @ConfigValue key check: \(error)",
+            file: baseURL.path, line: 1)
         return
     }
 
@@ -556,32 +593,33 @@ let sorted = components.sorted {
 let dependencyModules = Set(sorted.map(\.module)).subtracting([manifest.targetModuleName]).sorted()
 
 var out = """
-// AUTO-GENERATED by flight-registration-gen — do not edit.
-// Target: \(manifest.targetModuleName)
-// Components: \(sorted.count), existential bridges: \(bridges.count)
+    // AUTO-GENERATED by flight-registration-gen — do not edit.
+    // Target: \(manifest.targetModuleName)
+    // Components: \(sorted.count), existential bridges: \(bridges.count)
 
-import FlightCore
+    import FlightCore
 
-"""
+    """
 for module in dependencyModules {
     out += "import \(module)\n"
 }
 out += """
 
-/// Registers every @Component visible from \(manifest.targetModuleName)
-/// (its own sources plus all Flight-based dependency modules). Call this
-/// from a FlightModule's configure(_:) or directly before freeze().
-public func flightRegisterAll(_ container: FlightCore.Container) throws {
-"""
+    /// Registers every @Component visible from \(manifest.targetModuleName)
+    /// (its own sources plus all Flight-based dependency modules). Call this
+    /// from a FlightModule's configure(_:) or directly before freeze().
+    public func flightRegisterAll(_ container: FlightCore.Container) throws {
+    """
 if sorted.isEmpty {
-    out += "\n    // No @Component types found in scope.\n"
+    out += "\n // No @Component types found in scope.\n"
 } else {
     out += "\n"
     for component in sorted {
-        let qualified = component.module == manifest.targetModuleName
+        let qualified =
+            component.module == manifest.targetModuleName
             ? component.typeName
             : "\(component.module).\(component.typeName)"
-        out += "    try \(qualified)._flightRegister(container)\n"
+        out += " try \(qualified)._flightRegister(container)\n"
     }
 }
 if !bridges.isEmpty {
@@ -591,11 +629,12 @@ if !bridges.isEmpty {
         // with exactly one scanned conformer resolves through that conformer,
         // mirroring its scope. A `// flight:hand-registered` marker on the
         // demanding property suppresses the bridge.
-    """
+        """
     out += "\n"
     for bridge in bridges {
         let component = bridge.component
-        let concrete = component.module == manifest.targetModuleName
+        let concrete =
+            component.module == manifest.targetModuleName
             ? component.typeName
             : "\(component.module).\(component.typeName)"
         let qualifierArgument = component.qualifierText.map { ", qualifier: \($0)" } ?? ""
@@ -603,12 +642,14 @@ if !bridges.isEmpty {
         // factory runs, resolution of the scoped existential key has already
         // bound the ambient scope, and the explicit spelling keeps the
         // captive-dependency error precise. Everything else is a plain resolve.
-        let resolveCall = component.scopeText.hasSuffix("scoped")
+        let resolveCall =
+            component.scopeText.hasSuffix("scoped")
             ? "try c.resolveInActiveScope(\(concrete).self\(qualifierArgument))"
             : "try c.resolve(\(concrete).self\(qualifierArgument))"
-        out += "    container.register((any \(bridge.protocolName)).self, scope: \(component.scopeText)) { c in\n"
-        out += "        \(resolveCall)\n"
-        out += "    }\n"
+        out +=
+            " container.register((any \(bridge.protocolName)).self, scope: \(component.scopeText)) { c in\n"
+        out += " \(resolveCall)\n"
+        out += " }\n"
     }
 }
 out += "}\n"
@@ -621,6 +662,7 @@ do {
     )
     try out.write(to: outputURL, atomically: true, encoding: .utf8)
 } catch {
-    FileHandle.standardError.write("flight-registration-gen: cannot write output: \(error)\n".data(using: .utf8)!)
+    FileHandle.standardError.write(
+        "flight-registration-gen: cannot write output: \(error)\n".data(using: .utf8)!)
     exit(2)
 }

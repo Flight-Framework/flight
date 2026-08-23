@@ -1,23 +1,23 @@
 import Synchronization
 
-/// The Flight DI container (§2).
+/// The Flight DI container.
 ///
 /// ## The two-phase model, as implemented
 ///
 /// - **Registration phase** — from `init()` until `freeze()`. Strictly
-///   single-threaded *by contract* (bootstrap runs `configure(_:)` serially,
-///   §7 step 6). Registration state is therefore held in plain vars guarded
-///   by preconditions, not locks — a lock here would launder a contract
-///   violation into silent misbehavior instead of a loud trap.
+/// single-threaded *by contract* (bootstrap runs `configure(_:)` serially,
+/// the step 6). Registration state is therefore held in plain vars guarded
+/// by preconditions, not locks — a lock here would launder a contract
+/// violation into silent misbehavior instead of a loud trap.
 /// - **Resolution phase** — from the moment `freeze()` returns. `frozenStorage`
-///   is written exactly once, and every concurrent reader lives in a task
-///   created *after* `freeze()` returns (bootstrap hands services to the
-///   ServiceGroup only after step 7). Task creation establishes the
-///   happens-before edge, so the publication is ordered without any fence,
-///   lock, or atomic — this is the §8 "post-freeze case likely needs no
-///   synchronization primitive whatsoever" claim, made concrete. The
-///   `nonisolated(unsafe)` below is the single, documented place where that
-///   argument is load-bearing.
+/// is written exactly once, and every concurrent reader lives in a task
+/// created *after* `freeze()` returns (bootstrap hands services to the
+/// ServiceGroup only after step 7). Task creation establishes the
+/// happens-before edge, so the publication is ordered without any fence,
+/// lock, or atomic — this is the "post-freeze case likely needs no
+/// synchronization primitive whatsoever" claim, made concrete. The
+/// `nonisolated(unsafe)` below is the single, documented place where that
+/// argument is load-bearing.
 ///
 /// `@unchecked Sendable` is justified by exactly the reasoning above; if the
 /// two-phase contract ever changes, this annotation is the first thing to
@@ -26,7 +26,15 @@ public final class Container: @unchecked Sendable {
 
     // MARK: - Registration-phase state (single-threaded by contract)
 
-    private enum Phase { case registering, freezing, frozen }
+    private enum Phase { case registering, freezing, frozen, failed }
+
+    /// The first duplicate registration seen, reported by ``freeze()``.
+    ///
+    /// Recorded rather than trapped: generated code and hand-written code can
+    /// legitimately collide, and that is a wiring problem for the bootstrap
+    /// sequence to report — not a reason to abort the process from inside a
+    /// registration call the developer did not write.
+    private var duplicateRegistration: ComponentKey?
     private var phase: Phase = .registering
     private var registrations: [ComponentKey: Registration] = [:]
     private var order: [ComponentKey] = []
@@ -40,7 +48,7 @@ public final class Container: @unchecked Sendable {
 
     nonisolated(unsafe) private var frozenStorage: FrozenStorage?
 
-    // MARK: - Module health (§6.1) — mutated during the service-run phase,
+    // MARK: - Module health — mutated during the service-run phase,
     // so unlike component storage this genuinely needs synchronization.
 
     private struct HealthState {
@@ -54,8 +62,8 @@ public final class Container: @unchecked Sendable {
     // MARK: - Registration
 
     /// Only callable during the registration phase. Traps if called after
-    /// `freeze()` — programmer error, not a runtime condition (§2.1).
-    public func register<T>(
+    /// `freeze()` — programmer error, not a runtime condition.
+    public func register<T: Sendable>(
         _ type: T.Type,
         qualifier: String? = nil,
         scope: Lifetime,
@@ -64,13 +72,16 @@ public final class Container: @unchecked Sendable {
     ) {
         precondition(
             phase == .registering,
-            "Container.register called after freeze(). Registration is only legal during the bootstrap registration phase (§2.1)."
+            "Container.register called after freeze(). Registration is only legal during the bootstrap registration phase."
         )
         let key = ComponentKey(type, qualifier: qualifier)
-        precondition(
-            registrations[key] == nil,
-            "Duplicate registration for \(key). Use a qualifier to register multiple components of one type."
-        )
+        if registrations[key] != nil {
+            // Reachable without a hand-written mistake: a generated existential
+            // bridge can collide with a hand-written registration, and that is
+            // a wiring problem to report, not a reason to abort the process.
+            duplicateRegistration = duplicateRegistration ?? key
+            return
+        }
         let descriptor = ComponentDescriptor(
             typeName: key.typeName,
             scope: scope,
@@ -84,19 +95,40 @@ public final class Container: @unchecked Sendable {
         order.append(key)
     }
 
-    /// Called once by bootstrap after all modules have configured (§7 step 7).
+    /// Called once by bootstrap after all modules have configured.
     /// Irreversible for the lifetime of the process.
     ///
     /// Deviation from the spec doc's `freeze()` signature, deliberately:
     /// singletons are constructed eagerly *here* (that eagerness is what makes
     /// post-freeze resolution a pure read), and a factory failure at startup
     /// must surface as an error to the already-throwing bootstrap sequence,
-    /// not a trap. Recorded in SPIKE-FINDINGS.md → Design deltas.
+    /// not a trap.
+    /// - Throws: whatever an eager singleton's factory throws. On failure the
+    /// container moves to a terminal failed state: it reports
+    /// ``isFrozen`` as `false`, refuses further registration, and refuses to
+    /// resolve. Previously a thrown `freeze()` left the container mid-freeze
+    /// — `isFrozen` said `false` while `resolve` happily handed out
+    /// partially-constructed singletons.
     public func freeze() throws {
-        precondition(phase == .registering, "freeze() called more than once.")
+        precondition(
+            phase == .registering,
+            phase == .failed
+                ? "freeze() called on a container whose previous freeze() failed. Build a new container."
+                : "freeze() called more than once."
+        )
+        if let duplicate = duplicateRegistration {
+            phase = .failed
+            throw BootstrapError.duplicateRegistration(duplicate.description)
+        }
         phase = .freezing
-        for key in order where registrations[key]?.scope == .singleton {
-            _ = try resolveAny(key: key)
+        do {
+            for key in order where registrations[key]?.scope == .singleton {
+                _ = try resolveAny(key: key)
+            }
+        } catch {
+            phase = .failed
+            singletonsUnderConstruction = [:]
+            throw error
         }
         frozenStorage = FrozenStorage(
             registrations: registrations,
@@ -111,11 +143,12 @@ public final class Container: @unchecked Sendable {
 
     // MARK: - Resolution
 
-    /// Safe to call concurrently post-freeze; no isolation required (§2.1).
+    /// Safe to call concurrently post-freeze; no isolation required.
     /// Throws `ResolutionError.notRegistered` as the fallback for genuinely
-    /// dynamic resolution (§5.3) — the macro-generated path is validated at
+    /// dynamic resolution — the macro-generated path is validated at
     /// compile time and should never hit it.
-    public func resolve<T>(_ type: T.Type = T.self, qualifier: String? = nil) throws -> T {
+    public func resolve<T: Sendable>(_ type: T.Type = T.self, qualifier: String? = nil) throws -> T
+    {
         let key = ComponentKey(type, qualifier: qualifier)
         let value = try resolveAny(key: key)
         guard let typed = value as? T else {
@@ -127,19 +160,23 @@ public final class Container: @unchecked Sendable {
         return typed
     }
 
-    /// Scoped resolution (§3). `.singleton`/`.transient` components resolved through
+    /// Scoped resolution. `.singleton`/`.transient` components resolved through
     /// this overload behave exactly as plain `resolve` — a component's scope is a
     /// property of its registration, not of the call site.
     ///
     /// The whole resolution runs with `Scope.active` bound to `scope`
-    /// (delta 11), and since delta 12 plain `resolve` consults that binding
+    ///, and since delta 12 plain `resolve` consults that binding
     /// for `.scoped` registrations — so this overload is now exactly "bind
     /// the scope, then resolve". Factories underneath it (including a
     /// transient's) resolve further scoped components against the same scope
     /// through either plain `resolve` or the explicit `resolveInActiveScope`.
-    public func resolve<T>(_ type: T.Type = T.self, qualifier: String? = nil, in scope: Scope) throws -> T {
+    public func resolve<T: Sendable>(
+        _ type: T.Type = T.self, qualifier: String? = nil, in scope: Scope
+    ) throws -> T {
         guard frozenStorage != nil else {
-            preconditionFailure("Scoped resolution requires a frozen container — scopes exist only in the resolution phase (§3).")
+            preconditionFailure(
+                "Scoped resolution requires a frozen container — scopes exist only in the resolution phase."
+            )
         }
         return try Scope.$active.withValue(scope) {
             try resolve(type, qualifier: qualifier)
@@ -187,7 +224,7 @@ public final class Container: @unchecked Sendable {
         // on the bootstrap thread), so plain vars remain sound here.
         precondition(
             phase == .freezing,
-            "resolve() called during the registration phase — resolution begins at freeze() (§2.1)."
+            "resolve() called during the registration phase — resolution begins at freeze()."
         )
         guard let registration = registrations[key] else {
             throw ResolutionError.notRegistered(key.description)
@@ -205,7 +242,7 @@ public final class Container: @unchecked Sendable {
         }
     }
 
-    // MARK: - Runtime cycle detection (§2.2, dynamic-factory fallback)
+    // MARK: - Runtime cycle detection
 
     private enum ResolutionStack {
         // TaskLocal rather than thread-local: correct under Swift's
@@ -225,7 +262,7 @@ public final class Container: @unchecked Sendable {
         }
     }
 
-    // MARK: - Introspection (§6)
+    // MARK: - Introspection
 
     public func allRegistrations() -> [ComponentDescriptor] {
         if let frozen = frozenStorage {
@@ -236,12 +273,13 @@ public final class Container: @unchecked Sendable {
         return order.compactMap { registrations[$0]?.descriptor }
     }
 
-    // MARK: - Module health (§6.1)
+    // MARK: - Module health
 
     internal func beginHealthTracking(moduleNames: [String]) {
         healthState.withLock { state in
             state.order = moduleNames
-            state.map = Dictionary(uniqueKeysWithValues: moduleNames.map { ($0, ModuleHealth.notStarted) })
+            state.map = Dictionary(
+                uniqueKeysWithValues: moduleNames.map { ($0, ModuleHealth.notStarted) })
         }
     }
 

@@ -1,7 +1,8 @@
 import Testing
+
 @testable import FlightCore
 
-@Suite("Introspection (§6)")
+@Suite("Introspection")
 struct IntrospectionTests {
 
     @Test("allRegistrations reflects registration order, scope, and qualifier")
@@ -20,7 +21,7 @@ struct IntrospectionTests {
         #expect(descriptors[0].typeName.contains("Alpha"))
         #expect(descriptors[0].scope == .singleton)
         #expect(descriptors[0].qualifier == nil)
-        // Hand registrations default to the generic layer (§5.1.1).
+        // Hand registrations default to the generic layer.
         #expect(descriptors[0].stereotype == .component)
 
         #expect(descriptors[1].typeName.contains("Beta"))
@@ -31,9 +32,10 @@ struct IntrospectionTests {
         #expect(descriptors[2].qualifier == "special")
     }
 
-    @Test("sourceModule is stamped from the configuring module (§6)")
+    @Test("sourceModule is stamped from the configuring module")
     func sourceModuleStamping() throws {
-        let app = try assemble(configuration: Configuration(), modules: [FakeServerModule.self])
+        let app = try Flight.assemble(
+            configuration: Configuration(), modules: [FakeServerModule.self])
         let descriptors = app.container.allRegistrations()
 
         let sink = try #require(descriptors.first { $0.typeName.contains("TestLogSink") })
