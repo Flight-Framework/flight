@@ -49,7 +49,7 @@ struct HostileQualifierModule: FlightModule {
 
 /// A module whose service fails during the run phase — the only way module
 /// health legitimately reaches `.failed` on a live container (Flight Core
-/// §6.1: configure failures abort bootstrap entirely).
+///: configure failures abort bootstrap entirely).
 struct FailingServiceModule: FlightModule {
     struct Boom: Error, CustomStringConvertible {
         var description: String { "boom: the flux capacitor de-fluxed" }

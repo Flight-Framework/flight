@@ -1,18 +1,13 @@
 import FlightCore
 
-// Presentation vocabulary over Core's introspection types (§3). Core keeps
+// Presentation vocabulary over Core's introspection types. Core keeps
 // `ModuleHealth`/`Lifetime`/`Stereotype` free of rendering concerns; the
 // labels both renderings share live here so JSON and SSR can never disagree
 // about what a state is called.
 
 extension ModuleHealth {
-    /// True only for `.failed`. The predicate the design doc's own test
-    /// leans on (§6) — checking health without pattern-matching an enum
-    /// that carries a non-Equatable `any Error`.
-    public var isFailed: Bool {
-        if case .failed = self { return true }
-        return false
-    }
+    // `isFailed` is Flight Core's own — declaring it here too made every use
+    // ambiguous once Core added it.
 
     public var isRunning: Bool {
         if case .running = self { return true }
@@ -64,7 +59,7 @@ extension Stereotype {
     }
 
     /// Section heading for the SSR dashboard's layer grouping (Flight Core
-    /// §5.1.1: the stereotype tag exists to feed exactly this grouping).
+    ///: the stereotype tag exists to feed exactly this grouping).
     var actuatorSectionTitle: String {
         switch self {
         case .component: return "Components"

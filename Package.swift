@@ -1,6 +1,6 @@
 // swift-tools-version: 6.1
 // Flight Actuator — HTTP introspection surface for a running Flight app
-// (flight-actuator-design.md). A leaf package: a consumer of Core/Web/Config,
+// A leaf package: a consumer of Core/Web/Config,
 // not infrastructure anything else builds on.
 import PackageDescription
 

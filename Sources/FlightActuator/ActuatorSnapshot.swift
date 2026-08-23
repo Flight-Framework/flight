@@ -1,6 +1,6 @@
 import FlightCore
 
-/// Everything the dashboard serves, assembled per request (§3): data Core
+/// Everything the dashboard serves, assembled per request: data Core
 /// already tracks as a natural consequence of bootstrap — no new
 /// instrumentation, no caching or polling layer. Both underlying calls are
 /// cheap reads against frozen (or externally-tracked, for module health)
@@ -20,7 +20,7 @@ public struct ActuatorSnapshot: Sendable {
         self.beans = beans
     }
 
-    /// The per-request assembly the controller performs (§3), as a public
+    /// The per-request assembly the controller performs, as a public
     /// convenience for anyone building their own surface over the same data.
     public init(container: Container, environment: FlightEnvironment) {
         self.init(
@@ -31,7 +31,7 @@ public struct ActuatorSnapshot: Sendable {
     }
 }
 
-// MARK: - JSON rendering (§5)
+// MARK: - JSON rendering
 
 /// Hand-written encoding rather than retroactive `Codable` conformances on
 /// Core's types: the JSON shape is Actuator's public contract for external

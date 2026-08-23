@@ -1,9 +1,9 @@
 import FlightCore
 
-// SSR rendering (§5): deliberately basic, plain server-rendered HTML — a
+// SSR rendering: deliberately basic, plain server-rendered HTML — a
 // heading, a table of modules with health status, tables of beans grouped by
 // layer. No CSS framework, no client-side JS, no dependency on the future
-// reactive templating engine (Flight Web §6.3 scopes that as a separate,
+// reactive templating engine (Flight Web scopes that as a separate,
 // later package — this is not it). String-templated generation is sufficient
 // here; if these needs ever grow past "sufficient," that's a reason to
 // revisit, not to over-build now.
@@ -72,7 +72,7 @@ private func renderBeansSection(_ beans: [ComponentDescriptor]) -> String {
     guard !beans.isEmpty else {
         return section + "<p>No beans registered.</p>\n"
     }
-    // Grouped by layer (Flight Core §5.1.1: the stereotype tag exists to
+    // Grouped by layer (Flight Core: the stereotype tag exists to
     // feed exactly this grouping), registration order preserved within each.
     for stereotype in Stereotype.actuatorSectionOrder {
         let group = beans.filter { $0.stereotype == stereotype }

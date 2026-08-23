@@ -4,7 +4,7 @@ import FlightWeb
 import FlightWebTesting
 import Testing
 
-/// §3/§6: the snapshot is a plain assembly of what Core already tracks —
+/// The snapshot is a plain assembly of what Core already tracks —
 /// no HTTP round-trip required to test it.
 @Suite("ActuatorSnapshot assembly")
 struct SnapshotTests {
@@ -44,7 +44,7 @@ struct SnapshotTests {
     func snapshotReflectsModuleFailure() async throws {
         // The real health path: assemble tracks health externally, and the
         // health-wrapped service records the failure on the live container.
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(),
             modules: [FailingServiceModule.self]
         )
@@ -68,12 +68,12 @@ struct SnapshotTests {
 
     @Test("configured modules report running health")
     func configuredModulesRunning() throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(),
             modules: [FailingServiceModule.self]
         )
         // Configure succeeded and the service has not run yet: .running
-        // (Flight Core §6.1 — registration-only view of a configured module).
+        // (Flight Core — registration-only view of a configured module).
         let snapshot = ActuatorSnapshot(container: app.container, environment: .test)
         #expect(snapshot.modules.count == 1)
         #expect(snapshot.modules[0].health.isRunning)

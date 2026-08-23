@@ -5,7 +5,7 @@ import FlightWebTesting
 import HTTPTypes
 import Testing
 
-/// §5: `actuator.format` read once at bootstrap. Absent → ssr; present but
+///: `actuator.format` read once at bootstrap. Absent → ssr; present but
 /// malformed → loud bootstrap failure, never a silent default.
 @Suite("Format configuration")
 struct ConfigTests {

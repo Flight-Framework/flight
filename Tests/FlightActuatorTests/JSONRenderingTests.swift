@@ -6,7 +6,7 @@ import Foundation
 import HTTPTypes
 import Testing
 
-/// The Decodable mirror of Actuator's public JSON contract (§5) — decoded
+/// The Decodable mirror of Actuator's public JSON contract — decoded
 /// with plain JSONDecoder to pin the wire shape, not just round-trip it.
 struct SnapshotWire: Decodable {
     struct Module: Decodable {
@@ -33,7 +33,7 @@ struct JSONRenderingTests {
         try TestContainer.build(
             configuration: Configuration(values: ["actuator.format": "json"])
         ) {
-            ActuatorModule(environment: environment)
+            ActuatorModule(environment: environment, exposure: .full)
             SampleAppModule()
         }
     }
@@ -70,14 +70,14 @@ struct JSONRenderingTests {
         #expect(qualified.compactMap(\.qualifier).sorted() == ["primary", "secondary"])
 
         // Actuator's own machinery is visible through the same introspection
-        // as everything else — no side channel, no special casing (§2).
+        // as everything else — no side channel, no special casing.
         #expect(wire.beans.contains { $0.type == "FlightActuator.ActuatorController" })
         #expect(wire.beans.contains { $0.type == "FlightWeb.RouteRegistration" })
     }
 
     @Test("a failed module encodes health 'failed' with its error")
     func failedModuleOnTheWire() async throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(),
             modules: [FailingServiceModule.self]
         )
@@ -95,7 +95,7 @@ struct JSONRenderingTests {
 
     @Test("a healthy module encodes with a null error")
     func healthyModuleOnTheWire() throws {
-        let app = try assemble(configuration: Configuration(), modules: [FailingServiceModule.self])
+        let app = try Flight.assemble(configuration: Configuration(), modules: [FailingServiceModule.self])
         let snapshot = ActuatorSnapshot(container: app.container, environment: .dev)
         let data = try JSONEncoder().encode(snapshot)
         let wire = try JSONDecoder().decode(SnapshotWire.self, from: data)

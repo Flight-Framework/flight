@@ -6,7 +6,7 @@ import Foundation
 import HTTPTypes
 import Testing
 
-/// The real bootstrap path (Flight Core §7): `assemble` with
+/// The real bootstrap path (Flight Core): `assemble` with
 /// `ActuatorModule.self` as a module *type* — instantiated via `init()`,
 /// health-tracked, source-module-stamped — then served through the full
 /// dispatch pipeline.
@@ -22,7 +22,7 @@ struct IntegrationTests {
 
     @Test("assemble → dispatch → dashboard, end to end")
     func endToEnd() async throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(values: ["actuator.format": "json"]),
             modules: [ActuatorModule.self, SampleAppModule.self]
         )
@@ -33,7 +33,7 @@ struct IntegrationTests {
         })
         #expect(controller.sourceModule == "ActuatorModule")
 
-        // Both modules configured → running (Flight Core §6.1).
+        // Both modules configured → running (Flight Core).
         let client = try TestClient(container: app.container)
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
@@ -52,7 +52,7 @@ struct IntegrationTests {
 
     @Test("actuator registers no service — it is request-response only")
     func noLongRunningService() throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(),
             modules: [ActuatorModule.self]
         )
@@ -63,7 +63,7 @@ struct IntegrationTests {
     func reportsGateEnvironment() async throws {
         // Module constructed with an explicit environment; the page must
         // report that same value even though FLIGHT_ENV says "dev".
-        let container = try TestContainer.build { ActuatorModule(environment: .staging) }
+        let container = try TestContainer.build { ActuatorModule(environment: .staging, exposure: .full) }
         let client = try TestClient(container: container)
         let body = await client.get("/actuator").bodyText
         #expect(body.contains("Environment: <strong>staging</strong>"))

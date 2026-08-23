@@ -21,7 +21,7 @@ struct HTMLRenderingTests {
     @Test("page lists environment, beans, and layer sections")
     func pageContents() async throws {
         let container = try TestContainer.build {
-            ActuatorModule(environment: .staging)
+            ActuatorModule(environment: .staging, exposure: .full)
             SampleAppModule()
         }
         let client = try TestClient(container: container)
@@ -30,7 +30,7 @@ struct HTMLRenderingTests {
         #expect(body.contains("Environment: <strong>staging</strong>"))
         #expect(body.contains("FlightActuatorTests.SampleService"))
         #expect(body.contains("FlightActuatorTests.SampleRepository"))
-        // Layer grouping (Flight Core §5.1.1): non-empty sections render as
+        // Layer grouping (Flight Core): non-empty sections render as
         // headed tables, entry points first.
         #expect(body.contains("<h3>Services (1)</h3>"))
         #expect(body.contains("<h3>Repositories (1)</h3>"))
@@ -55,7 +55,7 @@ struct HTMLRenderingTests {
 
     @Test("a failed module renders its health and error detail")
     func rendersModuleFailure() async throws {
-        let app = try assemble(
+        let app = try Flight.assemble(
             configuration: Configuration(),
             modules: [FailingServiceModule.self]
         )

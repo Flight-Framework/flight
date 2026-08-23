@@ -2,15 +2,13 @@
 
 A lightweight, no-frills introspection surface for a running Flight app —
 what beans are registered, which modules are healthy, basic runtime facts —
-served over HTTP. The design rationale lives in
-[flight-actuator-design.md](flight-actuator-design.md); this README covers
-usage and records where the implementation had to make choices the design
-left open.
+served over HTTP. This README covers usage and records the choices the
+implementation had to make.
 
 ## Usage
 
 Actuator is an ordinary `FlightModule` — registered like everything else,
-with no special access to Core or Web (§2):
+with no special access to Core or Web:
 
 ```swift
 import FlightActuator
@@ -37,13 +35,13 @@ actuator:
 (or `FLIGHT_ACTUATOR_FORMAT=json` via the env-var config layer). The key is
 read once at bootstrap. An absent key means SSR; a present-but-malformed
 value fails bootstrap loudly, naming the key and value — never a silent
-fallback (Flight Config §5).
+fallback (Flight Config).
 
-## Access gating (§4.1)
+## Access gating
 
 In `.prod` (per `FLIGHT_ENV`) the routes are simply **not registered** —
 `/actuator` does not exist in the route table, so there is nothing to probe
-or misconfigure. Prod access is a seam reserved for Flight Security (§4.2)
+or misconfigure. Prod access is a seam reserved for Flight Security
 and deliberately not built.
 
 For tests and embedders, `ActuatorModule(environment:)` bypasses the
@@ -83,21 +81,18 @@ changing this wire format.
 Recorded here the same way sibling packages record theirs:
 
 1. **`ActuatorController` is a plain struct, hand-registered — not
-   `@Controller`.** An early revision used `@Controller` (the design's own
-   §4.1 sketch, `container.register(ActuatorController.self, scope:
-   .singleton) { ... }`, was implemented as the macro instead) and broke the
+   `@Controller`.** An early revision used `@Controller` and broke the
    moment a real app depended on this package: Flight Core's registration
    plugin scans *every* recursive source-module dependency that sits atop
    FlightCore — right for an app-owned library target, wrong for a starter
    package with its own `FlightModule`. A downstream app's generated
    `flightRegisterAll` tried to register `ActuatorController` itself,
-   unconditionally — bypassing the `.prod` gate entirely (§4.1's whole
+   unconditionally — bypassing the `.prod` gate entirely (whole
    point) and colliding with the registration `ActuatorModule` already
    performs. Every sibling starter (`flight-web`, `flight-pubsub`,
    `flight-channels`, `flight-data-postgres`) avoids this the same way: none
    of them put `@Component`/`@Controller` on their own infrastructure.
-   Restored to the design doc's original sketch: `ActuatorModule.configure`
-   registers the controller and its route by hand (`registerRoute`, the
+   `ActuatorModule.configure` registers the controller and its routes by hand (`registerRoute`, the
    escape hatch `@GetMapping` sits beside).
 2. **The container is no longer a registered bean at all.** A consequence
    of (1): `ActuatorController` now holds `container` as a plain stored
@@ -122,7 +117,7 @@ Recorded here the same way sibling packages record theirs:
    `Configuration.getIfPresent(_:as:) ?? .ssr`, not `get(_:default:)`: the
    latter is non-throwing and `fatalError`s on a malformed *present* value;
    `getIfPresent` throws instead, so a malformed value still fails module
-   configuration loudly (§5) rather than trapping the process — the same
+   configuration loudly rather than trapping the process — the same
    distinction the `@ConfigValue` macro's own `default:` expansion relies
    on.
 
@@ -133,7 +128,7 @@ whatever `@Controller`'s own stereotype-tagging does upstream.
 
 ## Testing
 
-No HTTP round-trip is required to test the data assembly (§6) —
+No HTTP round-trip is required to test the data assembly —
 `ActuatorSnapshot` is a plain `Sendable` struct assembled from
 `Container.moduleStatuses()` / `allRegistrations()`. The suite covers
 environment gating, snapshot assembly (including a module whose service
@@ -144,8 +139,52 @@ HTML escaping of hostile registration metadata, and config resolution:
 swift test
 ```
 
+## What gets published, and where
+
+| exposure | `/actuator/health` | `/actuator` |
+|---|---|---|
+| `disabled` | — | — |
+| `health_only` | yes | — |
+| `full` | yes | yes |
+
+The default is `full` in `dev`, `development`, `test`, and `local`, and
+`health_only` everywhere else — **including any environment name this
+package does not recognize**.
+
+That last clause is the point. The gate used to be `environment != .prod`,
+which fails open twice over: an unset `FLIGHT_ENV` resolves to `dev`, and
+`production`, `PROD`, `prd`, and `live` are all not-`.prod` too. Each of
+them published the dashboard — the module list, every registered
+component's fully-qualified type name, and failure messages —
+unauthenticated, on a deployment whose operator believed otherwise.
+Getting the environment name wrong now costs you a dashboard instead of
+leaking one.
+
+`/actuator/health` is published wherever the actuator is enabled at all,
+because an orchestrator needs a probe in production and the old
+all-or-nothing gate left production with none. It answers `200`/`UP` when
+every module is running and `503`/`DOWN` otherwise, with counts and nothing
+else — no component list, no type names, no failure text. It is safe to
+publish unauthenticated precisely because of what it leaves out.
+
+To opt a non-development environment into the dashboard:
+
+```sh
+FLIGHT_ACTUATOR_EXPOSURE=full
+```
+
+That is an environment variable rather than a `flight.yaml` key because it
+decides whether a route is *registered at all*, and registration happens
+before configuration is resolvable. It is the env-var spelling of
+`actuator.exposure` under Flight Config's own convention. An unrecognized
+value stops startup rather than quietly choosing for you.
+
+**Put authentication in front of it.** `full` in an environment reachable
+by anyone else needs `requireAuthentication` (Flight Security Core) ordered
+ahead of the route. This package does not authenticate anything itself.
+
 ## Non-goals
 
-No auth (until Flight Security exists), no live-updating dashboard, no
-historical/metrics data, no per-bean instance inspection — see design doc
-§7.
+No live-updating dashboard, no historical/metrics data, and no per-bean
+instance inspection.
+
