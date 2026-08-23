@@ -35,10 +35,11 @@ jobs:
       - name: Test
         run: swift test --enable-all-traits
 
-      # The lean configuration is a supported consumption mode, so it is
-      # built too: this is what a consumer using only the container gets.
-      - name: Build with defaults disabled
-        run: swift build --disable-default-traits
+      # A root build compiles every target regardless of traits, so it cannot
+      # verify the lean configuration. This builds an actual consumer and
+      # fails if any gated dependency leaked into its resolution.
+      - name: Lean consumer resolves no gated dependency
+        run: ./CI/check-lean-consumer.sh
 
   lint:
     # Advisory only. Seven of the eight merged packages predate the shared

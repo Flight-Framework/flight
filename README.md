@@ -39,6 +39,48 @@ Per-product documentation lives in [Docs/](Docs/).
 ])
 ```
 
+## Traits
+
+Merging eight packages into one would otherwise hand every consumer the union
+of their dependencies. Two traits prevent that — SwiftPM resolves only what an
+enabled trait reaches.
+
+| Trait | Default | Brings |
+| --- | --- | --- |
+| `Web` | **on** | HTTP, WebSockets, SSE, Channels, Presence, actuator — Hummingbird, NIO, the TLS stack |
+| `Security` | off | `FlightSecurityCore` — JWTKit, AsyncHTTPClient. Enables `Web`. |
+
+`Web` is on by default, so an application that serves HTTP needs no trait
+ceremony at all. Authentication is opt-in:
+
+```swift
+.package(url: "https://github.com/Swift-Flight/flight.git",
+         from: "0.1.0", traits: ["defaults", "Security"])
+```
+
+And a consumer that wants only the container and lifecycle opts out, which
+drops it from 28 resolved packages to 7:
+
+```swift
+.package(url: "https://github.com/Swift-Flight/flight.git",
+         from: "0.1.0", traits: [])
+```
+
+### Building this repository
+
+A root build compiles every target regardless of traits, so it needs them all
+enabled:
+
+```
+swift build --enable-all-traits
+swift test  --enable-all-traits
+```
+
+A plain `swift build` here fails by design — the trait-gated targets find
+their dependencies pruned. `CI/check-lean-consumer.sh` verifies the lean
+configuration the only way that proves anything: by building a real consumer
+and asserting no gated dependency reached it.
+
 ## Backends
 
 Database and cache drivers deliberately live outside this package, in
@@ -52,4 +94,5 @@ builds in Swift 6 language mode.
 
 ## Testing
 
-`swift test` — 685 tests across 14 suites, no external services required.
+`swift test --enable-all-traits` — 685 tests across 14 targets, no external
+services required.
