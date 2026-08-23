@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Swift ${{ matrix.swift }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        swift: ["6.2"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: ${{ matrix.swift }}
+
+      - name: Build (warnings are errors)
+        run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Test
+        run: swift test
+
+  docs:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2"
+
+      # Fails the job on any DocC warning, so a broken symbol link or an
+      # unresolved guide reference cannot land on main.
+      - name: Generate documentation
+        env:
+          SWIFT_CONFIG_BUILD_DOCS: "1"
+        run: |
+          swift package --allow-writing-to-directory ./docs \
+            generate-documentation --target FlightConfig \
+            --warnings-as-errors --output-path ./docs
+
+  # macOS is expected to fail until swift-configuration builds against Apple's
+  # Foundation. It uses `Data.bytes`, which ships with the Linux toolchain's
+  # swift-foundation but is not in the macOS SDK on any available runner
+  # image. Kept visible rather than deleted so the day it starts passing is
+  # obvious, but non-blocking because it is not something this package can fix.
+  #
+  #   .build/checkouts/swift-configuration/Sources/Configuration/Providers/
+  #     Files/FileProvider.swift:189: error: value of type 'Data' has no member 'bytes'
+  macos:
+    name: Test (macOS, upstream-blocked)
+    runs-on: macos-15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2"
+
+      - name: Build
+        run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Test
+        run: swift test
