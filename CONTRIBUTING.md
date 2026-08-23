@@ -25,7 +25,10 @@ SWIFT_CONFIG_BUILD_DOCS=1 swift package generate-documentation \
     --target FlightConfig --warnings-as-errors
 ```
 
-CI runs exactly these, on Linux and macOS, against Swift 6.0 and 6.2.
+CI runs exactly these, on Linux and macOS, against Swift 6.2.
+
+Swift 6.2 is the floor because swift-configuration declares tools version
+6.2; this package cannot go lower while depending on it.
 
 ## The rule that governs most decisions here
 

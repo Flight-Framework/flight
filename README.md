@@ -30,7 +30,7 @@ dependencies: [
 ])
 ```
 
-Requires Swift 6.0+. Supports macOS 15+, iOS 18+, tvOS 18+, watchOS 11+,
+Requires Swift 6.2+ (inherited from swift-configuration). Supports macOS 15+, iOS 18+, tvOS 18+, watchOS 11+,
 visionOS 2+, and Linux.
 
 ## Layering
