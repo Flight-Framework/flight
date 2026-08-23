@@ -7,7 +7,7 @@ import HTTPTypes
 ///
 ///     struct UserResponse: Codable, ResponseEncodable {}   // JSON, 200
 ///
-/// Status-code inference: values encode as 200 by default; `Void` handlers
+/// HTTPResponse.Status-code inference: values encode as 200 by default; `Void` handlers
 /// answer 204; `nil` optionals answer 404. Anything else returns `Response`
 /// directly (or uses `Response.json(_:status:)`).
 ///
@@ -26,7 +26,7 @@ extension Response: ResponseEncodable {
 /// The default for domain types: JSON body, 200, application/json.
 extension ResponseEncodable where Self: Encodable {
     public func response(for context: RequestContext) throws -> Response {
-        try .json(self)
+        try .json(self, encoder: context.coders.jsonEncoder)
     }
 }
 
@@ -54,7 +54,7 @@ extension Optional: ResponseEncodable where Wrapped: ResponseEncodable {
 
 extension Array: ResponseEncodable where Element: Encodable {
     public func response(for context: RequestContext) throws -> Response {
-        try .json(self)
+        try .json(self, encoder: context.coders.jsonEncoder)
     }
 }
 

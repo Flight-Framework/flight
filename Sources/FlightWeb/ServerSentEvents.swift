@@ -54,7 +54,7 @@ extension Response {
     public static func serverSentEvents(
         _ produce: @escaping @Sendable (ServerSentEventWriter) async -> Void
     ) -> Response {
-        var headers: Headers = [:]
+        var headers: HTTPFields = [:]
         headers[.cacheControl] = "no-cache"
         return .streaming(contentType: .eventStream, headers: headers) { continuation in
             await produce(ServerSentEventWriter(continuation: continuation))

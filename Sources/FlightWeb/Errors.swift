@@ -6,7 +6,7 @@ import HTTPTypes
 /// Errors *not* conforming render as an opaque 500 — internal detail never
 /// leaks to the wire, only to `context.logger`.
 public protocol HTTPErrorRepresentable: Error {
-    var httpStatus: Status { get }
+    var httpStatus: HTTPResponse.Status { get }
     /// Client-visible message. Keep it safe for the wire.
     var httpMessage: String { get }
 }
@@ -16,10 +16,10 @@ public protocol HTTPErrorRepresentable: Error {
 ///     throw HTTPError(.forbidden)
 ///     throw HTTPError(.unprocessableContent, "name must not be empty")
 public struct HTTPError: HTTPErrorRepresentable, Sendable {
-    public let httpStatus: Status
+    public let httpStatus: HTTPResponse.Status
     public let httpMessage: String
 
-    public init(_ status: Status, _ message: String? = nil) {
+    public init(_ status: HTTPResponse.Status, _ message: String? = nil) {
         self.httpStatus = status
         self.httpMessage = message ?? status.reasonPhrase
     }
@@ -31,7 +31,7 @@ public enum RoutingError: HTTPErrorRepresentable, Sendable, Equatable {
     /// a programming error in the route, surfaced as a 500, never a 4xx.
     case missingPathParameter(String)
 
-    public var httpStatus: Status {
+    public var httpStatus: HTTPResponse.Status {
         switch self {
         case .missingPathParameter: return .internalServerError
         }
@@ -56,7 +56,7 @@ public enum RoutingError: HTTPErrorRepresentable, Sendable, Equatable {
 /// Request-body decoding failures — always the client's 400, with the
 /// decoder's reason included (it describes the request, not the server).
 public struct BodyDecodingError: HTTPErrorRepresentable, Sendable {
-    public let httpStatus: Status = .badRequest
+    public let httpStatus: HTTPResponse.Status = .badRequest
     public let httpMessage: String
 
     public init(_ message: String) {
@@ -75,7 +75,7 @@ public func decodeRequestBody<T: Decodable>(
         throw BodyDecodingError("expected a JSON body, got an empty one")
     }
     do {
-        return try JSONDecoder().decode(type, from: context.request.body)
+        return try context.coders.jsonDecoder.decode(type, from: context.request.body)
     } catch let error as DecodingError {
         throw BodyDecodingError(error.shortDescription)
     } catch {

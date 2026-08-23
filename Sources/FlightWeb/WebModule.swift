@@ -27,6 +27,23 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule {
 
     public func configure(_ container: Container) throws {
         self.container = container
+
+        // Registration and resolution are separate phases, so the coders are
+        // *registered* here and *built* at freeze — reading configuration now
+        // would trip Core's "resolution begins at freeze()" precondition.
+        //
+        // Checked against the registration list rather than by resolving, for
+        // the same reason. An application that registers its own `WebCoders`
+        // in a module configured before this one keeps it; registering both
+        // would be a duplicate-registration failure, not a silent override.
+        let alreadyRegistered = container.allRegistrations().contains {
+            $0.typeName == String(reflecting: WebCoders.self) && $0.qualifier == nil
+        }
+        guard !alreadyRegistered else { return }
+
+        container.register(WebCoders.self, scope: .singleton) { c in
+            try WebCoders(configuration: c.resolve(Configuration.self))
+        }
     }
 
     public var service: (any Service)? {
@@ -45,6 +62,11 @@ struct WebHostService<Transport: ServerTransport>: Service {
         // Route-table validation happens here, at startup: a conflicting or
         // malformed route fails the app before the socket ever binds.
         let dispatch = try DispatchBuilder.build(container: container, logger: logger)
+        // Force the coders now. They are registered lazily, so without this a
+        // misspelled `web.json.date-strategy` would first surface on whichever
+        // request happened to encode something — long after the deploy that
+        // introduced it looked successful.
+        _ = try container.resolve(WebCoders.self)
         let appConfiguration = try container.resolve(FlightCore.Configuration.self)
         let transport = Transport(
             configuration: try Transport.Configuration(configuration: appConfiguration),

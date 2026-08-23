@@ -225,7 +225,7 @@ public struct FlightTransport: ServerTransport {
     }
 
     /// 1xx/204/304 responses carry neither body nor content-length.
-    private static func statusAllowsBody(_ status: Status) -> Bool {
+    private static func statusAllowsBody(_ status: HTTPResponse.Status) -> Bool {
         switch status.code {
         case 100..<200, 204, 304: return false
         default: return true

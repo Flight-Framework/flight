@@ -20,7 +20,7 @@ struct ResponseTests {
     }
 
     @Test func responsePassesThroughUntouched() throws {
-        let teapot = Status(code: 418)
+        let teapot = HTTPResponse.Status(code: 418)
         let original = Response.status(teapot)
         let encoded = try encodeResponse(original, for: .mock())
         #expect(encoded.status == teapot)
@@ -64,11 +64,24 @@ struct ResponseTests {
     }
 
     @Test func problemBodyShape() throws {
-        struct Problem: Codable { let status: Int; let error: String }
-        let response = Response.problem(status: .notFound, message: "Not Found")
+        struct Problem: Codable { let status: Int; let title: String; let detail: String? }
+        let response = Response.problem(status: .notFound, message: "no such user")
+        #expect(response.headers[.contentType] == "application/problem+json")
         let problem = try response.decodeJSON(Problem.self)
         #expect(problem.status == 404)
-        #expect(problem.error == "Not Found")
+        #expect(problem.title == "Not Found")
+        #expect(problem.detail == "no such user")
+    }
+
+    @Test("the pre-9457 shape is still available for clients that parse it")
+    func simpleErrorBodyShape() throws {
+        struct Simple: Codable { let status: Int; let error: String }
+        let response = Response.problem(
+            status: .notFound, message: "Not Found", render: SimpleErrorBody.render)
+        #expect(response.headers[.contentType] == ContentType.json.rawValue)
+        let simple = try response.decodeJSON(Simple.self)
+        #expect(simple.status == 404)
+        #expect(simple.error == "Not Found")
     }
 
     @Test func settingHeaderPreservesEverythingElse() {

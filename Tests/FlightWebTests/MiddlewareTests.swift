@@ -172,17 +172,33 @@ struct ResponseObservingMiddlewareTests {
     }
 }
 
-@Suite("errorResponse (§3)")
+@Suite("errorResponse")
 struct ErrorResponseTests {
 
-    @Test func httpRepresentableErrorsKeepTheirShape() {
+    @Test func httpRepresentableErrorsKeepTheirShape() throws {
         let response = errorResponse(
             for: HTTPError(.conflict, "already exists"),
             context: .mock(path: "/")
         )
         #expect(response.status == .conflict)
-        #expect(response.bodyText.contains("already exists"))
-        #expect(response.headers[.contentType]?.contains("application/json") == true)
+        // RFC 9457: its own media type, not application/json, so a client can
+        // tell a problem document from a successful body of the same shape.
+        #expect(response.headers[.contentType] == "application/problem+json")
+
+        let body = try JSONSerialization.jsonObject(
+            with: Data(response.bodyText.utf8)) as? [String: Any]
+        #expect(body?["status"] as? Int == 409)
+        #expect(body?["title"] as? String == "Conflict")
+        #expect(body?["detail"] as? String == "already exists")
+    }
+
+    @Test("the title falls back to the status and detail is omitted when it adds nothing")
+    func detailOmittedWhenRedundant() throws {
+        let response = errorResponse(for: HTTPError(.notFound, "Not Found"), context: .mock())
+        let body = try JSONSerialization.jsonObject(
+            with: Data(response.bodyText.utf8)) as? [String: Any]
+        #expect(body?["title"] as? String == "Not Found")
+        #expect(body?["detail"] == nil, "a detail identical to the title is noise")
     }
 
     @Test func unknownErrorsAreOpaque500s() {

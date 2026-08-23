@@ -48,7 +48,7 @@ struct RouterTests {
         _ path: String,
         kind: RouteRegistration.Kind = .http,
         source: String = "test",
-        status: Status = .ok
+        status: HTTPResponse.Status = .ok
     ) -> RouteRegistration {
         RouteRegistration(method: method, path: path, kind: kind, source: source) { _ in
             .text(path, status: status)

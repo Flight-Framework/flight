@@ -2,8 +2,12 @@ import Foundation
 import HTTPTypes
 
 /// HTTPTypes' names, surfaced under the design doc's vocabulary (§6.2).
-public typealias Status = HTTPResponse.Status
-public typealias Headers = HTTPFields
+// `Status` and `Headers` used to be module-level typealiases here. They are
+// gone deliberately: `Status` in particular is a word applications use — an
+// order status, a job status — and a module-level alias for it turned
+// `import FlightWeb` into a source of shadowing surprises in code that had
+// nothing to do with HTTP. HTTPTypes' own names are re-exported instead, and
+// `.ok` / `[:]` still infer at every call site.
 
 /// A response in one of three shapes (§6.2): a complete fixed body, a
 /// streaming body written chunk-by-chunk as produced (SSE, large downloads),
@@ -17,15 +21,15 @@ public typealias Headers = HTTPFields
 /// the transport performs the protocol switch and calls `run`, still knowing
 /// nothing about routing or contexts.
 public enum Response: Sendable {
-    case fixed(status: Status, headers: Headers, body: Data)
-    case streaming(status: Status, headers: Headers, body: AsyncStream<Data>)
+    case fixed(status: HTTPResponse.Status, headers: HTTPFields, body: Data)
+    case streaming(status: HTTPResponse.Status, headers: HTTPFields, body: AsyncStream<Data>)
     case upgrade(UpgradeResponse)
 }
 
 extension Response {
     // MARK: - Fixed-body conveniences
 
-    public static func status(_ status: Status, headers: Headers = [:]) -> Response {
+    public static func status(_ status: HTTPResponse.Status, headers: HTTPFields = [:]) -> Response {
         .fixed(status: status, headers: headers, body: Data())
     }
 
@@ -34,14 +38,14 @@ extension Response {
         .problem(status: .notFound, message: "Not Found")
     }
 
-    public static func text(_ string: String, status: Status = .ok) -> Response {
-        var headers: Headers = [:]
+    public static func text(_ string: String, status: HTTPResponse.Status = .ok) -> Response {
+        var headers: HTTPFields = [:]
         headers[.contentType] = ContentType.text.rawValue
         return .fixed(status: status, headers: headers, body: Data(string.utf8))
     }
 
-    public static func html(_ string: String, status: Status = .ok) -> Response {
-        var headers: Headers = [:]
+    public static func html(_ string: String, status: HTTPResponse.Status = .ok) -> Response {
+        var headers: HTTPFields = [:]
         headers[.contentType] = ContentType.html.rawValue
         return .fixed(status: status, headers: headers, body: Data(string.utf8))
     }
@@ -49,31 +53,42 @@ extension Response {
     public static func data(
         _ data: Data,
         contentType: ContentType = .octetStream,
-        status: Status = .ok
+        status: HTTPResponse.Status = .ok
     ) -> Response {
-        var headers: Headers = [:]
+        var headers: HTTPFields = [:]
         headers[.contentType] = contentType.rawValue
         return .fixed(status: status, headers: headers, body: data)
     }
 
-    public static func json(_ value: some Encodable, status: Status = .ok) throws -> Response {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    /// JSON body, `application/json`.
+    ///
+    /// `encoder` defaults to ``WebCoders/default``'s. A handler that wants the
+    /// application's configured encoder should return the value itself and let
+    /// `ResponseEncodable` do it, or pass `context.coders.jsonEncoder` here —
+    /// this is a static, so it cannot reach the container on its own.
+    public static func json(
+        _ value: some Encodable,
+        status: HTTPResponse.Status = .ok,
+        encoder: JSONEncoder = WebCoders.default.jsonEncoder
+    ) throws -> Response {
         let body = try encoder.encode(value)
-        var headers: Headers = [:]
+        var headers: HTTPFields = [:]
         headers[.contentType] = ContentType.json.rawValue
         return .fixed(status: status, headers: headers, body: body)
     }
 
     /// The uniform error-body shape used by `errorResponse(for:context:)`.
-    public static func problem(status: Status, message: String) -> Response {
-        struct Problem: Encodable {
-            let status: Int
-            let error: String
-        }
-        // Encoding a two-field struct of primitives cannot fail.
-        return (try? .json(Problem(status: status.code, error: message), status: status))
-            ?? .status(status)
+    /// An error body, rendered by `render` — RFC 9457 `problem+json` unless
+    /// the application configured otherwise.
+    ///
+    /// Call sites that have a `RequestContext` should pass
+    /// `context.coders.renderError`, so the application's choice is honored.
+    public static func problem(
+        status: HTTPResponse.Status,
+        message: String,
+        render: (HTTPResponse.Status, String) -> Response = ProblemDetails.render
+    ) -> Response {
+        render(status, message)
     }
 
     // MARK: - Streaming (§6.2)
@@ -83,9 +98,9 @@ extension Response {
     /// reading (client disconnect), and the stream finishes when `produce`
     /// returns even if the producer forgot to call `finish()`.
     public static func streaming(
-        status: Status = .ok,
+        status: HTTPResponse.Status = .ok,
         contentType: ContentType,
-        headers: Headers = [:],
+        headers: HTTPFields = [:],
         _ produce: @escaping @Sendable (AsyncStream<Data>.Continuation) async -> Void
     ) -> Response {
         let (stream, continuation) = AsyncStream<Data>.makeStream()
@@ -119,7 +134,7 @@ extension Response {
     // MARK: - Accessors
 
     /// The status line, or `.switchingProtocols` for upgrade responses.
-    public var status: Status {
+    public var status: HTTPResponse.Status {
         switch self {
         case .fixed(let status, _, _), .streaming(let status, _, _):
             return status
@@ -128,7 +143,7 @@ extension Response {
         }
     }
 
-    public var headers: Headers {
+    public var headers: HTTPFields {
         switch self {
         case .fixed(_, let headers, _), .streaming(_, let headers, _):
             return headers

@@ -90,6 +90,48 @@ Transport settings come from the same `flight.yaml` everything else uses:
 `server.host` (127.0.0.1), `server.port` (8080), `server.backlog`,
 `server.max-request-body-bytes`, `server.max-websocket-frame-bytes`.
 
+### Wire format
+
+Response encoding, request decoding, and error bodies are configurable —
+`ResponseEncodable` is unusable for most real APIs otherwise:
+
+```yaml
+web:
+  json:
+    key-strategy: snake-case     # snake-case | as-is (default)
+    date-strategy: iso8601       # iso8601 (default) | seconds | milliseconds | foundation
+    pretty-print: false
+  errors:
+    format: problem              # problem (default, RFC 9457) | simple
+```
+
+Dates default to ISO-8601 rather than Foundation's seconds-since-2001
+`Double`, which is nearly always wrong on a wire shared with anything that is
+not another Foundation client — and silently so, since the field is present
+and numeric, just meaningless to the reader.
+
+Errors default to RFC 9457 `application/problem+json`:
+
+```json
+{"status": 404, "title": "Not Found", "detail": "no such user"}
+```
+
+`format: simple` keeps the older `{"status", "error"}` shape for clients that
+already parse it. For anything else, register your own `WebCoders` — its
+`renderError` is a closure, so an error body need not be JSON at all:
+
+```swift
+container.register(WebCoders.self, scope: .singleton) { _ in
+    var coders = WebCoders.default
+    coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
+    return coders
+}
+```
+
+An application that registers its own keeps it; Flight only fills in the gap.
+A misspelled `web.*` value fails at startup naming the key, not on the first
+request that happens to encode something.
+
 ### HTTPS
 
 TLS is off until a certificate and key are named, and on as soon as they are —

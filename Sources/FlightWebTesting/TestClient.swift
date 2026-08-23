@@ -59,7 +59,7 @@ public struct TestClient: Sendable {
     // MARK: - WebSocket (§6.1, in process)
 
     public enum TestClientError: Error, CustomStringConvertible {
-        case notAnUpgrade(Status)
+        case notAnUpgrade(HTTPResponse.Status)
 
         public var description: String {
             switch self {

@@ -90,17 +90,18 @@ public func compose(_ chain: [Middleware], around responder: @escaping Next) -> 
 /// - everything else is an opaque 500 — details go to `context.logger`,
 ///   never to the client.
 public func errorResponse(for error: any Error, context: RequestContext) -> Response {
+    let render = context.coders.renderError
     switch error {
     case let routing as RoutingError:
         context.logger.error("request failed: \(routing.logDescription)")
-        return .problem(status: routing.httpStatus, message: routing.httpMessage)
+        return render(routing.httpStatus, routing.httpMessage)
     case let http as HTTPErrorRepresentable:
         if http.httpStatus.kind == .serverError {
             context.logger.error("request failed: \(String(describing: error))")
         }
-        return .problem(status: http.httpStatus, message: http.httpMessage)
+        return render(http.httpStatus, http.httpMessage)
     default:
         context.logger.error("unhandled error: \(String(describing: error))")
-        return .problem(status: .internalServerError, message: "Internal Server Error")
+        return render(.internalServerError, "Internal Server Error")
     }
 }

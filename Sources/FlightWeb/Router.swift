@@ -271,10 +271,10 @@ public struct Router: Sendable {
         return { context in
             switch router.route(method: context.request.method, path: context.request.path) {
             case .notFound:
-                return .problem(status: .notFound, message: "Not Found")
+                return context.coders.renderError(.notFound, "Not Found")
             case .methodNotAllowed(let allow):
                 let allowed = allow.map(\.rawValue).joined(separator: ", ")
-                return .problem(status: .methodNotAllowed, message: "Method Not Allowed")
+                return context.coders.renderError(.methodNotAllowed, "Method Not Allowed")
                     .settingHeader(.allow, allowed)
             case .matched(let match):
                 context.pathParameters = match.pathParameters
