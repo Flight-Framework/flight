@@ -4,7 +4,7 @@ import Testing
 @Suite("Configuration — layering and typed access")
 struct ConfigurationTests {
 
-    // MARK: Precedence (§3)
+    // MARK: Precedence
 
     @Test("first source holding a key wins")
     func precedenceOrder() throws {
@@ -17,7 +17,7 @@ struct ConfigurationTests {
 
     @Test("merge is key-by-key, not source-by-source")
     func keyByKeyMerge() throws {
-        // The §3 example: the env layer overrides only pool_size; url still
+        // The env layer overrides only pool_size; url still
         // resolves from base.
         let environmentLayer = TestConfigSource(["datasource.pool_size": "50"])
         let base = TestConfigSource([
@@ -41,7 +41,7 @@ struct ConfigurationTests {
         #expect(try config.get("k", as: String.self) == "v")
     }
 
-    // MARK: get(_:as:) failures (§2)
+    // MARK: get(_:as:) failures
 
     @Test("missing key throws ConfigError.missingKey with the key")
     func missingKey() {
@@ -86,11 +86,11 @@ struct ConfigurationTests {
             try config.get("server.port", as: Int.self)
         } throws: { error in
             guard case ConfigError.decodingFailed(let key, let raw, let type) = error else { return false }
-            return key == "server.port" && raw == "eight thousand" && type == Int.self
+            return key == "server.port" && raw == "eight thousand" && type == "Int"
         }
     }
 
-    @Test("the design doc's §7 example holds verbatim")
+    @Test("a test-source override wins over every file layer")
     func designDocExample() throws {
         let config = Configuration(sources: [
             TestConfigSource(["datasource.pool_size": "3"])

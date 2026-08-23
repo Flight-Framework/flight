@@ -1,4 +1,4 @@
-/// The config file names the §3 layering is built from.
+/// The config file names the layering is built from.
 ///
 /// These live in `FlightConfigCore` rather than beside `Configuration.load`
 /// because Flight Core's `flight-registration-gen` build tool needs to find

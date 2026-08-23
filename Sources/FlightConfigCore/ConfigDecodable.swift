@@ -3,7 +3,7 @@ import Foundation
 /// A type that can be decoded from a single raw configuration string.
 ///
 /// Conformances ship for the obvious primitives (`String`, `Int`, `Bool`,
-/// `Double`, `URL`) out of the box (§2). Custom types conform the same way
+/// `Double`, `URL`) out of the box. Custom types conform the same way
 /// any `Codable`-adjacent type would in Swift — implement the failable
 /// initializer, return nil on malformed input, and `Configuration.get`
 /// converts that nil into a `ConfigError.decodingFailed` naming the key, the

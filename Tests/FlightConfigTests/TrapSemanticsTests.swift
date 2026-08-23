@@ -1,7 +1,7 @@
 import Testing
 @testable import FlightConfig
 
-/// `get(_:default:)` is non-throwing by contract (§2), so its
+/// `get(_:default:)` is non-throwing by contract, so its
 /// present-but-malformed case cannot throw — and silently returning the
 /// default would mask a corrupted configuration. The documented behavior is
 /// a trap; these exit tests pin it.

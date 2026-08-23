@@ -1,4 +1,4 @@
-/// An in-memory source for use with Swift Testing (§7): hand it the exact
+/// An in-memory source for use with Swift Testing: hand it the exact
 /// keys a test needs and nothing else.
 ///
 /// ```swift

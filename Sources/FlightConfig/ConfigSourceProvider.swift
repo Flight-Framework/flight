@@ -14,7 +14,7 @@ import FlightConfigCore
 /// with `8080` — so a test source works with the swift-configuration reader
 /// API, not just with Flight's accessors.
 ///
-/// **Immutability.** Sources are immutable after construction (§8), so the
+/// **Immutability.** Sources are immutable after construction, so the
 /// snapshot *is* the provider and every watch emits exactly one value and then
 /// waits for cancellation. That is the correct semantics for a value that can
 /// never change, and it is what `watchValueFromValue` / `watchSnapshotFromSnapshot`
@@ -96,17 +96,17 @@ extension ConfigValue {
             self = .init(.string(raw), isSecret: false)
         case .int:
             guard let value = Int(configValue: raw) else {
-                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: Int.self)
+                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: Int.self))
             }
             self = .init(.int(value), isSecret: false)
         case .double:
             guard let value = Double(configValue: raw) else {
-                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: Double.self)
+                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: Double.self))
             }
             self = .init(.double(value), isSecret: false)
         case .bool:
             guard let value = Bool(configValue: raw) else {
-                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: Bool.self)
+                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: Bool.self))
             }
             self = .init(.bool(value), isSecret: false)
         case .bytes:
@@ -115,7 +115,7 @@ extension ConfigValue {
             // A source's values are scalars; the flattened-sequence keys
             // (`hosts.0`) are addressable individually. Reassembling them is
             // FlightYAMLSnapshot's job, where the document structure is known.
-            throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: [String].self)
+            throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: [String].self))
         }
     }
 }

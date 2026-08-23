@@ -3,7 +3,7 @@ import FlightConfigCore
 import Foundation
 
 /// The bootstrap entry point — steps 1–5 of the app-wide sequence, which are
-/// Flight Config's entire contribution (§6):
+/// Flight Config's entire contribution:
 ///
 /// ```
 /// 1. FlightEnvironment.current()        — read FLIGHT_ENV
@@ -37,7 +37,7 @@ extension Configuration {
     ///     Defaults to the process working directory — the deployment
     ///     convention (config ships next to the binary's launch point).
     ///   - environment: Overrides environment resolution. Defaults to nil,
-    ///     meaning `FLIGHT_ENV` is read from `processEnvironment` (§4) —
+    ///     meaning `FLIGHT_ENV` is read from `processEnvironment` —
     ///     the one place in an app's lifetime that variable is consulted.
     ///   - processEnvironment: The variables backing the env-var layer,
     ///     `FLIGHT_ENV` resolution, and `${VAR}` substitution. Defaults to
@@ -50,13 +50,11 @@ extension Configuration {
     ///   - accessReporter: Receives an event per resolved key. Pass an
     ///     `AccessLogger` to log every config read at startup.
     ///   - additionalProviders: Extra providers, inserted *above* the env-var
-    ///     layer so they win. The hook for the sources §8 deferred —
+    ///     layer so they win. The hook for sources this package defers —
     ///     Kubernetes secret directories, remote stores, CLI arguments.
     ///
     /// - Throws: `ConfigLoadError.missingBaseFile` when `flight.yaml` is
-    ///   absent (§6 marks only the environment file optional — an app
-    ///   configured purely by env vars can assemble
-    ///   `Configuration(providers: [EnvironmentVariablesProvider()])`
+    ///   absent])`
     ///   directly), and the other `ConfigLoadError` cases for
     ///   unreadable/invalid files.
     ///
@@ -91,7 +89,7 @@ extension Configuration {
             : nil
 
         // Step 4 — env var layer. `prefixKeys(with: "flight")` reproduces the
-        // §3 transform exactly: the provider joins components with `_` and
+        // The documented transform exactly: the provider joins components with `_` and
         // uppercases, so `datasource.pool_size` under a `flight` prefix
         // encodes to FLIGHT_DATASOURCE_POOL_SIZE.
         let variables = EnvironmentVariablesProvider(

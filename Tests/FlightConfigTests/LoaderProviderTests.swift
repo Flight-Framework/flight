@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import FlightConfig
 
-/// `Configuration.load`'s provider-era parameters: the extension point §8
+/// `Configuration.load`'s provider-era parameters: the extension point
 /// deferred, plus secret marking. The base layering these sit on top of is
 /// covered by `LoaderTests`.
 @Suite("Configuration.load — providers, secrets, reporting")
@@ -51,7 +51,7 @@ struct LoaderProviderTests {
         }
     }
 
-    @Test("the env-var layer still encodes keys the §3 way")
+    @Test("the env-var layer still encodes keys the documented way")
     func envLayerEncoding() throws {
         try withConfigDirectory(files: ["flight.yaml": baseYAML]) { directory in
             let config = try Configuration.load(

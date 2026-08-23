@@ -4,7 +4,7 @@ import Testing
 
 /// Integration tests for `Configuration.load` — real files in a temp
 /// directory, explicit process-environment dictionaries, no global state.
-@Suite("Configuration.load (§6 bootstrap steps 1–5)")
+@Suite("Configuration.load")
 struct LoaderTests {
 
     /// Creates a unique temp directory, writes the given files, runs `body`,
@@ -59,7 +59,7 @@ struct LoaderTests {
             #expect(config.environment == .prod)
             // Overridden by flight-prod.yaml:
             #expect(try config.get("datasource.pool_size", as: Int.self) == 50)
-            // Untouched keys fall through to base (§3: key-by-key merge):
+            // Untouched keys fall through to base:
             #expect(try config.get("datasource.url", as: String.self) == "postgres://localhost:5432/flight_dev")
             #expect(try config.get("server.port", as: Int.self) == 8080)
         }
@@ -80,7 +80,7 @@ struct LoaderTests {
         }
     }
 
-    @Test("a missing flight-{env}.yaml is not an error (§6 step 3)")
+    @Test("a missing flight-{env}.yaml is not an error")
     func missingEnvironmentFileIsFine() throws {
         try withConfigDirectory(files: ["flight.yaml": baseYAML]) { directory in
             let config = try Configuration.load(
@@ -125,7 +125,7 @@ struct LoaderTests {
     @Test("the design doc's full prod scenario, end to end")
     func designDocProdScenario() throws {
         // flight-prod.yaml references the env var; the env var layer would
-        // win anyway (§3), but the substitution keeps the file resolvable.
+        // win anyway, but the substitution keeps the file resolvable.
         let prodYAML = """
         datasource:
           url: "${FLIGHT_DATASOURCE_URL}"
@@ -150,7 +150,7 @@ struct LoaderTests {
         let prodYAML = "datasource:\n  url: ${FLIGHT_DATASOURCE_URL}"
         try withConfigDirectory(files: ["flight.yaml": baseYAML, "flight-prod.yaml": prodYAML]) { directory in
             // FLIGHT_DATASOURCE_URL deliberately unset: silently falling back
-            // to the base (dev) URL would be the §5 nightmare scenario.
+            // to the base (dev) URL is the failure this must never allow.
             #expect(throws: ConfigLoadError.self) {
                 _ = try Configuration.load(
                     from: directory,
@@ -207,7 +207,7 @@ struct LoaderTests {
         }
     }
 
-    @Test("test is a first-class environment with its own file (§7)")
+    @Test("test is a first-class environment with its own file")
     func testEnvironmentFile() throws {
         let testYAML = "datasource:\n  url: \"postgres://localhost:5432/flight_test\""
         try withConfigDirectory(files: ["flight.yaml": baseYAML, "flight-test.yaml": testYAML]) { directory in

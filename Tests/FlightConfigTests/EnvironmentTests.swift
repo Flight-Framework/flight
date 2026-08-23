@@ -1,7 +1,7 @@
 import Testing
 @testable import FlightConfig
 
-@Suite("FlightEnvironment (§4)")
+@Suite("FlightEnvironment")
 struct FlightEnvironmentTests {
 
     @Test("unset FLIGHT_ENV defaults to dev — a valid local state, never a throw")
@@ -9,18 +9,35 @@ struct FlightEnvironmentTests {
         #expect(FlightEnvironment.current(from: [:]) == .dev)
     }
 
-    @Test("all four environments resolve from their raw values")
-    func allCases() {
-        for env in FlightEnvironment.allCases {
+    @Test("the standard environments resolve from their raw values")
+    func standardEnvironments() {
+        for env in FlightEnvironment.standard {
             #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": env.rawValue]) == env)
         }
     }
 
-    @Test("unrecognized values resolve to dev, per the design contract")
-    func unrecognizedDefaultsToDev() {
-        #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": "production"]) == .dev)
-        #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": "PROD"]) == .dev)
+    @Test("an unset or empty FLIGHT_ENV resolves to dev")
+    func absentDefaultsToDev() {
+        #expect(FlightEnvironment.current(from: [:]) == .dev)
         #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": ""]) == .dev)
+    }
+
+    @Test("a non-standard value resolves to itself, not silently to dev")
+    func nonStandardResolvesToItself() {
+        // Collapsing an unknown name to `dev` would load development
+        // configuration under a production-shaped name, silently. Resolving
+        // to itself means the missing flight-qa.yaml is visible instead.
+        #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": "qa"]) == FlightEnvironment("qa"))
+        #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": "production"]).rawValue == "production")
+        #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": "production"]) != .prod)
+    }
+
+    @Test("an app can define its own environments")
+    func extensibility() {
+        let qa = FlightEnvironment("qa")
+        #expect(qa.rawValue == "qa")
+        #expect(FlightEnvironment.current(from: ["FLIGHT_ENV": "qa"]) == qa)
+        #expect(!FlightEnvironment.standard.contains(qa))
     }
 
     @Test("current() reads the real process environment without throwing")
@@ -31,7 +48,7 @@ struct FlightEnvironmentTests {
     }
 }
 
-@Suite("EnvironmentVariablesSource (§3 layer 1)")
+@Suite("EnvironmentVariablesSource")
 struct EnvironmentVariablesSourceTests {
 
     @Test("the fixed transform: uppercase, dots to underscores, FLIGHT_ prefix")

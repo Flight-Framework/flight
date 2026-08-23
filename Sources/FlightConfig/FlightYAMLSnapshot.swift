@@ -21,8 +21,7 @@ import FlightConfigCore
 /// ## Values are string-native
 ///
 /// Flight's parser flattens a document to `[String: String]` — YAML's typing
-/// rules are deliberately not applied (§2: types are the *reader's* concern,
-/// resolved through `ConfigDecodable`). A snapshot therefore answers a request
+/// rules are deliberately not applied. A snapshot therefore answers a request
 /// for *any* `ConfigType` by converting the raw string, which means Flight's
 /// own YAML works with the whole swift-configuration accessor surface —
 /// `config.int(forKey:)`, `config.stringArray(forKey:)` — as well as with the
@@ -126,7 +125,7 @@ extension ConfigValue {
     /// Conversion failure throws rather than returning nil, matching every
     /// other provider: nil means *absent* and lets the reader fall through to
     /// a lower-precedence layer, which is exactly the silent-wrong-value
-    /// outcome §5 exists to prevent.
+    /// outcome this library exists to prevent.
     fileprivate init(scalar raw: String, as type: ConfigType, key: String) throws {
         switch type {
         case .string:

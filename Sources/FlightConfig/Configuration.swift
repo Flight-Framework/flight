@@ -2,11 +2,11 @@ import Configuration
 import FlightConfigCore
 
 /// Immutable, fully-resolved configuration. Built once at bootstrap, handed
-/// into `Container.bootstrap()`, never mutated after (§2).
+/// into `Container.bootstrap()`, never mutated after.
 ///
 /// A `Configuration` is an ordered stack of swift-configuration providers,
 /// highest precedence first. Lookups walk the stack and the first provider
-/// holding the key wins — which is what makes the §3 layering (env vars over
+/// holding the key wins — which is what makes the layering (env vars over
 /// `flight-{env}.yaml` over `flight.yaml`) a key-by-key merge rather than a
 /// file-by-file one: a key present only in the base file still resolves even
 /// when the environment file overrides its neighbors.
@@ -15,17 +15,17 @@ import FlightConfigCore
 ///
 /// swift-configuration supplies the provider stack, the file/env/CLI/remote
 /// providers, secret redaction, and access reporting. What it does not supply
-/// is Flight's §5 failure contract: its optional and `default:` accessors
+/// is this library's failure contract: its optional and `default:` accessors
 /// **swallow type-conversion errors**, returning nil or the default when a
 /// value is present but malformed. That is precisely the silent-wrong-value
-/// outcome §5 exists to prevent, so this type resolves through the provider
+/// outcome this type exists to prevent, so it resolves through the provider
 /// API directly — where a bad value is a thrown error — and applies Flight's
 /// own `ConfigDecodable` on top.
 ///
 /// Reach for `reader` when handing config to a library that speaks
 /// swift-configuration; reach for `get`/`getIfPresent` for Flight's own code.
 ///
-/// Fully `Sendable` and immutable (§8): resolution is a side-effect-free read,
+/// Fully `Sendable` and immutable: resolution is a side-effect-free read,
 /// safe from any number of concurrent callers, no isolation required.
 public struct Configuration: Sendable {
 
@@ -37,19 +37,19 @@ public struct Configuration: Sendable {
     /// The environment this configuration was resolved for, when known.
     /// Set by `Configuration.load`; nil for hand-assembled configurations
     /// (tests, embedders composing their own stacks). Used to make
-    /// `ConfigError.missingKey` name the active environment (§5).
+    /// `ConfigError.missingKey` name the active environment.
     public let environment: FlightEnvironment?
 
     /// Assembles a configuration from an ordered provider stack.
     ///
-    /// This is the extension point §8 promised and could not deliver in v1:
+    /// The extension point for providers this package does not ship:
     /// any swift-configuration provider works here — `DirectoryFilesProvider`
     /// for Kubernetes secrets, `CommandLineArgumentsProvider`, a reloading
     /// file provider, or a third-party remote provider (AWS Secrets Manager,
     /// Vault) — without this package taking on a dependency for it.
     ///
     /// - Parameters:
-    ///   - providers: Highest precedence first. The §6 bootstrap order is
+    ///   - providers: Highest precedence first. The bootstrap order is
     ///     `[env vars, flight-{env}.yaml, flight.yaml]`.
     ///   - environment: The resolved `FlightEnvironment`, if this stack was
     ///     assembled for one. Purely diagnostic — it never affects lookups.
@@ -90,27 +90,44 @@ public struct Configuration: Sendable {
 
     /// Resolves and decodes a required key.
     ///
-    /// Throws `ConfigError.missingKey` if the key is absent from every
-    /// provider and no default is supplied. Throws
-    /// `ConfigError.decodingFailed` if the key is present but its raw string
-    /// fails to decode as `T` (§2).
+    /// ```swift
+    /// let port: Int = try configuration.get("server.port")
+    /// ```
+    ///
+    /// - Throws: `ConfigError.missingKey` if the key is
+    ///   absent from every provider;
+    ///   `ConfigError.decodingFailed` if it is
+    ///   present but does not decode as `T`;
+    ///   `ConfigError.unrepresentableValue` if a
+    ///   provider holds it as an array or byte blob.
     public func get<T: ConfigDecodable>(_ key: String, as type: T.Type = T.self) throws -> T {
-        guard let raw = rawValue(for: key) else {
+        guard let raw = try resolveRawValue(for: key) else {
             throw ConfigError.missingKey(key: key, environment: environment)
         }
         return try decode(raw, key: key, as: type)
     }
 
-    /// Non-throwing variant for genuinely optional config (§2): returns
-    /// `defaultValue` when the key is absent from every provider.
+    /// Resolves a key, falling back to `defaultValue` when it is absent.
     ///
-    /// A key that is *present but malformed* is not an "optional config"
-    /// situation — it is a corrupted configuration, and silently substituting
-    /// the default would mask it (the exact silent-`nil`-three-services-deep
-    /// failure mode §5 exists to prevent). That case traps with a message
-    /// naming the key, value, and type. Code that genuinely needs to tolerate
-    /// a malformed value uses `getIfPresent` (throwing) or `get(_:as:)` and
-    /// handles the error itself.
+    /// ```swift
+    /// let port = configuration.get("server.port", default: 8080)
+    /// ```
+    ///
+    /// - Important: This traps if the key is **present but malformed**. A
+    ///   corrupted value is not an "optional config" situation, and silently
+    ///   substituting the default would hide it — which is the failure mode
+    ///   this library exists to prevent.
+    ///
+    ///   The value can come from the environment, so a deployment typo
+    ///   (`FLIGHT_SERVER_PORT=eighty`) reaches this path and aborts the
+    ///   process at startup. That is deliberate — a server that boots on the
+    ///   wrong port is worse than one that refuses to boot — but if you need
+    ///   to survive a malformed value, resolve it with
+    ///   ``getIfPresent(_:as:)`` or ``get(_:as:)`` and handle the error:
+    ///
+    ///   ```swift
+    ///   let port = (try? configuration.getIfPresent("server.port", as: Int.self)) ?? nil ?? 8080
+    ///   ```
     public func get<T: ConfigDecodable>(_ key: String, default defaultValue: T) -> T {
         guard let raw = rawValue(for: key) else {
             return defaultValue
@@ -126,17 +143,26 @@ public struct Configuration: Sendable {
         return value
     }
 
-    /// Resolves an optional key without inventing a default: nil when the key
-    /// is absent from every provider, `ConfigError.decodingFailed` when
-    /// present but malformed.
+    /// Resolves an optional key without inventing a default.
     ///
-    /// This is the shape for "absence means the feature is off" config (an
-    /// optional TLS cert path, an optional proxy URL) where no default value
-    /// exists to hand `get(_:default:)` — and it is what the `@ConfigValue`
-    /// macro's `default:` expansion resolves through, so a malformed value
-    /// still fails module configuration loudly instead of trapping.
+    /// `nil` when the key is absent from every provider; throws when it is
+    /// present but malformed. This is the shape for "absence means the
+    /// feature is off" configuration — an optional TLS certificate path, an
+    /// optional proxy URL — where there is no sensible default to supply.
+    ///
+    /// ```swift
+    /// if let certPath: String = try configuration.getIfPresent("tls.certificate") {
+    ///     enableTLS(at: certPath)
+    /// }
+    /// ```
+    ///
+    /// Unlike ``get(_:default:)`` this never traps, which is what makes it
+    /// the right tool when a malformed value must be survivable.
+    ///
+    /// - Throws: `ConfigError.decodingFailed` or
+    ///   `ConfigError.unrepresentableValue`.
     public func getIfPresent<T: ConfigDecodable>(_ key: String, as type: T.Type = T.self) throws -> T? {
-        guard let raw = rawValue(for: key) else {
+        guard let raw = try resolveRawValue(for: key) else {
             return nil
         }
         return try decode(raw, key: key, as: type)
@@ -149,13 +175,41 @@ public struct Configuration: Sendable {
     /// is the normal path; this exists for tooling and diagnostics (Flight
     /// Actuator's config view, error reporting) that work at the raw layer.
     public func rawValue(for key: String) -> String? {
-        let absoluteKey = AbsoluteConfigKey(key.split(separator: ".").map(String.init))
+        try? resolveRawValue(for: key)
+    }
+
+    /// The winning raw string for a key, or `nil` if absent everywhere.
+    ///
+    /// The throwing form of ``rawValue(for:)``. Throws
+    /// `ConfigError.unrepresentableValue` when a
+    /// provider holds the key as an array or byte blob, which has no single
+    /// raw-string form.
+    public func resolveRawValue(for key: String) throws -> String? {
+        let absoluteKey = AbsoluteConfigKey(Self.pathComponents(of: key))
         for provider in providers {
-            if let raw = Self.rawValue(of: provider, forKey: absoluteKey) {
+            switch Self.lookup(of: provider, forKey: absoluteKey) {
+            case .absent:
+                continue
+            case .resolved(let raw):
                 return raw
+            case .unrepresentable(let kind):
+                // Present here, but unreadable as a string. Stopping is the
+                // whole point: continuing would answer from a lower layer.
+                throw ConfigError.unrepresentableValue(
+                    key: key, provider: provider.providerName, kind: kind
+                )
             }
         }
         return nil
+    }
+
+    /// Splits a dotted key into path components, rejecting empty ones.
+    ///
+    /// `split` alone silently drops empty components, so `a..b` and `a.b.`
+    /// would both alias `a.b` — two different strings resolving to one key,
+    /// which makes a typo indistinguishable from the key you meant.
+    private static func pathComponents(of key: String) -> [String] {
+        key.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
     }
 
     /// Resolves one key against one provider, as a raw string.
@@ -178,28 +232,58 @@ public struct Configuration: Sendable {
     /// present in a form this request could not read** and the walk must not
     /// fall through — falling through would resolve a prod key from a dev
     /// layer, silently.
-    private static func rawValue(
+    /// What one provider had to say about one key.
+    private enum Lookup {
+        /// Not in this provider at all — the walk continues.
+        case absent
+        /// A raw string this provider holds — the walk stops, successfully.
+        case resolved(String)
+        /// Present, but with no single raw-string form. The walk stops and
+        /// throws; it must not continue to a lower-precedence layer.
+        case unrepresentable(String)
+    }
+
+    private static func lookup(
         of provider: any ConfigProvider, forKey key: AbsoluteConfigKey
-    ) -> String? {
+    ) -> Lookup {
+        // Scalars first: the common case, and the only shape Flight's own
+        // YAML snapshot ever holds.
         for type in [ConfigType.string, .int, .double, .bool] {
-            guard let result = try? provider.value(forKey: key, type: type) else {
-                // Present, but not readable as `type` — try another shape.
-                continue
-            }
-            guard let value = result.value else {
-                // Genuinely absent from this provider, whatever the type.
-                continue
-            }
+            guard let result = try? provider.value(forKey: key, type: type),
+                  let value = result.value
+            else { continue }
             if let raw = value.content.flightRawString {
-                return raw
+                return .resolved(raw)
             }
         }
-        return nil
+
+        // No scalar answered. That is either "absent" or "present as
+        // something with no raw string" — and the difference decides whether
+        // the walk may continue to a lower-precedence layer, so it has to be
+        // established rather than assumed. A provider signals a type mismatch
+        // by throwing, so absence can only be ruled out by asking for the
+        // non-scalar shapes explicitly.
+        let nonScalarTypes: [(ConfigType, String)] = [
+            (.stringArray, "an array of strings"),
+            (.intArray, "an array of integers"),
+            (.doubleArray, "an array of doubles"),
+            (.boolArray, "an array of booleans"),
+            (.bytes, "a byte blob"),
+            (.byteChunkArray, "an array of byte blobs"),
+        ]
+        for (type, kind) in nonScalarTypes {
+            guard let result = try? provider.value(forKey: key, type: type),
+                  result.value != nil
+            else { continue }
+            return .unrepresentable(kind)
+        }
+
+        return .absent
     }
 
     private func decode<T: ConfigDecodable>(_ raw: String, key: String, as type: T.Type) throws -> T {
         guard let value = T(configValue: raw) else {
-            throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: type)
+            throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: type))
         }
         return value
     }
@@ -274,6 +358,22 @@ extension ConfigContent {
         case .bool(let value): return String(value)
         case .bytes, .stringArray, .intArray, .doubleArray, .boolArray, .byteChunkArray:
             return nil
+        }
+    }
+
+    /// A human name for the shape, for the error a non-scalar value raises.
+    fileprivate var flightKindDescription: String {
+        switch self {
+        case .string: return "a string"
+        case .int: return "an integer"
+        case .double: return "a double"
+        case .bool: return "a boolean"
+        case .bytes: return "a byte blob"
+        case .stringArray: return "an array of strings"
+        case .intArray: return "an array of integers"
+        case .doubleArray: return "an array of doubles"
+        case .boolArray: return "an array of booleans"
+        case .byteChunkArray: return "an array of byte blobs"
         }
     }
 }

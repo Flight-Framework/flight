@@ -45,7 +45,7 @@ public struct YAMLConfigSource: ConfigSource {
     }
 
     /// Reads and parses a YAML file. Whether a *missing* file is an error is
-    /// the caller's policy (§6), so this initializer only throws for files
+    /// the caller's policy, so this initializer only throws for files
     /// that exist but cannot be read or parsed — check existence first.
     public init(
         contentsOf url: URL,

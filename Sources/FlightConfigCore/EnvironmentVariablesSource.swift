@@ -1,7 +1,7 @@
 import Foundation
 
 /// The environment-variable layer — precedence layer 1, the layer that always
-/// wins (§3). It is the standard "override anything at deploy time" escape
+/// wins. It is the standard "override anything at deploy time" escape
 /// hatch: container orchestrators, CI secrets, one-off local overrides.
 ///
 /// Keys map to variable names via a fixed transform: uppercase, `.` → `_`,
@@ -20,7 +20,7 @@ import Foundation
 ///
 /// The process environment is snapshotted at `init` — the source never
 /// re-reads `ProcessInfo` afterwards, preserving `Configuration`'s
-/// immutability guarantee (§8) even if something else mutates the
+/// immutability guarantee even if something else mutates the
 /// environment mid-flight.
 public struct EnvironmentVariablesSource: ConfigSource {
     private let environment: [String: String]
@@ -36,7 +36,7 @@ public struct EnvironmentVariablesSource: ConfigSource {
         environment[Self.variableName(for: key)]
     }
 
-    /// The fixed key → variable-name transform (§3): uppercase, `.` → `_`,
+    /// The fixed key → variable-name transform: uppercase, `.` → `_`,
     /// prefixed `FLIGHT_`. Public so error messages and docs can tell users
     /// exactly which variable would satisfy a key.
     public static func variableName(for key: String) -> String {

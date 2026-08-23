@@ -6,7 +6,7 @@
 /// examples use — nested block mappings, block sequences, scalars, comments,
 /// and quoting. Everything outside the subset fails **loudly at parse time**
 /// with a message naming the construct and the alternative, in line with the
-/// project-wide fail-fast rule (§5): a silently misread config file is the
+/// project-wide fail-fast rule: a silently misread config file is the
 /// worst outcome a config library can produce.
 ///
 /// ## Supported
@@ -29,7 +29,7 @@
 ///
 /// ## Flattening
 /// The tree flattens to dot-separated keys, which is the currency of
-/// `ConfigSource` (§2): `datasource: {url: x}` → `datasource.url`. Sequences
+/// `ConfigSource`: `datasource: {url: x}` → `datasource.url`. Sequences
 /// flatten by index: `hosts: [a, b]` (block form) → `hosts.0`, `hosts.1`.
 /// Null-valued keys are omitted — an empty `key:` means "this layer says
 /// nothing about `key`", letting lower-precedence layers show through
@@ -151,6 +151,15 @@ enum FlightYAML {
         var result: [Line] = []
         var number = 0
         var pastDocumentEnd = false
+
+        // A UTF-8 BOM is invisible but would otherwise become part of the
+        // first key, so `server.port` would parse as "\u{FEFF}server.port"
+        // and every lookup for it would report the key missing — from a file
+        // that visibly contains it. Windows editors write this by default.
+        var text = text
+        if text.hasPrefix("\u{FEFF}") {
+            text.removeFirst()
+        }
 
         // "\r\n" is a single Character (grapheme cluster) in Swift, so a
         // split on the newline *Character* alone would never break CRLF

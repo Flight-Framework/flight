@@ -3,7 +3,7 @@ import Foundation
 /// How a `YAMLConfigSource` treats `${VAR}` placeholders in scalar values.
 ///
 /// Substitution is a load-time convenience for referencing env vars from
-/// static config (§8) — not a vault integration. It is a property of the
+/// static config — not a vault integration. It is a property of the
 /// YAML layer specifically: environment variables *as a precedence layer*
 /// are `EnvironmentVariablesSource`'s job and always win regardless.
 public enum EnvironmentSubstitutionPolicy: Sendable {
@@ -29,7 +29,7 @@ public enum EnvironmentSubstitutionPolicy: Sendable {
 ///   (`ConfigLoadError.unresolvedSubstitution` at load time). Letting an
 ///   unset variable resolve to nothing would silently fall through to a
 ///   lower-precedence layer — e.g. prod quietly running on the base file's
-///   dev URL — which is the exact failure §5 wants loud.
+///   dev URL — which is exactly the failure that must be loud.
 /// - `${VAR:-default}` — the variable's value, or `default` when the
 ///   variable is unset **or empty** (bash `:-` semantics). The default is
 ///   literal text; nesting is not supported.

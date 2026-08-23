@@ -5,7 +5,7 @@ import FlightConfigCore
 ///
 /// `FileProvider<FlightYAMLSnapshot>` is the general path and reads the file
 /// itself, but its initializer is `async` — and Flight parses its layers
-/// synchronously at bootstrap, before any concurrency exists (§6). This
+/// synchronously at bootstrap, before any concurrency exists. This
 /// provider closes that gap: same snapshot, same lookup semantics, no `await`.
 ///
 /// It is also the shape an embedder wants when the YAML did not come from a
@@ -52,7 +52,7 @@ public struct FlightYAMLProvider: ConfigProvider {
     ) async throws -> Return {
         // A parsed document never changes — emit once, then wait for
         // cancellation. `Configuration` is immutable post-bootstrap by design
-        // (§8); code wanting live updates uses ReloadingFileProvider, which
+        //; code wanting live updates uses ReloadingFileProvider, which
         // the FileConfigSnapshot conformance makes available for free.
         try await watchValueFromValue(forKey: key, type: type, updatesHandler: updatesHandler)
     }
@@ -75,18 +75,29 @@ extension FlightYAMLProvider: CustomStringConvertible, CustomDebugStringConverti
         yamlSnapshot.description
     }
 
-    /// The file's keys and values, sorted.
+    /// The file's keys and values, sorted, with substituted values redacted.
     ///
-    /// Nothing is redacted here, and that is deliberate rather than an
-    /// oversight: a value only reaches a YAML layer by being written into a
-    /// file in the repo, and §8 is explicit that secrets belong in the env-var
-    /// layer sourced from the deployment platform. A secret in `flight.yaml`
-    /// is already disclosed by the file it lives in.
+    /// A literal written into the file is already disclosed by the file it
+    /// lives in, so printing it discloses nothing new. A `${VAR}` placeholder
+    /// is different: its resolved value came from the deployment environment,
+    /// which is exactly where credentials live. Those render as `<REDACTED>`.
+    ///
+    /// ```swift
+    /// // flight.yaml:  db: { host: localhost, password: "${DB_PASSWORD}" }
+    /// String(reflecting: provider))
+    /// // FlightYAML[flight.yaml, 2 keys: db.host=localhost, db.password=<REDACTED>]
+    /// ```
     public var debugDescription: String {
-        let values = yamlSnapshot.document.keys
+        let document = yamlSnapshot.document
+        let values = document.keys
             .sorted()
-            .map { "\($0)=\(yamlSnapshot.document.rawValue(for: $0) ?? "")" }
+            .map { key -> String in
+                if document.substitutedKeys.contains(key) {
+                    return "\(key)=<REDACTED>"
+                }
+                return "\(key)=\(document.rawValue(for: key) ?? "")"
+            }
             .joined(separator: ", ")
-        return "FlightYAML[\(providerName), \(yamlSnapshot.document.keys.count) keys: \(values)]"
+        return "FlightYAML[\(providerName), \(document.keys.count) keys: \(values)]"
     }
 }

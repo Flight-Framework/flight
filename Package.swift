@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.0
 // Flight Config — layered, environment-aware configuration resolution,
 // built on Apple's swift-configuration.
 //
@@ -18,6 +18,7 @@
 //                     still yields the whole API and Flight Core's re-export
 //                     chain is unchanged.
 import PackageDescription
+import Foundation
 
 let package = Package(
     name: "flight-config",
@@ -53,7 +54,17 @@ let package = Package(
         ),
         .testTarget(
             name: "FlightConfigTests",
-            dependencies: ["FlightConfig"]
+            dependencies: ["FlightConfig"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )
+
+// Documentation tooling only, gated so that consumers never resolve it.
+//
+//     SWIFT_CONFIG_BUILD_DOCS=1 swift package generate-documentation
+if ProcessInfo.processInfo.environment["SWIFT_CONFIG_BUILD_DOCS"] != nil {
+    package.dependencies.append(
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.3.0")
+    )
+}

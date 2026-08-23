@@ -1,300 +1,230 @@
-# Flight Config
+# flight-config
 
-Layered, environment-aware configuration for Flight — a Spring Boot analogue
-for server-side Swift. Implements the flight-config design doc: an immutable
-`Configuration` resolved once at bootstrap from environment variables,
-`flight-{env}.yaml`, and `flight.yaml`, with typed access via
-`ConfigDecodable` and loud, specific failures for everything that can only go
-wrong at runtime.
+Layered, environment-aware configuration for Swift servers, built on
+[swift-configuration](https://github.com/apple/swift-configuration).
 
-Built on Apple's [swift-configuration](https://github.com/apple/swift-configuration):
-that package supplies the provider stack, the file/env/CLI/remote providers,
-secret redaction, and access reporting; this one supplies the Flight-subset
-YAML parser, the environment layering, and the §5 failure contract. Flight
-Core depends on it and re-exports it, so app code normally just
-`import FlightCore`.
-
-## Two targets
-
-| Target | Contains | Depends on |
-|---|---|---|
-| `FlightConfigCore` | the YAML parser, `${VAR}` substitution, `ConfigDecodable`, the error types, `FlightEnvironment`, the `ConfigSource` protocol | **nothing** |
-| `FlightConfig` | the `Configuration` facade, `FlightYAMLSnapshot`/`FlightYAMLProvider`, the loader | `FlightConfigCore`, swift-configuration |
-
-The split exists so Flight Core's `flight-registration-gen` build tool can
-link the parser for its compile-time `@ConfigValue` key check without dragging
-swift-configuration (and swift-system, swift-collections,
-swift-service-lifecycle) into every consumer's build graph. It is a
-build-graph concern only: `FlightConfig` re-exports `FlightConfigCore`, so
-`import FlightConfig` still yields the whole API.
-
-## Build status
-
-Builds and passes all tests — verified 2026-08-21 against Swift 6.2.3 on
-Linux (x86_64): `swift build` clean, 102/102 swift-testing tests green,
-including process-exit tests for trap semantics and the provider-interop
-suite. Flight Core builds and passes its 56 + 16 tests against it unchanged.
-Wired into Flight Core (`../../Core/flight-core`) as a path dependency;
-Core's own suites and the flight-demo tour exercise the integration end to
-end.
-
-## Quick start
+Base file, environment overlay, environment variables — resolved in that
+precedence order, validated once at startup, and typed at the point of use.
+When a key is missing or malformed, you find out during boot with a message
+naming the key and the environment, not three services deep at request time.
 
 ```swift
-import FlightCore  // re-exports FlightConfig; or `import FlightConfig` alone
+let configuration = try Configuration.load()
 
-@main struct Main {
-    static func main() async throws {
-        // Steps 1–5 of the bootstrap sequence (§6): FLIGHT_ENV, flight.yaml,
-        // flight-{env}.yaml, env vars → one immutable Configuration.
-        let configuration = try Configuration.load()
-        try await bootstrap(configuration: configuration, modules: [AppModule.self])
-    }
-}
+let port: Int = try configuration.get("server.port")
+let poolSize = configuration.get("datasource.pool_size", default: 10)
+let certPath: String? = try configuration.getIfPresent("tls.certificate")
 ```
 
+## Installation
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/Swift-Flight/flight-config", from: "0.1.0")
+]
+```
+
+```swift
+.target(name: "MyApp", dependencies: [
+    .product(name: "FlightConfig", package: "flight-config")
+])
+```
+
+Requires Swift 6.0+. Supports macOS 15+, iOS 18+, tvOS 18+, watchOS 11+,
+visionOS 2+, and Linux.
+
+## Layering
+
+Three layers, highest precedence first:
+
+| Layer | Source | Purpose |
+|---|---|---|
+| Environment variables | `FLIGHT_SERVER_PORT` | Deployment-time overrides and secrets |
+| Environment overlay | `flight-{env}.yaml` | What differs in staging, production, test |
+| Base | `flight.yaml` | Defaults that hold everywhere |
+
+`flight.yaml` must exist. The overlay is optional — an environment that
+changes nothing simply has no file.
+
 ```yaml
-# flight.yaml — base layer, shared by every environment
-datasource:
-  url: "postgres://localhost:5432/flight_dev"
-  pool_size: 5
+# flight.yaml
 server:
   port: 8080
+datasource:
+  url: postgres://localhost/app_dev
+  pool_size: 5
 ```
 
 ```yaml
-# flight-prod.yaml — active when FLIGHT_ENV=prod, overrides key-by-key
+# flight-prod.yaml
 datasource:
-  url: "${FLIGHT_DATASOURCE_URL}"   # env-var substitution at load time
+  url: "${DATABASE_URL}"
   pool_size: 50
 ```
 
-Components read config through the `@ConfigValue` macro (declared in Flight
-Core, resolved against this package's `Configuration`):
+A key set in a higher layer wins outright. A key absent from a higher layer
+falls through to the next one.
+
+### Environment variables
+
+A dotted key maps to an upper-snake-case variable with a `FLIGHT_` prefix:
+
+```
+server.port           →  FLIGHT_SERVER_PORT
+datasource.pool_size  →  FLIGHT_DATASOURCE_POOL_SIZE
+```
+
+Setting one overrides both files, with no configuration change required.
+
+## Environments
+
+`FLIGHT_ENV` selects the overlay. Unset means `dev`.
 
 ```swift
-@Component
-struct DataSourceFactory {
-    @ConfigValue("datasource.url") var url: String
-    @ConfigValue("datasource.pool_size", default: 10) var poolSize: Int
+FlightEnvironment.current()      // FLIGHT_ENV=staging → .staging
+```
+
+`dev`, `test`, `staging`, and `prod` ship with the package, but the type is
+extensible — a deployment with its own environments adds them without waiting
+on a release:
+
+```swift
+extension FlightEnvironment {
+    static let qa = FlightEnvironment("qa")     // loads flight-qa.yaml
 }
 ```
 
-Or imperatively, anywhere the `Configuration` value (or component) is in hand:
+A value that is not one of the built-ins resolves to itself rather than
+silently collapsing to `dev`. `FLIGHT_ENV=qa` looks for `flight-qa.yaml`; if
+that file does not exist you get base-file values and a visibly absent
+overlay, rather than development configuration running under a
+production-shaped name.
+
+## Reading values
+
+Three accessors, each for a different kind of "missing":
 
 ```swift
-let url: URL = try configuration.get("datasource.url")
+// Required. Throws if absent or malformed.
+let port: Int = try configuration.get("server.port")
+
+// Has a sensible default. Returns it only when the key is ABSENT.
 let poolSize = configuration.get("datasource.pool_size", default: 10)
-let certPath: String? = try configuration.getIfPresent("tls.cert_path")
+
+// Genuinely optional — absence means the feature is off.
+let certPath: String? = try configuration.getIfPresent("tls.certificate")
 ```
 
-## Precedence (§3)
-
-Highest first; the merge is **key-by-key**, so an override file only shadows
-the keys it names:
-
-1. **Environment variables** — `datasource.url` reads `FLIGHT_DATASOURCE_URL`
-   (fixed transform: uppercase, `.` → `_`, `FLIGHT_` prefix). The deploy-time
-   escape hatch; always wins.
-2. **`flight-{env}.yaml`** — `{env}` from `FLIGHT_ENV` (`dev`, `test`,
-   `staging`, `prod`; unset → `dev`). A missing file is not an error.
-3. **`flight.yaml`** — base defaults. Required by `Configuration.load`
-   (env-var-only apps can assemble
-   `Configuration(sources: [EnvironmentVariablesSource()])` by hand).
-
-## Compile-time vs. runtime validation (§5)
-
-The project-wide rule: what is statically knowable is a compile error;
-throwing is reserved for genuinely runtime-only unknowns.
-
-- **Compile time** — a `@ConfigValue` key with no `default:` is checked
-  against `flight.yaml` by Flight Core's `FlightRegistrationPlugin` during
-  the build, using this package's own parser (build and runtime can never
-  disagree about what keys a file defines). Missing → build error at the
-  `@ConfigValue` site. Typo'd keys never reach a binary.
-- **Runtime** — a key whose value depends on the active environment (which
-  `flight-{env}.yaml` got selected, what an env var actually holds) throws
-  `ConfigError.missingKey`/`.decodingFailed` during bootstrap, naming the
-  key, the active environment, and the env var that would satisfy it.
-- **Load time** — unreadable/invalid files and unresolved `${VAR}`
-  substitutions throw `ConfigLoadError` before a `Configuration` exists.
-  An unresolved substitution fails the load rather than letting the key fall
-  through to a lower layer — the alternative is prod silently running on the
-  base file's dev values.
-
-### Accessor semantics at a glance
-
-| Accessor | absent | present, malformed |
-|---|---|---|
-| `get(_:as:) throws` | throws `missingKey` | throws `decodingFailed` |
-| `get(_:default:)` | returns default | **traps** (never masks corruption) |
-| `getIfPresent(_:as:) throws` | `nil` | throws `decodingFailed` |
-
-`@ConfigValue("key", default: v)` expands through `getIfPresent … ?? (v)`,
-so a malformed value fails the owning module's `configure(_:)` loudly
-instead of trapping or silently taking the default.
-
-## Typed access
-
-`ConfigDecodable` ships for `String`, `Int`, `Bool`, `Double`, `URL`.
-`Bool` accepts `true/false`, `yes/no`, `on/off`, `1/0` (case-insensitive);
-numeric types tolerate surrounding whitespace. Custom types conform with one
-failable initializer:
-
-```swift
-enum LogLevel: String, ConfigDecodable {
-    case debug, info, warn, error
-    init?(configValue: String) { self.init(rawValue: configValue) }
-}
-```
+> **`get(_:default:)` traps on a malformed value.** It applies the default
+> when the key is absent, never when it is present and corrupt — silently
+> substituting a default there would hide exactly the failure this library
+> exists to surface. The value can come from the environment, so a deployment
+> typo (`FLIGHT_SERVER_PORT=eighty`) reaches this path and aborts the process
+> at startup. If you need to survive a malformed value, use `getIfPresent` or
+> `get(_:as:)` and handle the error.
 
 ## The YAML subset
 
-Config files are parsed by a self-contained subset parser (`FlightYAML`),
-kept deliberately small and **loud about its edges** — anything outside the
-subset is a clear parse error naming the construct and the alternative,
-never a silent misread.
+Deliberately small: nested maps, sequences, scalars, comments, and `${VAR}`
+substitution. Flow style (`[a, b]`, `{k: v}`), block scalars, anchors, and
+aliases are rejected with a message naming the construct and what to use
+instead.
 
-Supported: block mappings and sequences (indentation-based, spaces only),
-plain / single-quoted / double-quoted scalars (with the usual escapes),
-comments, quoted keys, explicit and implicit nulls, one optional `---` /
-`...` marker pair, CRLF files. Sequences flatten by index
-(`hosts.0`, `hosts.1`); a null value means "this layer says nothing about
-this key" (an explicit `""` is a present, empty value); duplicate keys and
-dotted-key/nesting collisions are errors.
+The point is that a configuration file cannot be *subtly* wrong. Anything the
+parser does not fully understand is a loud failure at load, not a value that
+means something unexpected at runtime.
 
-Rejected with a specific error: flow style (`[a, b]` / `{a: b}`), block
-scalars (`|`/`>`), anchors/aliases/tags/merge keys, directives, multiple
-documents, tab indentation, multi-line plain scalars.
+## Substitution and secrets
 
-### `${VAR}` substitution (§8)
+`${VAR}` pulls from the process environment, with an optional fallback:
 
-A load-time convenience for referencing env vars from static config — not a
-secrets manager (secrets belong in the env-var layer, sourced from the
-deployment platform):
+```yaml
+datasource:
+  url: "${DATABASE_URL}"
+  pool_size: ${DB_POOL_SIZE:-10}
+```
 
-- `${VAR}` — the variable's value; **unset fails the load**
-  (`ConfigLoadError.unresolvedSubstitution`)
-- `${VAR:-default}` — fallback when unset *or empty* (bash `:-` semantics)
-- `$$` — literal `$`; a `$` not followed by `{` needs no escaping
+An unresolved `${VAR}` with no fallback fails the whole load. That is
+deliberate: the alternative is a production deployment quietly running on
+base-layer development values.
 
-Substitution applies to values only (never keys), after quote processing.
-
-## Testing (§7)
-
-Unit-style — hand a test exactly the keys it needs:
+**Substituted values are treated as secrets.** They came from the deployment
+environment, which is where credentials live, so they render as `<REDACTED>`
+in any diagnostic dump:
 
 ```swift
-@Test
-func dataSourceUsesConfiguredPoolSize() throws {
-    let config = Configuration(sources: [
-        TestConfigSource(["datasource.pool_size": "3"])
-    ])
-    #expect(try config.get("datasource.pool_size", as: Int.self) == 3)
-}
+String(reflecting: provider)
+// FlightYAML[flight.yaml, 2 keys: db.host=localhost, db.password=<REDACTED>]
 ```
 
-Integration-style — `test` is a first-class `FlightEnvironment` case so
-`flight-test.yaml` can live alongside the other files, and every `load`
-parameter is injectable (directory, environment, process-environment
-dictionary), making full loads reproducible without touching global state:
+A literal written into the file is printed as-is — it is already disclosed by
+the file it lives in.
+
+## Errors
+
+Every failure names the key, and load failures name the file, line, and
+column:
+
+```
+Configuration key 'server.port' is not set in any source (active environment: prod).
+Add it to flight.yaml or flight-prod.yaml, or set the FLIGHT_SERVER_PORT
+environment variable.
+```
+
+```
+flight.yaml:4:3: flow style ('[…]' / '{…}') is not supported by the Flight
+YAML subset — quote the value if the character is literal
+```
+
+`ConfigError` and `ConfigLoadError` are both `Equatable` and conform to
+`LocalizedError`, so they can be asserted on directly in tests and logged
+through `localizedDescription` without losing the message.
+
+## Interoperating
+
+`Configuration.reader` hands the same layered stack to any library that takes
+a swift-configuration `ConfigReader`, so an app configures its dependencies
+from one stack rather than maintaining two:
 
 ```swift
-let config = try Configuration.load(
-    from: fixtureDirectory,
-    processEnvironment: ["FLIGHT_ENV": "test"]
-)
+let app = Application(configuration: configuration.reader)
 ```
 
-## Layout
-
-```
-Sources/FlightConfigCore/         no dependencies — also linked by the build tool
-  FlightYAML.swift                the subset parser
-  FlightYAMLDocument.swift        parse + flatten + substitute; `keys` for tooling
-  EnvironmentSubstitution.swift   ${VAR} / ${VAR:-default} engine
-  ConfigDecodable.swift           typed decoding + std conformances
-  ConfigError.swift               ConfigError (resolution) + ConfigLoadError (load)
-  FlightEnvironment.swift         FLIGHT_ENV resolution (§4)
-  FlightConfigFiles.swift         flight.yaml / flight-{env}.yaml names
-  ConfigSource.swift              the pre-migration source protocol
-  YAMLConfigSource.swift          a document as a ConfigSource
-  EnvironmentVariablesSource.swift  the FLIGHT_* key transform
-  TestConfigSource.swift          in-memory source for tests (§7)
-
-Sources/FlightConfig/             + swift-configuration
-  Configuration.swift             the facade: typed accessors over a provider stack
-  ConfigurationLoader.swift       Configuration.load — bootstrap steps 1–5
-  FlightYAMLSnapshot.swift        FlightYAML as a FileConfigSnapshot
-  FlightYAMLProvider.swift        serves a parsed snapshot without async
-  ConfigSourceProvider.swift      ConfigSource → ConfigProvider bridge
-  Exports.swift                   re-exports FlightConfigCore
-
-Tests/FlightConfigTests/          102 tests: grammar, rejections, substitution,
-                                  precedence, loader integration, trap semantics,
-                                  provider interop
-```
-
-## Beyond the base layering
-
-`Configuration` is an ordered stack of swift-configuration **providers**, so
-anything that ecosystem grows plugs straight in — the §8 extension point,
-delivered by someone else's code:
+Custom providers layer in at any precedence:
 
 ```swift
 let configuration = try Configuration.load(
-    // Inserted above the env-var layer, so they win.
-    additionalProviders: [
-        DirectoryFilesProvider(directoryPath: "/run/secrets"),  // K8s / Docker secrets
-        CommandLineArgumentsProvider(),
-    ],
-    secrets: .specific(["FLIGHT_DATASOURCE_PASSWORD"]),
-    accessReporter: AccessLogger(logger: logger)
+    additionalProviders: [remoteSecretsProvider]
 )
 ```
 
-- **Secrets** — `secrets:` marks env vars sensitive, so they redact to
-  `<REDACTED>` in access logs and in `configuration.debugDescription`. Vaults
-  remain the platform's job, but a third-party provider (AWS Secrets Manager,
-  Vault) is now a list entry rather than a fork.
-- **Access reporting** — `accessReporter:` receives an event per resolved key:
-  which provider won, under what encoded key, and whether conversion failed.
-- **Diagnostics** — `description` summarizes the stack (which layers, how many
-  keys each, highest precedence first) and prints no values, so it is always
-  safe to log; `debugDescription` adds the values, secret-marked ones redacted.
-- **Hot reloading** — still not what `Configuration` does: it is immutable
-  post-bootstrap by design, matching Flight Core's frozen-`Container`
-  decision, and config change means restart. But `FlightYAMLSnapshot`
-  conforms to `FileConfigSnapshot`, so
-  `ReloadingFileProvider<FlightYAMLSnapshot>` exists for code that genuinely
-  wants to watch a file, and it parses the same subset with the same errors.
+## Two modules
 
-### Handing config to other libraries
+`FlightConfig` is the runtime — the `Configuration` facade, the loader, the
+provider bridge. This is what an application imports.
 
-`configuration.reader` yields a swift-configuration `ConfigReader` — the type
-Vapor, Hummingbird, and the Swift Temporal SDK accept — so those libraries
-read from the same layered stack rather than a second one.
+`FlightConfigCore` is the grammar and vocabulary: the YAML parser, `${VAR}`
+substitution, `ConfigDecodable`, the error types, `FlightEnvironment`. It has
+**no dependencies**, which matters because build tools link it to check
+configuration keys at compile time, and a build tool's dependencies are paid
+for by every consumer's build.
 
-One semantic caveat at that boundary, and the reason Flight's own code never
-resolves through it: a reader's optional and `default:` accessors **swallow**
-type-conversion errors, returning nil or the default where `get`/`getIfPresent`
-fail loudly. That is the reader's documented contract, not a defect — but it
-is the §5 failure mode, so keep it on the far side of the handoff.
+Importing `FlightConfig` re-exports `FlightConfigCore`, so applications get
+the whole API from one import.
 
-## Non-goals (§8)
+## What this is not
 
-- No hot reloading in `Configuration` itself — see above for the escape hatch.
-- No secrets *storage* — `${VAR}` substitution references env vars, `secrets:`
-  redacts them; vaults are the platform's job.
+It does not fetch remote configuration, manage secrets, or reload at runtime.
+Those are all provider concerns, and swift-configuration's provider protocol
+is the seam for them — a remote-secrets provider layers in through
+`additionalProviders` without this package growing to accommodate it.
 
-## Design deltas vs. the design doc
+## Documentation
 
-All additive or narrowing, none silent:
+```bash
+SWIFT_CONFIG_BUILD_DOCS=1 swift package generate-documentation --target FlightConfig
+```
 
-| Delta | Why |
-|---|---|
-| `ConfigError.missingKey` carries `(key:environment:)`, not a bare `String` | §5 requires the runtime error to "identify the key **and the active environment**"; the payload is where that has to live. |
-| `getIfPresent(_:as:)` added beside the two spec'd accessors | "Absence means feature off" config (optional TLS cert path) has no default value to hand `get(_:default:)`; also what `@ConfigValue default:` expands through so malformed values throw rather than trap. |
-| Not a leaf package any more — depends on swift-configuration | The §8 non-goals (remote sources, secrets, reload) all reduce to "someone else's provider" once the stack is Apple's. `FlightConfigCore` keeps the zero-dependency property where it actually pays: the build tool. |
-| Resolution walks providers asking `.string`, then `.int`/`.double`/`.bool` | swift-configuration's lookup is type-directed, and a provider holding a typed value refuses a `.string` request rather than stringifying it. Asking only for `.string` would read every JSON/TOML integer as **absent** and silently resolve it from a lower layer — §5's exact failure mode. The retry is what keeps third-party providers usable. |
-| `Configuration` is a facade, not a `ConfigReader` typealias | A reader's optional/`default:` accessors swallow type-conversion errors. Flight resolves through the provider API, where a malformed value throws, and applies `ConfigDecodable` itself. |
+## License
+
+MIT. See [LICENSE](LICENSE).

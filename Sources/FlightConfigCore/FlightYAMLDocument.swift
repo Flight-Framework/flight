@@ -13,7 +13,7 @@ import Foundation
 /// Every way a file can be wrong — syntax, out-of-subset constructs,
 /// unresolved substitutions, colliding keys — throws a `ConfigLoadError` from
 /// this initializer, before any `Configuration` exists: the fast, loud
-/// startup failure §5 calls for.
+/// startup failure this library aims for.
 public struct FlightYAMLDocument: Sendable, Hashable {
 
     /// Diagnostic name — the file name for file-backed documents. Appears in
@@ -22,9 +22,17 @@ public struct FlightYAMLDocument: Sendable, Hashable {
 
     private let values: [String: String]
 
+    /// Keys whose source text contained a `${VAR}` placeholder.
+    ///
+    /// A substituted value came from the environment, which is where secrets
+    /// live — so these are the keys a diagnostic dump must redact. Recorded
+    /// at parse time because the placeholder is gone by the time anyone
+    /// reads the resolved value.
+    public let substitutedKeys: Set<String>
+
     /// Every flattened key this document holds. Exposed for tooling: the
     /// Flight Core build plugin checks `@ConfigValue` keys against the base
-    /// file's key set at compile time (§5), and Actuator-style dashboards
+    /// file's key set at compile time, and Actuator-style dashboards
     /// enumerate layers.
     public var keys: Set<String> {
         Set(values.keys)
@@ -68,8 +76,12 @@ public struct FlightYAMLDocument: Sendable, Hashable {
         }
 
         var resolved: [String: String] = [:]
+        var substituted: Set<String> = []
         resolved.reserveCapacity(flat.count)
         for entry in flat {
+            if entry.value.contains("${") {
+                substituted.insert(entry.key)
+            }
             guard let environment else {
                 resolved[entry.key] = entry.value
                 continue
@@ -92,11 +104,11 @@ public struct FlightYAMLDocument: Sendable, Hashable {
             }
         }
         self.values = resolved
+        self.substitutedKeys = substituted
     }
 
     /// Reads and parses a file. Whether a *missing* file is an error is the
-    /// caller's policy (§6: a missing `flight-{env}.yaml` is fine, a missing
-    /// `flight.yaml` is not), so this initializer only throws for files that
+    /// caller's policy, so this initializer only throws for files that
     /// exist but cannot be read or parsed — check existence first.
     public init(
         contentsOf url: URL,
@@ -107,9 +119,43 @@ public struct FlightYAMLDocument: Sendable, Hashable {
         do {
             text = try String(contentsOf: url, encoding: .utf8)
         } catch {
-            throw ConfigLoadError.unreadableFile(path: url.path, reason: "\(error)")
+            throw ConfigLoadError.unreadableFile(
+                path: url.path, reason: Self.describeReadFailure(error, at: url)
+            )
         }
         try self.init(string: text, name: name, substitution: substitution)
+    }
+
+    /// A short, operator-readable reason a file could not be read.
+    ///
+    /// The underlying error's own description is an `NSError` dump — domain,
+    /// code, and a `userInfo` blob — which is the first thing an operator
+    /// sees when a deployment's config file is wrong. This names the actual
+    /// condition instead.
+    private static func describeReadFailure(_ error: any Error, at url: URL) -> String {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            return "it is a directory, not a file"
+        }
+        if !FileManager.default.isReadableFile(atPath: url.path) {
+            return "the process does not have permission to read it"
+        }
+        if let cocoa = error as? CocoaError {
+            switch cocoa.code {
+            case .fileReadInapplicableStringEncoding:
+                return "it is not valid UTF-8 text"
+            case .fileReadNoSuchFile:
+                return "it no longer exists"
+            case .fileReadNoPermission:
+                return "the process does not have permission to read it"
+            case .fileReadTooLarge:
+                return "it is too large to read into memory"
+            default:
+                break
+            }
+        }
+        return "the file could not be read as UTF-8 text"
     }
 
     /// The raw string this document holds for `key`, or nil if absent.
@@ -120,8 +166,7 @@ public struct FlightYAMLDocument: Sendable, Hashable {
     /// The elements of a flattened sequence at `key` — the contiguous run of
     /// `key.0`, `key.1`, … — or nil if this document has no sequence there.
     ///
-    /// Sequences flatten by index rather than staying structured (§ the YAML
-    /// subset), so this is what reassembles them for callers that want an
+    /// Sequences flatten by index rather than staying structured, so this is what reassembles them for callers that want an
     /// array. A `key.0` with no `key.1` is a one-element array, which is
     /// indistinguishable from a one-element sequence in the source — and is
     /// exactly what the source said.
