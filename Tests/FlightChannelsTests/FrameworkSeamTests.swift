@@ -51,8 +51,48 @@ struct FrameworkSeamTests {
                 socket.pushReserved(topic: event.topic, event: "flight:presence_state", payload: ["who": "me"])
                 return .none
             }
+            // The shape that used to kill the process: an application handler
+            // deriving an event name from client payload. A client sending
+            // `{"type": "flight:anything"}` reached a `precondition`.
+            if event.event == "echo_type", case .object(let fields) = event.payload,
+                case .string(let type)? = fields["type"]
+            {
+                socket.push(topic: event.topic, event: type, payload: ["ok": true])
+                return .reply(["pushed": .string(type)])
+            }
             return .none
         }
+    }
+
+    @Test("a reserved event name from client payload is refused, not fatal")
+    func reservedNameFromPayloadDoesNotKillTheProcess() async throws {
+        // `push`/`pushReserved`/`publish` asserted their namespace rule with
+        // `precondition`, which terminates the process — and with it every
+        // other connected socket on the node — because one caller passed a
+        // bad name.
+        //
+        // The framework filters `flight:`-prefixed events arriving in an
+        // envelope before any handler sees them, so the wire path is closed.
+        // A handler deriving a name from *payload* is not, and doing that is
+        // an ordinary pattern.
+        let (client, _) = try harness()
+        let wire = ChannelWireClient(socket: try await client.webSocket("/socket"))
+        try wire.send(ref: "1", topic: "seam:a", event: "flight:join")
+        _ = try await wire.expectEnvelope { $0.ref == "1" }
+
+        try wire.send(
+            ref: "2", topic: "seam:a", event: "echo_type",
+            payload: ["type": "flight:presence_state"])
+
+        // The reply proves the process is still alive and the socket still
+        // serving; the push itself was dropped.
+        let reply = try await wire.expectEnvelope { $0.ref == "2" }
+        #expect(reply != nil)
+
+        // And an ordinary name still goes through.
+        try wire.send(ref: "3", topic: "seam:a", event: "echo_type", payload: ["type": "ping"])
+        let pushed = try await wire.expectEnvelope { $0.event == "ping" }
+        #expect(pushed != nil, "a non-reserved name must still be pushed")
     }
 
     private func harness() throws -> (client: TestClient, probe: SeamProbe) {
@@ -63,7 +103,7 @@ struct FrameworkSeamTests {
             static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
             func configure(_ container: Container) throws {}
         }
-        for moduleType in try resolveModuleOrder([SeamModule.self]) {
+        for moduleType in try Flight.resolveModuleOrder([SeamModule.self]) {
             try moduleType.init().configure(container)
         }
         container.registerChannel("seam:*") { _ in SeamChannel(probe: probe) }

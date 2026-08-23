@@ -21,10 +21,10 @@ extension ChannelWireClient {
     }
 }
 
-@Suite("Socket handler — join, replies, errors (§4, §5)", .timeLimit(.minutes(1)))
+@Suite("Socket handler — join, replies, errors", .timeLimit(.minutes(1)))
 struct SocketHandlerJoinTests {
 
-    @Test("join ok: flight:reply echoes the ref and carries initial state (§4.3)")
+    @Test("join ok: flight:reply echoes the ref and carries initial state")
     func joinOk() async throws {
         let harness = try Harness()
         let wire = try await harness.wire()
@@ -51,7 +51,7 @@ struct SocketHandlerJoinTests {
         wire.close()
     }
 
-    @Test("join rejected: flight:error with the rejection reason and the ref (§4.2, §5)")
+    @Test("join rejected: flight:error with the rejection reason and the ref")
     func joinRejected() async throws {
         let harness = try Harness()
         let wire = try await harness.wire()
@@ -67,7 +67,7 @@ struct SocketHandlerJoinTests {
         wire.close()
     }
 
-    @Test("authorization composes with upgrade-time identity (§5)")
+    @Test("authorization composes with upgrade-time identity")
     func principalGate() async throws {
         let harness = try Harness()
 
@@ -132,10 +132,10 @@ struct SocketHandlerJoinTests {
     }
 }
 
-@Suite("Socket handler — application events (§3, §4.3)", .timeLimit(.minutes(1)))
+@Suite("Socket handler — application events", .timeLimit(.minutes(1)))
 struct SocketHandlerEventTests {
 
-    @Test("handler reply rides flight:reply with the inbound ref (§4.3)")
+    @Test("handler reply rides flight:reply with the inbound ref")
     func echo() async throws {
         let harness = try Harness()
         let wire = try await harness.wire()
@@ -194,7 +194,7 @@ struct SocketHandlerEventTests {
         wire.close()
     }
 
-    @Test("direct socket push: server-initiated, ref null (§4.1)")
+    @Test("direct socket push: server-initiated, ref null")
     func socketPush() async throws {
         let harness = try Harness()
         let wire = try await harness.wire()
@@ -207,7 +207,7 @@ struct SocketHandlerEventTests {
         wire.close()
     }
 
-    @Test("heartbeat: flight:reply on the control topic, ref echoed (§6)")
+    @Test("heartbeat: flight:reply on the control topic, ref echoed")
     func heartbeat() async throws {
         let harness = try Harness()
         let wire = try await harness.wire()
@@ -219,10 +219,10 @@ struct SocketHandlerEventTests {
     }
 }
 
-@Suite("Socket handler — broadcast via PubSub (§3)", .timeLimit(.minutes(1)))
+@Suite("Socket handler — broadcast via PubSub", .timeLimit(.minutes(1)))
 struct SocketHandlerBroadcastTests {
 
-    @Test("one shout reaches every joined socket, including the sender (§3)")
+    @Test("one shout reaches every joined socket, including the sender")
     func fanOut() async throws {
         let harness = try Harness()
         let alice = try await harness.wire("/socket?token=alice")

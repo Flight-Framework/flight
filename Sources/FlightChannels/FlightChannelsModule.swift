@@ -4,7 +4,7 @@ import FlightPubSub
 import FlightWeb
 import HTTPTypes
 
-/// Registers Channels with the container (§9). Three components, no service —
+/// Registers Channels with the container. Three components, no service —
 /// the socket-owning handler's lifetime is per connection, driven by the
 /// upgrade hook, not a `ServiceGroup` member:
 ///
@@ -13,7 +13,7 @@ import HTTPTypes
 /// - `ChannelRouter` — built at `freeze()` from every `ChannelRegistration`
 ///   any module registered; duplicate or malformed topic patterns fail the
 ///   app at bootstrap, before the socket route ever serves.
-/// - `ChannelBroadcaster` — the broadcast seam over `any PubSub` (§3).
+/// - `ChannelBroadcaster` — the broadcast seam over `any PubSub`.
 ///
 /// An app module declares the dependency, registers its channels, and mounts
 /// the socket route:
@@ -52,12 +52,12 @@ public struct FlightChannelsModule: FlightModule {
 }
 
 extension Container {
-    /// Mounts the channels WebSocket endpoint (§9) as an ordinary upgrade
+    /// Mounts the channels WebSocket endpoint as an ordinary upgrade
     /// route — the same `registerRoute` pipeline as everything else, so the
     /// endpoint shows up in startup logs and introspection like any route.
     ///
     /// `authenticate` runs during the initial HTTP upgrade request, before
-    /// the WebSocket exists (§5) — exactly where connection identity is
+    /// the WebSocket exists — exactly where connection identity is
     /// established. Return the connection's principal (nil admits an
     /// anonymous socket); throw to refuse the upgrade outright:
     ///

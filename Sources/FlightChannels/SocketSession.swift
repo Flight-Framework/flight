@@ -49,7 +49,7 @@ internal actor SocketSession {
         self.logger = logger
     }
 
-    // MARK: - Liveness (§6)
+    // MARK: - Liveness
 
     internal func touch() {
         lastActivity = .now
@@ -59,7 +59,7 @@ internal actor SocketSession {
         ContinuousClock.now - lastActivity
     }
 
-    // MARK: - Inbound routing (§3 step 2)
+    // MARK: - Inbound routing
 
     internal func handle(_ envelope: Envelope) async -> Directive {
         guard !isTornDown else { return .proceed }
@@ -72,7 +72,7 @@ internal actor SocketSession {
         case .heartbeat:
             heartbeat(envelope)
         case .close:
-            // Graceful client-initiated teardown (§4.2). The ack must be
+            // Graceful client-initiated teardown. The ack must be
             // enqueued BEFORE teardown — teardown finishes the outbound
             // queue, and the writer flushes only what was queued first.
             if let ref = envelope.ref {
@@ -85,7 +85,7 @@ internal actor SocketSession {
             socket.sendError(ref: envelope.ref, topic: envelope.topic, reason: ChannelErrorReason.invalidEvent)
         case nil where envelope.event.hasPrefix(ReservedEvent.prefix):
             // flight:-namespaced but not a reserved event we know. Because
-            // Flight versions protocol and clients together (§7), this is a
+            // Flight versions protocol and clients together, this is a
             // client bug — named as such, connection kept.
             socket.sendError(ref: envelope.ref, topic: envelope.topic, reason: ChannelErrorReason.invalidEvent)
         case nil:
@@ -94,7 +94,7 @@ internal actor SocketSession {
         return .proceed
     }
 
-    // MARK: - Join (§5: the join is the gate)
+    // MARK: - Join (the join is the gate)
 
     private func join(_ envelope: Envelope) async {
         let topic = envelope.topic
@@ -127,7 +127,7 @@ internal actor SocketSession {
             socket.sendError(ref: envelope.ref, topic: topic, reason: rejection.reason)
 
         case .accepted(let initialState):
-            // Order is load-bearing (§3 step 5, and PubSub's "effective when
+            // Order is load-bearing (PubSub's "effective when
             // subscribe returns"): subscribe first so no broadcast between
             // admission and pump start is lost; enqueue the join reply
             // second; start the pump last. Everything funnels through one
@@ -154,7 +154,7 @@ internal actor SocketSession {
         }
     }
 
-    /// One channel's fan-in (§3 step 5): iterate the PubSub stream, decode
+    /// One channel's fan-in: iterate the PubSub stream, decode
     /// each broadcast frame, and enqueue it for this socket. `nonisolated`
     /// so per-message delivery never hops through the session actor.
     private nonisolated static func pump(
@@ -193,7 +193,7 @@ internal actor SocketSession {
         }
     }
 
-    // MARK: - Heartbeat (§6)
+    // MARK: - Heartbeat
 
     private func heartbeat(_ envelope: Envelope) {
         // touch() already ran in the frame loop; just ack.
@@ -202,7 +202,7 @@ internal actor SocketSession {
         }
     }
 
-    // MARK: - Application events (§3 step 2)
+    // MARK: - Application events
 
     private func dispatchApplicationEvent(_ envelope: Envelope) async {
         guard let entry = joined[envelope.topic] else {
@@ -227,7 +227,7 @@ internal actor SocketSession {
         }
     }
 
-    // MARK: - Teardown (§6: structured, no manual cleanup)
+    // MARK: - Teardown (structured, no manual cleanup)
 
     /// Leaves every channel (handler `leave` runs, PubSub pumps end) and
     /// finishes the outbound queue so the writer drains and exits.

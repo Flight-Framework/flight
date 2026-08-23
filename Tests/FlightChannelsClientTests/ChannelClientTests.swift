@@ -3,7 +3,7 @@ import FlightChannelsTesting
 import Foundation
 import Testing
 
-@Suite("Swift client — join, push, replies (§7.2, §4.3)", .timeLimit(.minutes(1)))
+@Suite("Swift client — join, push, replies", .timeLimit(.minutes(1)))
 struct ChannelClientTests {
 
     @Test("connect, join, awaited push, disconnect — the happy path")
@@ -25,7 +25,7 @@ struct ChannelClientTests {
         #expect(await client.connectionState == .closed)
     }
 
-    @Test("join rejection throws channelError with the wire reason (§5)")
+    @Test("join rejection throws channelError with the wire reason")
     func joinRejected() async throws {
         let harness = try ClientHarness()
         let client = harness.makeClient()
@@ -52,7 +52,7 @@ struct ChannelClientTests {
         await client.disconnect()
     }
 
-    @Test("a handler that never replies times the push out (§4.3)")
+    @Test("a handler that never replies times the push out")
     func pushTimeout() async throws {
         let harness = try ClientHarness()
         let client = harness.makeClient(
@@ -77,7 +77,7 @@ struct ChannelClientTests {
         }
     }
 
-    @Test("server pushes arrive on the channel's message stream (§3 step 5)")
+    @Test("server pushes arrive on the channel's message stream")
     func messageStream() async throws {
         let harness = try ClientHarness()
         let sender = harness.makeClient()

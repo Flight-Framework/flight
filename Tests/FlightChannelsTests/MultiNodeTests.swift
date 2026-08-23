@@ -7,12 +7,12 @@ import FlightWeb
 import FlightWebTesting
 import Testing
 
-/// The §3 payoff, proven: "Channels code is identical whether the other
+/// The payoff, proven: "Channels code is identical whether the other
 /// subscriber is on the same process or a different machine." Two complete
 /// Flight apps — separate containers, separate LocalPubSubs — joined only
 /// by PubSub's distributed-adapter seam over an in-memory cluster. Sockets
 /// on different nodes share a room.
-@Suite("Multi-node broadcast (§3 step 3→4)", .timeLimit(.minutes(1)))
+@Suite("Multi-node broadcast", .timeLimit(.minutes(1)))
 struct MultiNodeTests {
 
     private struct Node {
@@ -52,7 +52,7 @@ struct MultiNodeTests {
                 cluster.makeAdapter()
             }
             container.register(ChannelEvents.self, scope: .singleton) { _ in ChannelEvents() }
-            for moduleType in try resolveModuleOrder([NodeModule.self]) {
+            for moduleType in try Flight.resolveModuleOrder([NodeModule.self]) {
                 let module = moduleType.init()
                 try module.configure(container)
             }

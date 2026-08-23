@@ -1,4 +1,4 @@
-/// When (and whether) the client re-dials after a dropped connection (§6:
+/// When (and whether) the client re-dials after a dropped connection (
 /// reconnection is client-driven).
 public struct ReconnectPolicy: Sendable {
     /// Delay before reconnect attempt `attempt` (1-based); nil gives up,
@@ -33,13 +33,13 @@ public struct ReconnectPolicy: Sendable {
 }
 
 public struct ChannelClientConfiguration: Sendable {
-    /// How often the client sends `flight:heartbeat` (§6). Must be well
+    /// How often the client sends `flight:heartbeat`. Must be well
     /// inside the server's timeout (default 60s server-side). A heartbeat
     /// whose reply doesn't arrive within one interval is treated as a dead
     /// connection: close and re-dial.
     public var heartbeatInterval: Duration
 
-    /// Default deadline for `join`/`push` replies (§4.3). Per-call
+    /// Default deadline for `join`/`push` replies. Per-call
     /// overridable.
     public var pushTimeout: Duration
 
@@ -73,7 +73,7 @@ public enum ChannelClientError: Error, Sendable, Equatable, CustomStringConverti
     /// The client is not connected (call `connect()`, or the connection
     /// dropped and reconnection hasn't succeeded yet).
     case notConnected
-    /// No reply within the deadline (§4.3). The channel may still have
+    /// No reply within the deadline. The channel may still have
     /// processed the message — at-most-once semantics, inherited end to end.
     case timedOut
     /// The connection dropped while this message awaited its reply.

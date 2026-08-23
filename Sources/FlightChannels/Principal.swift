@@ -1,6 +1,6 @@
-/// The identity a `Socket` carries (§5), as Channels needs to see it.
+/// The identity a `Socket` carries, as Channels needs to see it.
 ///
-/// Design delta, recorded in README: the design doc names Flight Security
+/// Recorded in README: the intended design names Flight Security
 /// Core's `Principal` here, but Security Core is not yet built — and
 /// Channels' actual requirement is only "the join gate can read who this
 /// is". So Channels owns the *seam*: a minimal protocol with exactly the
@@ -8,7 +8,7 @@
 /// `hasRole(_:)`). When flight-security-core ships, its `Principal`
 /// conforms retroactively and the authentication middleware's task-local
 /// feeds `registerChannelSocket`'s `authenticate` closure — no Channels
-/// change required. Same "seam, not engine" posture as §5.
+/// change required. Same "seam, not engine" posture as
 public protocol ChannelPrincipal: Sendable {
     /// The stable identity — a user ID, a service name.
     var subject: String { get }

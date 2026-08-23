@@ -10,7 +10,7 @@ import HummingbirdWSClient
 import Logging
 import Testing
 
-// MARK: - A real transport for the reference client (§7.2)
+// MARK: - A real transport for the reference client
 //
 // The shipped client is deliberately transport-free; this is the "real
 // socket" adapter an app would write (or a future FlightChannelsTransport
@@ -144,7 +144,7 @@ func withRunningChannelServer(
 
 // MARK: - Tests
 
-@Suite("End to end over a real socket (§7)", .timeLimit(.minutes(2)))
+@Suite("End to end over a real socket", .timeLimit(.minutes(2)))
 struct EndToEndTests {
 
     private func makeClient(port: Int, heartbeat: Duration = .seconds(25)) -> ChannelClient {

@@ -1,7 +1,7 @@
 // swift-tools-version: 6.1
 // Flight Channels — the stateful protocol layer between a raw WebSocket and
 // topic-based messaging: join/leave, message routing to per-topic handlers,
-// replies, heartbeats, and reconnection (flight-channels-design.md).
+// replies, heartbeats, and reconnection.
 import PackageDescription
 
 let package = Package(
@@ -21,11 +21,11 @@ let package = Package(
         // The server: Channel protocol, Socket, ChannelRouter,
         // ChannelBroadcaster, ChannelSocketHandler, FlightChannelsModule.
         .library(name: "FlightChannels", targets: ["FlightChannels"]),
-        // The wire protocol (§4) on its own: Envelope, JSONValue, reserved
+        // The wire protocol on its own: Envelope, JSONValue, reserved
         // events. Shared by server and Swift client; importable by an app's
         // shared message-type module without dragging in either side.
         .library(name: "FlightChannelsProtocol", targets: ["FlightChannelsProtocol"]),
-        // The Swift reference client (§7.2): ChannelClient, transport seam,
+        // The Swift reference client: ChannelClient, transport seam,
         // reconnect-with-backoff-and-rejoin. Depends only on the protocol
         // target and Foundation.
         .library(name: "FlightChannelsClient", targets: ["FlightChannelsClient"]),
@@ -37,7 +37,7 @@ let package = Package(
         .package(path: "../../Core/flight-core"),
         .package(path: "../../PubSub/flight-pubsub"),
         .package(path: "../../Web/flight-web"),
-        // Dependency policy follows Flight Core §9: Apple-adjacent,
+        // Dependency policy follows Flight Core: Apple-adjacent,
         // SSWG-blessed only.
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         // E2E tests only: a real WebSocket client against a bound

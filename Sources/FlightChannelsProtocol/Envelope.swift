@@ -2,13 +2,13 @@ import struct Foundation.Data
 import class Foundation.JSONDecoder
 import class Foundation.JSONEncoder
 
-/// The one wire shape (§4.1): client → server and server → client share this
+/// The one wire shape: client → server and server → client share this
 /// envelope. JSON text frames in v1; the payload stays opaque to the framing
 /// layer the same way PubSub's does.
 ///
 ///     { "ref": "7", "topic": "room:42", "event": "new_msg", "payload": {…} }
 ///
-/// `ref` correlates a request with its reply (§4.3); server-initiated pushes
+/// `ref` correlates a request with its reply; server-initiated pushes
 /// carry `ref: null`. All four keys are always present on the wire —
 /// "one well-designed shape", no optional-field dialects.
 public struct Envelope: Sendable, Equatable {
@@ -16,10 +16,10 @@ public struct Envelope: Sendable, Equatable {
     /// pushes (encoded as an explicit JSON `null`).
     public var ref: String?
     public var topic: String
-    /// Reserved lifecycle events are namespaced `flight:` (§4.2); everything
+    /// Reserved lifecycle events are namespaced `flight:`; everything
     /// else is an application event.
     public var event: String
-    /// Opaque to the framing layer (§4.1).
+    /// Opaque to the framing layer.
     public var payload: JSONValue
 
     public init(ref: String?, topic: String, event: String, payload: JSONValue = .object([:])) {
@@ -63,7 +63,7 @@ extension Envelope: Codable {
 
 // MARK: - Text-frame codec
 
-/// A malformed inbound frame. Because Flight owns both clients (§4), a frame
+/// A malformed inbound frame. Because Flight owns both clients, a frame
 /// that doesn't decode is a bug or an attack, never a compatibility case —
 /// the server responds by closing the socket (`CloseCode.protocolViolation`).
 public struct EnvelopeDecodingError: Error, Sendable, CustomStringConvertible {

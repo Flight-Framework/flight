@@ -3,15 +3,15 @@
 The stateful protocol layer between a raw WebSocket and topic-based
 messaging: clients join named topics, exchange messages bidirectionally with
 per-topic server handler logic, and receive fan-out from anything that
-publishes to those topics. Design: `../flight-channels-design.md`; scope
-modeled on Phoenix Channels, wire protocol Flight's own (§4).
+publishes to those topics. Scope
+modeled on Phoenix Channels, wire protocol Flight's own.
 
-It sits exactly between two things that already exist (§1):
+It sits exactly between two things that already exist:
 
 - **Below:** Flight Web's `ConnectionUpgradeHandler` owns the raw WebSocket.
   Channels is one.
 - **Beside:** Flight PubSub does the fan-out. Channels routes and frames;
-  PubSub delivers — on one node or twenty, invisibly (§3).
+  PubSub delivers — on one node or twenty, invisibly.
 
 What Channels adds is the per-connection, per-topic session protocol:
 join/leave, routing to handlers, replies, heartbeats, reconnection.
@@ -22,11 +22,32 @@ join/leave, routing to handlers, replies, heartbeats, reconnection.
 |---|---|---|
 | `FlightChannels` | Server: `Channel`, `Socket`, `ChannelRouter`, `ChannelBroadcaster`, `ChannelSocketHandler`, `FlightChannelsModule` | Core, PubSub, Web |
 | `FlightChannelsProtocol` | The wire protocol alone: `Envelope`, `JSONValue`, reserved events, error reasons, close codes | nothing |
-| `FlightChannelsClient` | Swift reference client (§7.2): `ChannelClient`, `ChannelHandle`, transport seam, reconnect-with-backoff-and-rejoin | Protocol only |
+| `FlightChannelsClient` | Swift reference client: `ChannelClient`, `ChannelHandle`, transport seam, reconnect-with-backoff-and-rejoin | Protocol only |
 | `FlightChannelsTesting` | `InMemoryChannelTransport` (client ↔ in-process server, no socket), `ChannelWireClient` (raw-envelope driver) | the above + WebTesting |
 
-The JS/TS reference client (§7.1) lives beside this package at
+The JS/TS reference client lives beside this package at
 `../flight-channels-js` — same protocol, same versioning.
+
+## Backpressure and blast radius
+
+A socket's outbound queue is bounded by
+`flight.channels.outbound-buffer-size` (256 by default). It used to be
+unbounded: a client that stopped reading — a backgrounded tab, a wedged
+connection, a phone in a tunnel — accumulated every message published to its
+topics with no ceiling, so one stalled subscriber could exhaust the server's
+memory while the watchdog waited out a 60-second heartbeat timeout.
+
+Full means the **oldest** messages go, not the newest: a client behind on a
+realtime feed wants current state, not a backlog it can never catch up on.
+Drops are counted per socket (`Socket.droppedEnvelopeCount`) and logged, so a
+subscriber falling behind is visible rather than silent.
+
+Nothing in the request path calls `precondition` any more. A reserved event
+name reaching `push`, `pushReserved`, or a broadcast is refused and logged.
+It used to terminate the process — every other connected socket with it —
+because one caller passed a bad name, and while the framework filters
+`flight:`-prefixed events arriving in an envelope, an application deriving a
+name from client *payload* is an ordinary pattern that reached the assertion.
 
 ## Server usage
 
@@ -36,7 +57,7 @@ import FlightChannels
 struct RoomChannel: Channel {
     let broadcaster: ChannelBroadcaster
 
-    // The join is the authorization gate (§5). Identity was established
+    // The join is the authorization gate. Identity was established
     // during the HTTP upgrade, before the WebSocket existed.
     func join(_ topic: String, socket: Socket) async -> JoinResult {
         guard let principal = socket.principal else { return .reject(.unauthenticated) }
@@ -48,7 +69,7 @@ struct RoomChannel: Channel {
     func handle(_ event: InboundEvent, socket: Socket) async -> HandleResult {
         switch event.event {
         case "new_msg":
-            // Channels never fans out itself — PubSub does (§3).
+            // Channels never fans out itself — PubSub does.
             await broadcaster.broadcast(topic: event.topic, event: "new_msg", payload: event.payload)
             return .reply(["sent": true])
         default:
@@ -67,7 +88,7 @@ struct AppModule: FlightModule {
             RoomChannel(broadcaster: try c.resolve(ChannelBroadcaster.self))
         }
         container.registerChannelSocket("/socket") { context in
-            // Runs during the upgrade request (§5). Return a principal,
+            // Runs during the upgrade request. Return a principal,
             // nil for anonymous, or throw HTTPError(.unauthorized).
             try await verify(context.request.queryParam("token"))
         }
@@ -88,7 +109,7 @@ await broadcaster.broadcast(topic: "room:42", event: "system", payload: ["msg": 
 await broadcaster.broadcast(topic: "room:42", event: "new_msg", payload: p, excluding: senderSocket)
 ```
 
-## Swift client usage (§7.2)
+## Swift client usage
 
 ```swift
 import FlightChannelsClient
@@ -97,16 +118,16 @@ let client = ChannelClient(url: url, transport: myTransport) // transport seam, 
 try await client.connect()
 
 let room = client.channel("room:42")
-let initialState = try await room.join()               // §5: the gate
-let reply = try await room.push("new_msg", payload: ["body": "hi"])  // §4.3: awaits flight:reply
+let initialState = try await room.join()               //: the gate
+let reply = try await room.push("new_msg", payload: ["body": "hi"])  //: awaits flight:reply
 try await room.send("typing", payload: ["on": true])   // fire-and-forget, ref: null
 
-for await message in await room.messages() {            // §3 step 5: pushes as a stream
+for await message in await room.messages() {            // step 5: pushes as a stream
     if message.isRejoin { /* fresh state after auto-reconnect */ }
 }
 ```
 
-Reconnection is client-driven (§6): on a drop the client re-dials with
+Reconnection is client-driven: on a drop the client re-dials with
 `ReconnectPolicy` backoff and rejoins every joined topic; the fresh initial
 state arrives on `messages()` as a `flight:join` message. In-flight pushes
 fail fast with `.disconnected`. Heartbeats run automatically; an unanswered
@@ -116,7 +137,7 @@ heartbeat is treated as a dead connection.
 WebSocket (the E2E suite shows a hummingbird `WSClient` adapter in ~60
 lines; `FlightChannelsTesting` ships the in-memory one).
 
-## Wire protocol (§4) — the contract all three artifacts version together
+## Wire protocol — the contract all three artifacts version together
 
 One envelope, both directions, JSON text frames in v1:
 
@@ -124,9 +145,9 @@ One envelope, both directions, JSON text frames in v1:
 { "ref": "7", "topic": "room:42", "event": "new_msg", "payload": { } }
 ```
 
-- `ref` correlates request → reply (§4.3); server pushes carry `ref: null`.
+- `ref` correlates request → reply; server pushes carry `ref: null`.
   All four keys are always present.
-- Reserved events (§4.2): `flight:join`, `flight:leave`, `flight:reply`,
+- Reserved events: `flight:join`, `flight:leave`, `flight:reply`,
   `flight:error` (payload `{"reason": "…"}`), `flight:heartbeat`,
   `flight:close`. Everything else routes to the channel's `handle`.
 - Socket-level control events travel on the reserved topic `"flight"`,
@@ -135,12 +156,12 @@ One envelope, both directions, JSON text frames in v1:
   (join rejected, handler error) is `flight:error` with the ref.
 - Close codes beyond RFC 6455's set: `4000` heartbeat timeout, `4400`
   protocol violation (undecodable envelope); binary frames close with
-  `1003` (the binary codec is a later, negotiated addition — §4.1, §8).
+  `1003` (the binary codec is a later, negotiated addition —).
 - Server-produced error reasons: `unauthenticated`, `forbidden`,
   `unmatched_topic`, `already_joined`, `not_joined`, `reserved_topic`,
   `handler_error`, `invalid_event`.
 
-Semantics inherited from PubSub (§10): at-most-once, no durability, no
+Semantics inherited from PubSub: at-most-once, no durability, no
 replay. Per-socket inbound processing is serial (one envelope fully handled
 before the next), and all outbound writes funnel through one per-socket
 queue — a slow client never blocks a handler, and frames never interleave.
@@ -171,14 +192,14 @@ wire-level assertions. Multi-node behavior is testable with
 
 ## Design deltas (doc → implementation)
 
-1. **`ChannelPrincipal` seam instead of Security Core's `Principal`** (§5).
+1. **`ChannelPrincipal` seam instead of Security Core's `Principal`**.
    Security Core is not yet built; Channels' actual requirement is "the
    join gate can read who this is". Channels owns a two-member protocol
    (`subject`, `hasRole(_:)`) — exactly what the design's own join example
    uses — plus `BasicPrincipal` for simple cases. When
    flight-security-core ships, its `Principal` conforms retroactively and
    its middleware feeds `registerChannelSocket`'s `authenticate` closure;
-   no Channels change. Same "seam, not engine" posture as §5.
+   no Channels change. Same "seam, not engine" posture as
 2. **`JoinResult`/`HandleResult` are structs with static constructors**,
    not enums — the design's call sites (`.ok`, `.ok(initialState:)`) need
    an overload an enum case can't provide; the shapes are otherwise the
@@ -194,7 +215,7 @@ wire-level assertions. Multi-node behavior is testable with
    transport papers over. Clients ship `send`/fire-and-forget for
    known-no-reply events.
 5. **The exit path never waits on the transport after a server-initiated
-   close.** A half-open peer (the case heartbeats exist for, §6) never
+   close.** A half-open peer (the case heartbeats exist for) never
    completes the close handshake, so the frame loop is unblocked by task
    cancellation, not by the frame stream ending. Watchdog teardown
    finishes the outbound queue; the writer drains what was already queued

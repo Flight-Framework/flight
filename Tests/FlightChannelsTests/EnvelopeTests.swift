@@ -2,7 +2,7 @@ import FlightChannelsProtocol
 import Foundation
 import Testing
 
-@Suite("Wire protocol — envelope (§4.1)")
+@Suite("Wire protocol — envelope")
 struct EnvelopeTests {
 
     @Test("one envelope shape, exact wire form, all four keys always present")
@@ -17,7 +17,7 @@ struct EnvelopeTests {
             == #"{"event":"new_msg","payload":{"body":"hi"},"ref":"7","topic":"room:42"}"#)
     }
 
-    @Test("server pushes carry an explicit ref: null (§4.1)")
+    @Test("server pushes carry an explicit ref: null")
     func nullRef() throws {
         let push = Envelope(ref: nil, topic: "room:42", event: "new_msg", payload: .object([:]))
         #expect(try push.encodedText()
@@ -56,7 +56,7 @@ struct EnvelopeTests {
         }
     }
 
-    @Test("payload is opaque: arbitrary nesting survives untouched (§4.1)")
+    @Test("payload is opaque: arbitrary nesting survives untouched")
     func opaquePayload() throws {
         let payload: JSONValue = [
             "diff": [["op": "replace", "path": "/2/text", "value": "hello"]],
@@ -68,7 +68,7 @@ struct EnvelopeTests {
         #expect(decoded.payload == payload)
     }
 
-    @Test("reserved events are exactly the flight: set (§4.2)")
+    @Test("reserved events are exactly the flight: set")
     func reservedEvents() {
         #expect(ReservedEvent.allCases.map(\.rawValue).sorted() == [
             "flight:close", "flight:error", "flight:heartbeat",

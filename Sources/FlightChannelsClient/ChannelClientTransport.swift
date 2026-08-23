@@ -6,7 +6,7 @@ import struct Foundation.URL
 /// client, `URLSessionWebSocketTask`, an in-memory test pair) constructs one
 /// without this package knowing its internals.
 ///
-/// The client core is deliberately transport-free (§7.2: "thin, protocol
+/// The client core is deliberately transport-free ("thin, protocol
 /// plumbing"): protocol logic — refs, replies, heartbeats, reconnection —
 /// is identical across transports and fully testable without a socket.
 /// `FlightChannelsTesting` ships the in-memory transport; the E2E suite

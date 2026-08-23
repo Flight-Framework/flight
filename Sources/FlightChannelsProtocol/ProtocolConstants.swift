@@ -1,19 +1,19 @@
-/// The reserved lifecycle events (§4.2): a small fixed set, namespaced
+/// The reserved lifecycle events: a small fixed set, namespaced
 /// `flight:` so they never collide with application events. Everything else
 /// on the wire is an application event, passed to the `Channel`'s `handle`.
 public enum ReservedEvent: String, Sendable, CaseIterable {
-    /// Topic membership (§4.2).
+    /// Topic membership.
     case join = "flight:join"
     case leave = "flight:leave"
-    /// A successful reply to a client message carrying a `ref` (§4.3).
+    /// A successful reply to a client message carrying a `ref`.
     case reply = "flight:reply"
-    /// A channel-level error — join rejected, handler error (§4.2). Carries
+    /// A channel-level error — join rejected, handler error. Carries
     /// the originating `ref` when it answers a correlated message, so a
     /// client's pending push can reject; `ref: null` when uncorrelated.
     case error = "flight:error"
-    /// Keepalive (§6), sent by the client on the control topic.
+    /// Keepalive, sent by the client on the control topic.
     case heartbeat = "flight:heartbeat"
-    /// Graceful channel/socket teardown (§4.2).
+    /// Graceful channel/socket teardown.
     case close = "flight:close"
 
     /// The namespace prefix. A client-sent application event may never start
@@ -35,9 +35,9 @@ public enum ChannelProtocol {
 /// an enum, on the wire — but every reason the server itself produces is
 /// named here so clients and tests share one vocabulary.
 public enum ChannelErrorReason {
-    /// Join refused: no authenticated principal (§5).
+    /// Join refused: no authenticated principal.
     public static let unauthenticated = "unauthenticated"
-    /// Join refused: authenticated but not allowed (§5).
+    /// Join refused: authenticated but not allowed.
     public static let forbidden = "forbidden"
     /// Join refused: no registered channel serves this topic.
     public static let unmatchedTopic = "unmatched_topic"
@@ -59,9 +59,9 @@ public enum ChannelErrorReason {
 /// WebSocket close codes Flight Channels uses beyond the RFC 6455 standard
 /// set — 4000-range, the RFC's private-use space.
 public enum ChannelCloseCode {
-    /// The socket went silent past the heartbeat timeout (§6).
+    /// The socket went silent past the heartbeat timeout.
     public static let heartbeatTimeout: UInt16 = 4000
-    /// A frame violated the protocol (§4): undecodable envelope. Because
+    /// A frame violated the protocol: undecodable envelope. Because
     /// Flight owns both clients, this is always a bug or an attack — the
     /// server closes rather than negotiating.
     public static let protocolViolation: UInt16 = 4400

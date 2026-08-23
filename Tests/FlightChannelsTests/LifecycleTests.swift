@@ -5,7 +5,7 @@ import FlightWebTesting
 import Foundation
 import Testing
 
-@Suite("Connection lifecycle — teardown, heartbeats (§6)", .timeLimit(.minutes(1)))
+@Suite("Connection lifecycle — teardown, heartbeats", .timeLimit(.minutes(1)))
 struct LifecycleTests {
 
     @Test("leave: reply, handler leave runs, fan-out stops for that socket")
@@ -35,7 +35,7 @@ struct LifecycleTests {
         wire.close()
     }
 
-    @Test("peer close: every channel leaves, subscriptions end, scope unwinds (§6)")
+    @Test("peer close: every channel leaves, subscriptions end, scope unwinds")
     func closeTearsDownAllChannels() async throws {
         let harness = try Harness()
         let wire = try await harness.wire("/socket?token=alice")
@@ -55,7 +55,7 @@ struct LifecycleTests {
         #expect(try harness.localPubSub.subscriberCount(for: "room:2") == 0)
     }
 
-    @Test("flight:close: graceful teardown — ack flushed, then the close frame (§4.2)")
+    @Test("flight:close: graceful teardown — ack flushed, then the close frame")
     func gracefulClose() async throws {
         let harness = try Harness()
         let wire = try await harness.wire("/socket?token=alice")
@@ -70,7 +70,7 @@ struct LifecycleTests {
         #expect(await (try harness.events).waitFor { $0.contains("leave room:1 by alice") })
     }
 
-    @Test("an undecodable frame closes with the protocol-violation code (§4)")
+    @Test("an undecodable frame closes with the protocol-violation code")
     func invalidEnvelopeCloses() async throws {
         let harness = try Harness()
         let wire = try await harness.wire()
@@ -83,7 +83,7 @@ struct LifecycleTests {
         #expect(closeCode == WebSocketCloseCode(ChannelCloseCode.protocolViolation))
     }
 
-    @Test("a binary frame closes with 1003 — protocol v1 is JSON text (§4.1)")
+    @Test("a binary frame closes with 1003 — protocol v1 is JSON text")
     func binaryFrameCloses() async throws {
         let harness = try Harness()
         let wire = try await harness.wire()
@@ -96,7 +96,7 @@ struct LifecycleTests {
         #expect(closeCode == .unacceptableData)
     }
 
-    @Test("a silent socket is closed past the heartbeat timeout — and channels leave (§6)")
+    @Test("a silent socket is closed past the heartbeat timeout — and channels leave")
     func heartbeatTimeout() async throws {
         let harness = try Harness(heartbeatTimeoutSeconds: 0.15, checkIntervalSeconds: 0.03)
         let wire = try await harness.wire("/socket?token=alice")
@@ -112,7 +112,7 @@ struct LifecycleTests {
         #expect(try harness.localPubSub.subscriberCount(for: "room:1") == 0)
     }
 
-    @Test("heartbeats keep an otherwise-quiet socket alive (§6)")
+    @Test("heartbeats keep an otherwise-quiet socket alive")
     func heartbeatKeepsAlive() async throws {
         let harness = try Harness(heartbeatTimeoutSeconds: 0.15, checkIntervalSeconds: 0.03)
         let wire = try await harness.wire()

@@ -22,7 +22,7 @@ public struct ChannelMessage: Sendable, Equatable {
     public var isRejoin: Bool { event == ReservedEvent.join.rawValue }
 }
 
-/// The Swift reference client (§7.2): the envelope protocol, ref/reply
+/// The Swift reference client: the envelope protocol, ref/reply
 /// correlation as `async` calls, incoming pushes as `AsyncStream`s, the
 /// heartbeat, and automatic reconnect-with-backoff-and-rejoin. Protocol
 /// plumbing, not a framework — transport injected, no dependencies.
@@ -73,7 +73,7 @@ public actor ChannelClient {
         self.logger = logger
     }
 
-    // MARK: - Connection lifecycle (§6)
+    // MARK: - Connection lifecycle
 
     /// Dials the server. Throws if the first connection cannot be
     /// established — the caller decides what an unreachable server means at
@@ -93,7 +93,7 @@ public actor ChannelClient {
         }
     }
 
-    /// Graceful teardown: best-effort `flight:close` (§4.2), transport
+    /// Graceful teardown: best-effort `flight:close`, transport
     /// close, terminal `.closed` state. Channel membership intent survives
     /// — a later `connect()` rejoins everything that was joined.
     public func disconnect() async {
@@ -155,7 +155,7 @@ public actor ChannelClient {
             return reply
         } catch let error as ChannelClientError {
             if case .channelError = error {
-                // The server said no (§5). Retrying on reconnect would spin
+                // The server said no. Retrying on reconnect would spin
                 // on a closed gate.
                 channels[topic]?.desired = false
             }
@@ -188,7 +188,7 @@ public actor ChannelClient {
         )
     }
 
-    /// Fire-and-forget: no ref, so no reply and no deadline (§4.3).
+    /// Fire-and-forget: no ref, so no reply and no deadline.
     internal func send(topic: String, event: String, payload: JSONValue) async throws {
         guard state == .connected, let connection else {
             throw ChannelClientError.notConnected
@@ -207,7 +207,7 @@ public actor ChannelClient {
         return stream
     }
 
-    // MARK: - Request/reply (§4.3)
+    // MARK: - Request/reply
 
     private func request(
         topic: String,
@@ -303,7 +303,7 @@ public actor ChannelClient {
         do {
             // Deadline = interval: a heartbeat that hasn't answered by the
             // time the next would go out means the connection is dead in
-            // the way heartbeats exist to detect (§6).
+            // the way heartbeats exist to detect.
             _ = try await request(
                 topic: ChannelProtocol.controlTopic,
                 event: ReservedEvent.heartbeat.rawValue,
@@ -325,7 +325,7 @@ public actor ChannelClient {
 
     private func receive(_ text: String) {
         guard let envelope = try? Envelope(text: text) else {
-            // Flight owns both ends (§4): an undecodable server frame is a
+            // Flight owns both ends: an undecodable server frame is a
             // version-skew bug. Log loudly, drop the frame.
             logger.error("undecodable frame from server", metadata: ["frame": "\(text)"])
             return
@@ -345,7 +345,7 @@ public actor ChannelClient {
                 deliver(envelope, topic: envelope.topic)
             }
         case .close:
-            // Server-initiated graceful teardown (§4.2): terminal, no
+            // Server-initiated graceful teardown: terminal, no
             // reconnect.
             Task { await self.disconnect() }
         case .join, .leave, .heartbeat:
@@ -363,7 +363,7 @@ public actor ChannelClient {
         }
     }
 
-    // MARK: - Drop and reconnect (§6: reconnect + rejoin, never resume)
+    // MARK: - Drop and reconnect (reconnect + rejoin, never resume)
 
     private func connectionEnded(error: (any Error)?) {
         guard state == .connected else { return } // intentional close already handled
@@ -403,7 +403,7 @@ public actor ChannelClient {
         }
     }
 
-    /// Re-establishes membership for every desired topic (§6: "the client
+    /// Re-establishes membership for every desired topic ("the client
     /// reconnects and re-joins its topics"). Success surfaces on the
     /// channel's message stream as a `flight:join` message carrying the
     /// fresh initial state; a rejected rejoin surfaces as `flight:error`

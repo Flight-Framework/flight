@@ -3,7 +3,7 @@ import FlightChannelsProtocol
 /// The topic pattern a `Channel` registration serves: an exact topic
 /// (`"lobby"`), a prefix wildcard (`"room:*"`), or the catch-all (`"*"`).
 ///
-/// Channels applies the `"kind:id"` convention (§2) but, like PubSub (§3),
+/// Channels applies the `"kind:id"` convention but, like PubSub,
 /// treats the string as opaque beyond its own join-routing step — so the
 /// pattern language is deliberately this small. `*` is legal only as the
 /// final character; anything richer is an application concern.

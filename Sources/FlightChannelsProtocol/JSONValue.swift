@@ -1,5 +1,5 @@
 /// An arbitrary JSON value — the representation of the envelope's opaque
-/// `payload` (§4.1).
+/// `payload`.
 ///
 /// The framing layer moves payloads without interpreting them, but it still
 /// has to *hold* them in a `Sendable`, `Codable` shape between the wire and
@@ -8,7 +8,7 @@
 /// handlers that just route can pass the value straight through.
 ///
 /// Numbers are `Double`, deliberately: the protocol's primary peer is a
-/// JavaScript client (§7.1), whose numbers are IEEE 754 doubles. Exact
+/// JavaScript client, whose numbers are IEEE 754 doubles. Exact
 /// integers up to 2⁵³ round-trip losslessly; `intValue` refuses anything
 /// that doesn't.
 public enum JSONValue: Sendable, Equatable, Hashable {

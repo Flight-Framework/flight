@@ -1,12 +1,12 @@
 import FlightChannelsProtocol
 
-/// Per-topic server logic (§2): joining a topic creates one instance of the
+/// Per-topic server logic: joining a topic creates one instance of the
 /// registered `Channel` for that (socket, topic) pair, so implementations
 /// may keep per-membership state in stored properties.
 public protocol Channel: Sendable {
     /// Called when a client attempts to join this channel's topic. Return
     /// `.ok` to admit (optionally with initial state to send back), or
-    /// `.reject` to deny — this is the authorization point (§5).
+    /// `.reject` to deny — this is the authorization point.
     func join(_ topic: String, socket: Socket) async -> JoinResult
 
     /// A message arrived FROM this client on this channel.
@@ -33,7 +33,7 @@ public struct JoinRejection: Sendable, Equatable {
     public static let forbidden = JoinRejection(ChannelErrorReason.forbidden)
 }
 
-/// The outcome of `Channel.join` (§2, §5).
+/// The outcome of `Channel.join`.
 ///
 ///     return .ok
 ///     return .ok(initialState: currentRoomState())
@@ -66,7 +66,7 @@ public struct InboundEvent: Sendable, Equatable {
     public let topic: String
     public let event: String
     public let payload: JSONValue
-    /// Present when the client wants a reply (§4.3).
+    /// Present when the client wants a reply.
     public let ref: String?
 
     public init(topic: String, event: String, payload: JSONValue, ref: String?) {
@@ -77,7 +77,7 @@ public struct InboundEvent: Sendable, Equatable {
     }
 }
 
-/// The outcome of `Channel.handle` (§4.3): reply to a ref-carrying message,
+/// The outcome of `Channel.handle`: reply to a ref-carrying message,
 /// report an error, or say nothing.
 ///
 /// `.none` on a ref-carrying message sends no reply — the client's awaited
@@ -96,7 +96,7 @@ public struct HandleResult: Sendable {
     /// No reply. Broadcast side effects have already happened in `handle`.
     public static let none = HandleResult(outcome: .none)
 
-    /// Send a `flight:reply` echoing the inbound `ref` (§4.3). Dropped if
+    /// Send a `flight:reply` echoing the inbound `ref`. Dropped if
     /// the inbound message carried no ref — there is nothing to correlate.
     public static func reply(_ payload: JSONValue) -> HandleResult {
         HandleResult(outcome: .reply(payload))

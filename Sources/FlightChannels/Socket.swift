@@ -3,10 +3,10 @@ import struct Foundation.UUID
 import Logging
 import Synchronization
 
-/// One client's WebSocket connection (§2): connection-level identity plus
+/// One client's WebSocket connection: connection-level identity plus
 /// the write side of that connection. A socket may hold many channels; its
 /// lifetime is one `ConnectionUpgradeHandler` invocation, i.e. one request
-/// `Scope` (Web §2, Core §3).
+/// `Scope` (Web, Core).
 ///
 /// All writes funnel through one per-socket outbound queue drained by a
 /// single writer task — channel handlers, PubSub fan-out pumps, and the
@@ -18,7 +18,7 @@ public final class Socket: Sendable, Identifiable {
     public let id: String
 
     /// The authenticated identity, established during the initial HTTP
-    /// upgrade request (§5) — before the WebSocket existed. Nil when the
+    /// upgrade request — before the WebSocket existed. Nil when the
     /// endpoint accepts anonymous sockets.
     public let principal: (any ChannelPrincipal)?
 
@@ -27,6 +27,7 @@ public final class Socket: Sendable, Identifiable {
     public let logger: Logger
 
     private let outbound: AsyncStream<Envelope>.Continuation
+    private let droppedEnvelopes = Atomic<Int64>(0)
 
     /// Topic-membership observation state (the framework seam below). All
     /// mutation happens under the mutex; observer callbacks always fire
@@ -52,19 +53,33 @@ public final class Socket: Sendable, Identifiable {
     }
 
     /// Pushes a server-initiated message to *this* socket only (`ref: null`,
-    /// §4.1). For fan-out to every subscriber of a topic, use
+    ///). For fan-out to every subscriber of a topic, use
     /// `ChannelBroadcaster` — a socket push is the "just this client" case
     /// (a private ack, a whisper).
     ///
     /// Fire-and-forget: enqueued onto the socket's outbound queue; if the
     /// connection is already closed the message is dropped, which
-    /// at-most-once semantics (PubSub §8, inherited) already permit.
+    /// at-most-once semantics (PubSub, inherited) already permit.
     public func push(topic: String, event: String, payload: JSONValue = .object([:])) {
-        precondition(
-            !event.hasPrefix(ReservedEvent.prefix),
-            "'\(event)' is in the reserved flight: namespace (§4.2); application pushes must use their own event names."
-        )
-        outbound.yield(Envelope(ref: nil, topic: topic, event: event, payload: payload))
+        // Rejected, not asserted. This used to be a `precondition`, which
+        // terminates the process — every other connected socket with it —
+        // because one caller passed a bad name.
+        //
+        // The framework filters `flight:`-prefixed events arriving from a
+        // client before any handler sees them, so the envelope's own event
+        // name cannot get here. An application deriving a name from client
+        // *payload* can: `push(event: payload["type"])` is an ordinary
+        // pattern, and a client sending `{"type": "flight:x"}` would have
+        // taken the process down with it. Dropping the message and saying so
+        // is the proportionate answer either way.
+        guard !event.hasPrefix(ReservedEvent.prefix) else {
+            logger.error(
+                "refusing to push an event in the reserved flight: namespace",
+                metadata: ["topic": "\(topic)", "event": "\(event)"]
+            )
+            return
+        }
+        enqueue(Envelope(ref: nil, topic: topic, event: event, payload: payload))
     }
 
     // MARK: - Framework seam (SPI)
@@ -84,11 +99,14 @@ public final class Socket: Sendable, Identifiable {
     /// at-most-once semantics.
     @_spi(FlightInternal)
     public func pushReserved(topic: String, event: String, payload: JSONValue = .object([:])) {
-        precondition(
-            event.hasPrefix(ReservedEvent.prefix),
-            "'\(event)' is not in the flight: namespace; use push(topic:event:payload:) for application events."
-        )
-        outbound.yield(Envelope(ref: nil, topic: topic, event: event, payload: payload))
+        guard event.hasPrefix(ReservedEvent.prefix) else {
+            logger.error(
+                "pushReserved called with a non-reserved event; use push(topic:event:payload:)",
+                metadata: ["topic": "\(topic)", "event": "\(event)"]
+            )
+            return
+        }
+        enqueue(Envelope(ref: nil, topic: topic, event: event, payload: payload))
     }
 
     /// Runs `perform` once this socket's membership of `topic` is fully
@@ -127,7 +145,42 @@ public final class Socket: Sendable, Identifiable {
     // MARK: - Session internals
 
     internal func send(_ envelope: Envelope) {
-        outbound.yield(envelope)
+        enqueue(envelope)
+    }
+
+    /// Every outbound envelope goes through here.
+    ///
+    /// The queue is bounded, so a client that stopped reading drops its
+    /// oldest messages rather than growing without limit. `yield` says when
+    /// that happened and the result used to be discarded at each call site —
+    /// which meant a socket silently losing messages looked exactly like one
+    /// that was fine.
+    private func enqueue(_ envelope: Envelope) {
+        switch outbound.yield(envelope) {
+        case .enqueued, .terminated:
+            break
+        case .dropped:
+            let total = droppedEnvelopes.wrappingAdd(1, ordering: .relaxed).oldValue + 1
+            // Logged at intervals: a client stuck behind will drop steadily,
+            // and a line per message would bury everything else.
+            if total == 1 || total % 100 == 0 {
+                logger.warning(
+                    "outbound queue full; dropping the oldest messages for this socket",
+                    metadata: [
+                        "topic": "\(envelope.topic)",
+                        "event": "\(envelope.event)",
+                        "dropped-total": "\(total)",
+                    ]
+                )
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    /// How many outbound envelopes this socket has dropped for being behind.
+    public var droppedEnvelopeCount: Int {
+        Int(droppedEnvelopes.load(ordering: .relaxed))
     }
 
     /// Called by `SocketSession` after a join is accepted and its PubSub
@@ -168,11 +221,11 @@ public final class Socket: Sendable, Identifiable {
     }
 
     internal func sendReply(ref: String, topic: String, payload: JSONValue) {
-        outbound.yield(Envelope(ref: ref, topic: topic, event: ReservedEvent.reply.rawValue, payload: payload))
+        enqueue(Envelope(ref: ref, topic: topic, event: ReservedEvent.reply.rawValue, payload: payload))
     }
 
     internal func sendError(ref: String?, topic: String, reason: String) {
-        outbound.yield(Envelope(
+        enqueue(Envelope(
             ref: ref,
             topic: topic,
             event: ReservedEvent.error.rawValue,

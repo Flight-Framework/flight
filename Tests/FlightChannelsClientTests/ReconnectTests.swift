@@ -3,7 +3,7 @@ import FlightChannelsTesting
 import Foundation
 import Testing
 
-@Suite("Swift client — heartbeat, reconnect, rejoin (§6)", .timeLimit(.minutes(1)))
+@Suite("Swift client — heartbeat, reconnect, rejoin", .timeLimit(.minutes(1)))
 struct ReconnectTests {
 
     private func fastReconnect(maxAttempts: Int? = nil) -> ChannelClientConfiguration {
@@ -18,7 +18,7 @@ struct ReconnectTests {
         )
     }
 
-    @Test("a dropped connection reconnects and rejoins automatically (§6)")
+    @Test("a dropped connection reconnects and rejoins automatically")
     func reconnectAndRejoin() async throws {
         var severable: SeverableTransport!
         let harness = try ClientHarness { transport in

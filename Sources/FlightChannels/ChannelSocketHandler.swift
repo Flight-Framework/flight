@@ -4,14 +4,14 @@ import FlightPubSub
 import FlightWeb
 import Logging
 
-/// Channels' `ConnectionUpgradeHandler` (§1): owns one upgraded WebSocket
-/// for its lifetime — decoding frames (§4), routing them through a
+/// Channels' `ConnectionUpgradeHandler`: owns one upgraded WebSocket
+/// for its lifetime — decoding frames, routing them through a
 /// `SocketSession` to per-topic `Channel`s, writing everything outbound
-/// through one serialized writer, and enforcing heartbeat liveness (§6).
+/// through one serialized writer, and enforcing heartbeat liveness.
 ///
 /// One instance per connection: the route handler constructs it during the
 /// upgrade request, which is where per-connection identity (the principal,
-/// §5) enters. Constructed for you by `Container.registerChannelSocket`, or
+///) enters. Constructed for you by `Container.registerChannelSocket`, or
 /// directly from a `@WebSocketMapping` method via `init(context:principal:)`.
 public struct ChannelSocketHandler: ConnectionUpgradeHandler {
     private let router: ChannelRouter
@@ -48,7 +48,10 @@ public struct ChannelSocketHandler: ConnectionUpgradeHandler {
     }
 
     public func handle(upgraded connection: UpgradedConnection, context: RequestContext) async throws {
-        let (outbound, outboundContinuation) = AsyncStream<Envelope>.makeStream()
+        // Bounded: an unbounded queue lets one client that stopped reading
+        // grow without limit until the server runs out of memory.
+        let (outbound, outboundContinuation) = AsyncStream<Envelope>.makeStream(
+            bufferingPolicy: .bufferingNewest(configuration.outboundBufferSize))
         let socket = Socket(
             principal: principal,
             logger: context.logger,
@@ -68,13 +71,13 @@ public struct ChannelSocketHandler: ConnectionUpgradeHandler {
 
         // Three tasks per connection, all owned by this call and joined
         // before it returns — the socket's whole session lives under its
-        // request `Scope` (§6):
+        // request `Scope`:
         //
         // - writer: drains the one outbound queue to the transport. The
         //   queue finishing (teardown does that) is its normal exit; a send
         //   failure (peer gone mid-write) an early one.
         // - watchdog: closes sockets that go silent past the heartbeat
-        //   timeout (§6).
+        //   timeout.
         // - frame loop: reads, decodes, routes — strictly one envelope at a
         //   time, preserving per-socket message order end to end.
         //
@@ -135,7 +138,7 @@ public struct ChannelSocketHandler: ConnectionUpgradeHandler {
                     do {
                         envelope = try Envelope(text: text)
                     } catch {
-                        // Flight owns both clients (§4): an undecodable
+                        // Flight owns both clients: an undecodable
                         // frame is a bug or an attack, not a compatibility
                         // case. Close, with the protocol-violation code.
                         context.logger.warning("undecodable channel frame", metadata: [
@@ -160,7 +163,7 @@ public struct ChannelSocketHandler: ConnectionUpgradeHandler {
                     }
                 case .binary:
                     // JSON text frames only in v1; the binary codec is a
-                    // documented later addition (§4.1), negotiated, never
+                    // documented later addition, negotiated, never
                     // sprung on a server.
                     await session.teardown()
                     await writer.value

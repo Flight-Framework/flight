@@ -1,7 +1,7 @@
 import FlightChannelsProtocol
 
 /// A client's view of one topic on its socket — the client-side half of the
-/// design's `Channel` noun (§2). Thin value façade over `ChannelClient`;
+/// design's `Channel` noun. Thin value façade over `ChannelClient`;
 /// create as many as you like via `client.channel(_:)`.
 public struct ChannelHandle: Sendable {
     public let topic: String
@@ -12,7 +12,7 @@ public struct ChannelHandle: Sendable {
         self.client = client
     }
 
-    /// Joins the topic (§5: the join is the gate). Returns the channel's
+    /// Joins the topic (the join is the gate). Returns the channel's
     /// initial state (`.null` when the server sent none). Throws
     /// `.channelError(reason:)` when the join is rejected.
     ///
@@ -30,7 +30,7 @@ public struct ChannelHandle: Sendable {
         try await client.leave(topic: topic, timeout: timeout)
     }
 
-    /// Sends an application event and awaits its `flight:reply` (§4.3) —
+    /// Sends an application event and awaits its `flight:reply` —
     /// request/response over the socket without blocking the channel.
     /// Throws `.timedOut` if the handler chose not to reply.
     @discardableResult
@@ -43,13 +43,13 @@ public struct ChannelHandle: Sendable {
     }
 
     /// Fire-and-forget: sends with `ref: null`, so no reply ever comes
-    /// (§4.3) — for events whose handler is known not to reply.
+    /// — for events whose handler is known not to reply.
     public func send(_ event: String, payload: JSONValue = .object([:])) async throws {
         try await client.send(topic: topic, event: event, payload: payload)
     }
 
-    /// Everything the server pushes on this topic (§3 step 5), as a stream —
-    /// mirroring the server's own subscription model (§7.2). Multiple
+    /// Everything the server pushes on this topic, as a stream —
+    /// mirroring the server's own subscription model. Multiple
     /// streams may be open; each sees every message from its creation on.
     public func messages() async -> AsyncStream<ChannelMessage> {
         await client.messages(topic: topic)

@@ -69,7 +69,7 @@ struct RouterTests {
         }
     }
 
-    @Test("module wiring: router, broadcaster, configuration are resolvable components (§9)")
+    @Test("module wiring: router, broadcaster, configuration are resolvable components")
     func moduleBeans() throws {
         let harness = try Harness()
         let router = try harness.container.resolve(ChannelRouter.self)

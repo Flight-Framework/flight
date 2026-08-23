@@ -2,7 +2,7 @@ import FlightChannelsProtocol
 import FlightCore
 
 /// One registered channel: the topic pattern it serves plus the factory
-/// that makes a fresh `Channel` instance per join (§2: "joining creates a
+/// that makes a fresh `Channel` instance per join ("joining creates a
 /// channel instance"). Registered through the same container pipeline as
 /// every other component — the Web `RouteRegistration` precedent, applied to
 /// channels — so registrations show up in Core introspection like anything
@@ -26,7 +26,7 @@ public struct ChannelRegistration: Sendable {
 }
 
 extension Container {
-    /// Registers a `Channel` for a topic pattern (§9) — from any module's
+    /// Registers a `Channel` for a topic pattern — from any module's
     /// `configure(_:)`:
     ///
     ///     container.registerChannel("room:*") { _ in RoomChannel() }
