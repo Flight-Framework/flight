@@ -6,10 +6,41 @@ import Logging
 import ServiceContextModule
 import Tracing
 
-/// The `dispatch` closure's contract (§5.3): requests in, responses out —
-/// including streaming and upgrade responses. Structured `async` end to end;
-/// no `EventLoopFuture` anywhere in this boundary (§5.5).
-public typealias Dispatch = @Sendable (Request) async -> Response
+/// The transport boundary: requests in, responses out — including streaming
+/// and upgrade responses. Structured `async` end to end; no `EventLoopFuture`
+/// anywhere in this boundary.
+///
+/// Two operations, not one. `respond` answers a request. ``acceptsUpgrade``
+/// asks whether a path is a connection-upgrade route, from the route table
+/// alone, and a transport **must** ask it before dispatching an
+/// upgrade-shaped request — see that property for why.
+public struct Dispatch: Sendable {
+    /// Runs the full pipeline: middleware, routing, handler.
+    public let respond: @Sendable (Request) async -> Response
+
+    /// Whether this request's method and path resolve to an upgrade route.
+    ///
+    /// Answered without running anything. A transport that skips this check
+    /// and dispatches every upgrade-shaped request will execute ordinary HTTP
+    /// handlers — their database writes, their side effects — and then throw
+    /// the response away, because it cannot perform an upgrade the route
+    /// never offered. That turns any `GET` route into something an
+    /// unauthenticated client can trigger by attaching upgrade headers.
+    public let acceptsUpgrade: @Sendable (Request) -> Bool
+
+    public init(
+        respond: @escaping @Sendable (Request) async -> Response,
+        acceptsUpgrade: @escaping @Sendable (Request) -> Bool
+    ) {
+        self.respond = respond
+        self.acceptsUpgrade = acceptsUpgrade
+    }
+
+    /// Keeps `await dispatch(request)` reading as a call.
+    public func callAsFunction(_ request: Request) async -> Response {
+        await respond(request)
+    }
+}
 
 /// Builds the dispatch closure Flight Web hands to whichever
 /// `ServerTransport` is active (§5.3): collect routes and middleware from
@@ -44,19 +75,29 @@ public enum DispatchBuilder {
             "middleware": .array(userMiddleware.map { .string($0.name) }),
         ])
 
-        let chain = userMiddleware.map(\.middleware) + [router.middleware]
-        return makeDispatch(chain: chain, container: container, logger: logger)
+        return makeDispatch(
+            chain: userMiddleware.map(\.middleware),
+            responder: router.responder,
+            acceptsUpgrade: { router.acceptsUpgrade(method: $0.method, path: $0.path) },
+            container: container,
+            logger: logger)
     }
 
     /// The assembled per-request pipeline, exposed separately so test
     /// harnesses can run a hand-built chain without a container full of
     /// controller components.
+    ///
+    /// `chain` is folded around `responder` **once, here** — a request pays
+    /// one call per layer, never the cost of building the chain.
     public static func makeDispatch(
         chain: [Middleware],
+        responder: @escaping Next,
+        acceptsUpgrade: @escaping @Sendable (Request) -> Bool = { _ in false },
         container: Container,
         logger: Logger
     ) -> Dispatch {
-        { request in
+        let pipeline = compose(chain, around: responder)
+        let respond: @Sendable (Request) async -> Response = { request in
             // Request identity: honor an inbound X-Request-ID, mint otherwise.
             let requestID = request.headers[.xRequestID] ?? UUID().uuidString
 
@@ -91,7 +132,7 @@ public enum DispatchBuilder {
                     tracingContext: span.context,
                     container: container
                 )
-                let response = await runMiddleware(chain, &context)
+                let response = await pipeline(&context)
 
                 span.attributes["http.response.status_code"] = response.status.code
                 if response.status.kind == .serverError {
@@ -100,6 +141,7 @@ public enum DispatchBuilder {
                 return response.settingHeader(.xRequestID, requestID)
             }
         }
+        return Dispatch(respond: respond, acceptsUpgrade: acceptsUpgrade)
     }
 }
 

@@ -26,7 +26,7 @@ public struct TestClient: Sendable {
     }
 
     /// Wraps an existing dispatch closure (for transport-free harnesses).
-    public init(dispatch: @escaping Dispatch) {
+    public init(dispatch: Dispatch) {
         self.dispatch = dispatch
     }
 

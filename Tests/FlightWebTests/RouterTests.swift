@@ -203,7 +203,7 @@ struct RoutingMiddlewareTests {
         }
         let router = try Router(routes: [registration])
         var context = RequestContext.mock(path: "/users/9")
-        let response = await runMiddleware([router.middleware], &context)
+        let response = await router.responder(&context)
         #expect(response.status == .ok)
         #expect(response.bodyText == "user 9")
     }
@@ -211,7 +211,7 @@ struct RoutingMiddlewareTests {
     @Test func noMatchIs404() async throws {
         let router = try Router(routes: [])
         var context = RequestContext.mock(path: "/users/999")
-        let response = await runMiddleware([router.middleware], &context)
+        let response = await router.responder(&context)
         #expect(response.status == .notFound)
     }
 
@@ -220,7 +220,7 @@ struct RoutingMiddlewareTests {
             RouteRegistration(method: .post, path: "/only-post", source: "t") { _ in .noContent }
         ])
         var context = RequestContext.mock(method: .get, path: "/only-post")
-        let response = await runMiddleware([router.middleware], &context)
+        let response = await router.responder(&context)
         #expect(response.status == .methodNotAllowed)
         #expect(response.headers[.allow] == "POST")
     }
@@ -232,7 +232,7 @@ struct RoutingMiddlewareTests {
             }
         ])
         var context = RequestContext.mock(path: "/boom")
-        let response = await runMiddleware([router.middleware], &context)
+        let response = await router.responder(&context)
         #expect(response.status == .forbidden)
         #expect(response.bodyText.contains("no entry"))
     }

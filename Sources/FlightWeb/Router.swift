@@ -242,31 +242,48 @@ public struct Router: Sendable {
         return a.segments.count < b.segments.count
     }
 
-    // MARK: - The routing middleware (§3, §7)
+    /// Whether `method` + `path` resolves to a connection-upgrade route.
+    ///
+    /// Answered from the route table alone — no handler runs, nothing is
+    /// dispatched. A transport asks this *before* dispatching an
+    /// upgrade-shaped request, because dispatching one at an ordinary HTTP
+    /// route would execute that route's handler, and every side effect it
+    /// has, only to discard the response it cannot use.
+    public func acceptsUpgrade(method: HTTPRequest.Method, path: String) -> Bool {
+        guard case .matched(let match) = route(method: method, path: path) else {
+            return false
+        }
+        return match.route.kind == .upgrade
+    }
 
-    /// Routing as the terminal middleware of the standard chain: matches,
-    /// binds path parameters, runs the handler, and answers. Handler errors
-    /// surface as `.fail` for `errorResponse` to render.
-    public var middleware: Middleware {
+    // MARK: - Routing as the innermost responder
+
+    /// Routing is the terminal of the pipeline, not a layer of it: it matches,
+    /// binds path parameters, runs the handler, and answers. Nothing wraps it
+    /// from the inside, so it takes no `next`.
+    ///
+    /// A handler error is rendered here rather than thrown onward, which is
+    /// what lets every enclosing layer see a real response — a 500 is still a
+    /// response, and access logging that missed them would be worse than no
+    /// access logging.
+    public var responder: Next {
         let router = self
         return { context in
             switch router.route(method: context.request.method, path: context.request.path) {
             case .notFound:
-                return .respond(.problem(status: .notFound, message: "Not Found"))
+                return .problem(status: .notFound, message: "Not Found")
             case .methodNotAllowed(let allow):
                 let allowed = allow.map(\.rawValue).joined(separator: ", ")
-                return .respond(
-                    .problem(status: .methodNotAllowed, message: "Method Not Allowed")
-                        .settingHeader(.allow, allowed)
-                )
+                return .problem(status: .methodNotAllowed, message: "Method Not Allowed")
+                    .settingHeader(.allow, allowed)
             case .matched(let match):
                 context.pathParameters = match.pathParameters
                 do {
                     let response = try await match.route.handler(context)
                     context.response = response
-                    return .respond(response)
+                    return response
                 } catch {
-                    return .fail(error)
+                    return errorResponse(for: error, context: context)
                 }
             }
         }

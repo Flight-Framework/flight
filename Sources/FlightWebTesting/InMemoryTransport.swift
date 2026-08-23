@@ -9,7 +9,7 @@ import Synchronization
 /// ServiceGroup — is exercised for real. Its `run()` parks until graceful
 /// shutdown or cancellation, like any suspending `Service` (§5.3).
 ///
-///     try await bootstrap(configuration: config,
+///     try await Flight.bootstrap(configuration: config,
 ///                         modules: [FlightWebModule<InMemoryTransport>.self, AppModule.self])
 ///     // from another task:
 ///     let response = try await InMemoryTransportHub.execute(Request(path: "/users/1"))
@@ -21,7 +21,7 @@ public struct InMemoryTransport: ServerTransport {
 
     private let dispatch: Dispatch
 
-    public init(configuration: Configuration, dispatch: @escaping Dispatch) {
+    public init(configuration: Configuration, dispatch: Dispatch) {
         self.dispatch = dispatch
     }
 
@@ -48,7 +48,7 @@ public enum InMemoryTransportHub {
         }
     }
 
-    static func register(_ dispatch: @escaping Dispatch) {
+    static func register(_ dispatch: Dispatch) {
         current.withLock { $0 = dispatch }
     }
 

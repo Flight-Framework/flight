@@ -156,6 +156,42 @@ struct HTTPWireTests {
         }
     }
 
+    @Test("an upgrade handshake at an ordinary route runs no handler")
+    func webSocketHandshakeDoesNotRunHTTPHandler() async throws {
+        // Below the fix this looked identical from the client's side — a 400
+        // either way. What differed is what the server did first: it
+        // dispatched the request, ran the matched GET handler and every side
+        // effect it had, then discarded a response it could not use. Any GET
+        // route was reachable by attaching upgrade headers, no credentials
+        // required. Only the counter can tell the two apart.
+        WireSideEffect.reset()
+        try await withRunningServer { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                try await session.send(
+                    "GET /counted HTTP/1.1\r\nHost: localhost\r\n"
+                        + "Connection: Upgrade\r\nUpgrade: websocket\r\n"
+                        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                        + "Sec-WebSocket-Version: 13\r\n\r\n"
+                )
+                let response = try await session.readToEnd()
+                #expect(response.hasPrefix("HTTP/1.1 400 Bad Request\r\n"))
+            }
+            #expect(
+                WireSideEffect.count.withLock { $0 } == 0,
+                "the GET handler must not run for an upgrade request at a non-upgrade route")
+
+            // The same route still serves ordinary GETs.
+            try await RawSocketClient.withConnection(port: port) { session in
+                try await session.send(
+                    "GET /counted HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                )
+                let response = try await session.readToEnd()
+                #expect(response.contains("counted"))
+            }
+            #expect(WireSideEffect.count.withLock { $0 } == 1)
+        }
+    }
+
     @Test func expectContinueIsAnswered() async throws {
         try await withRunningServer { port in
             try await RawSocketClient.withConnection(port: port) { session in

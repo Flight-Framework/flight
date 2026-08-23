@@ -131,6 +131,29 @@ struct EchoHandler: ConnectionUpgradeHandler {
     }
 }
 
+/// Records whether its handler body executed. An upgrade-shaped request at
+/// this ordinary HTTP route must leave `ran` false.
+enum SideEffect {
+    nonisolated(unsafe) static let ran = Mutex(false)
+    static func reset() { ran.withLock { $0 = false } }
+}
+
+@Controller
+struct SideEffectController {
+    @GetMapping("/side-effect")
+    func run(_ context: RequestContext) -> Response {
+        SideEffect.ran.withLock { $0 = true }
+        return .text("ran")
+    }
+}
+
+struct SideEffectModule: FlightModule {
+    static var dependencies: [any FlightModule.Type] { [UserModule.self] }
+    func configure(_ container: Container) throws {
+        try SideEffectController._flightRegister(container)
+    }
+}
+
 // MARK: - Modules
 
 struct UserModule: FlightModule {
@@ -322,6 +345,35 @@ struct WebSocketIntegrationTests {
         await #expect(throws: TestClient.TestClientError.self) {
             _ = try await client.webSocket("/users/1")
         }
+    }
+
+    @Test("an upgrade-shaped request never runs an ordinary route's handler")
+    func upgradeAtHTTPRouteDoesNotRunHandler() async throws {
+        // The refusal above is not enough on its own: it says the client got
+        // an error, not that the server stayed still. Dispatching every
+        // upgrade-shaped request ran the matched HTTP handler and discarded
+        // its response, so any GET route was reachable by anyone willing to
+        // attach upgrade headers. The route table now answers first.
+        SideEffect.reset()
+        let container = try TestContainer.build { SideEffectModule() }
+        let dispatch = try DispatchBuilder.build(container: container)
+
+        let request = Request(method: .get, path: "/side-effect")
+        #expect(dispatch.acceptsUpgrade(request) == false)
+        #expect(SideEffect.ran.withLock { $0 } == false)
+
+        // And the same route still works as ordinary HTTP.
+        #expect(await dispatch(request).bodyText == "ran")
+        #expect(SideEffect.ran.withLock { $0 } == true)
+    }
+
+    @Test("a genuine upgrade route is recognized from the route table alone")
+    func upgradeRouteIsRecognized() throws {
+        let container = try TestContainer.build { UserModule() }
+        let dispatch = try DispatchBuilder.build(container: container)
+        #expect(dispatch.acceptsUpgrade(Request(method: .get, path: "/echo/lobby")))
+        #expect(!dispatch.acceptsUpgrade(Request(method: .get, path: "/users/1")))
+        #expect(!dispatch.acceptsUpgrade(Request(method: .get, path: "/nope")))
     }
 
     @Test func middlewareGuardsUpgradeRoutes() async throws {

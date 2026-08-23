@@ -30,5 +30,5 @@ public protocol ServerTransport: Service, Sendable {
     /// request is handed to `dispatch`. The transport has zero opinion about
     /// routing, middleware, or dispatch order — it never sees a route table,
     /// never sees `RequestContext`, never sees `Container`.
-    init(configuration: Configuration, dispatch: @escaping Dispatch)
+    init(configuration: Configuration, dispatch: Dispatch)
 }

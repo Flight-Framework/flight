@@ -3,6 +3,7 @@ import FlightTransport
 import FlightWeb
 import FlightWebTesting
 import Foundation
+import Synchronization
 import Testing
 
 // MARK: - Fixture app (macros end-to-end, served over a real socket)
@@ -26,6 +27,14 @@ struct WireController {
             try? await Task.sleep(for: .milliseconds(50))
             events.send(data: "second", event: "tick")
         }
+    }
+
+    /// Records that its body ran. An upgrade-shaped request at this ordinary
+    /// HTTP route must leave the counter at zero.
+    @GetMapping("/counted")
+    func counted(_ context: RequestContext) -> String {
+        WireSideEffect.count.withLock { $0 += 1 }
+        return "counted"
     }
 
     @WebSocketMapping("/ws/:room")
@@ -58,6 +67,11 @@ struct WireEchoHandler: ConnectionUpgradeHandler {
             }
         }
     }
+}
+
+enum WireSideEffect {
+    nonisolated(unsafe) static let count = Mutex(0)
+    static func reset() { count.withLock { $0 = 0 } }
 }
 
 struct WireModule: FlightModule {

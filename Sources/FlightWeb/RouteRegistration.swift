@@ -91,6 +91,29 @@ extension Container {
             MiddlewareRegistration(name: name, order: order, middleware: middleware)
         }
     }
+
+    /// Registers a request-only step — the ``MiddlewareResult`` form.
+    ///
+    /// Chosen by the closure's arity: a two-parameter closure is a full
+    /// ``Middleware`` layer, a one-parameter closure is this. Prefer this one
+    /// whenever the layer does not need to see the response, because
+    /// `.continue` cannot be forgotten the way a call to `next` can.
+    ///
+    /// ```swift
+    /// container.registerMiddleware("auth", order: -100) { context in
+    ///     guard context.request.headers[.authorization] != nil else {
+    ///         return .respond(.status(.unauthorized))
+    ///     }
+    ///     return .continue
+    /// }
+    /// ```
+    public func registerMiddleware(
+        _ name: String,
+        order: Int = 0,
+        _ step: @escaping @Sendable (inout RequestContext) async -> MiddlewareResult
+    ) {
+        registerMiddleware(name, order: order, middleware(from: step))
+    }
 }
 
 extension Container {
@@ -110,7 +133,7 @@ extension Container {
     /// Resolves every component of `type` via introspection — Core's public
     /// `allRegistrations()` carries (typeName, qualifier), which is exactly
     /// enough to enumerate one type's registrations without any new Core API.
-    private func collect<T>(_ type: T.Type) throws -> [T] {
+    private func collect<T: Sendable>(_ type: T.Type) throws -> [T] {
         let typeName = String(reflecting: type)
         return try allRegistrations()
             .filter { $0.typeName == typeName }

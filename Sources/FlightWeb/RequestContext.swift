@@ -66,7 +66,7 @@ public struct RequestContext: Sendable {
     /// Resolves a component against this request's scope. `.scoped` components live
     /// exactly as long as the request; `.singleton`/`.transient` components behave
     /// as they would from any other resolution site (Flight Core §3).
-    public func resolve<T>(_ type: T.Type = T.self, qualifier: String? = nil) throws -> T {
+    public func resolve<T: Sendable>(_ type: T.Type = T.self, qualifier: String? = nil) throws -> T {
         try container.resolve(type, qualifier: qualifier, in: scope)
     }
 }

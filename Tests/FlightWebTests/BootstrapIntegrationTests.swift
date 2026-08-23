@@ -13,7 +13,7 @@ struct BootstrapIntegrationTests {
 
     @Test func bootstrappedAppServesRequestsThroughInMemoryTransport() async throws {
         let app = Task {
-            try await bootstrap(
+            try await Flight.bootstrap(
                 configuration: Configuration(),
                 modules: [FlightWebModule<InMemoryTransport>.self, UserModule.self]
             )
@@ -42,7 +42,7 @@ struct BootstrapIntegrationTests {
             }
         }
         let app = Task {
-            try await bootstrap(
+            try await Flight.bootstrap(
                 configuration: Configuration(),
                 modules: [FlightWebModule<InMemoryTransport>.self, ConflictModule.self]
             )

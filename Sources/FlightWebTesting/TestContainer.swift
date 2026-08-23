@@ -35,7 +35,7 @@ public enum TestContainer {
             instances.map { (ObjectIdentifier(type(of: $0)), $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let ordered = try resolveModuleOrder(instances.map { type(of: $0) })
+        let ordered = try Flight.resolveModuleOrder(instances.map { type(of: $0) })
         for moduleType in ordered {
             let module = byType[ObjectIdentifier(moduleType)] ?? moduleType.init()
             try module.configure(container)

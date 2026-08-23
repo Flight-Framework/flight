@@ -35,7 +35,7 @@ public struct FlightTransport: ServerTransport {
     let dispatch: Dispatch
     let logger = Logger(label: "flight.web.transport")
 
-    public init(configuration: FlightTransportConfiguration, dispatch: @escaping Dispatch) {
+    public init(configuration: FlightTransportConfiguration, dispatch: Dispatch) {
         self.configuration = configuration
         self.dispatch = dispatch
     }
@@ -57,10 +57,25 @@ public struct FlightTransport: ServerTransport {
             ),
             shouldUpgrade: { (head: HTTPRequest, _: any Channel, _: Logger) async throws
                 -> ShouldUpgradeResult<WebSocketDataHandler<HTTP1WebSocketUpgradeChannel.Context>> in
-                // The upgrade decision needs the *routed* answer — middleware
-                // included (§6.1) — so full dispatch runs here. Upgrade
-                // requests carry no body by construction (RFC 6455 §4.1).
-                switch await dispatch(Request(head: head, body: Data())) {
+                // Upgrade requests carry no body by construction (RFC 6455 §4.1).
+                let request = Request(head: head, body: Data())
+
+                // Ask the route table first. Dispatching every upgrade-shaped
+                // request would run ordinary HTTP handlers — their writes,
+                // their side effects — and then discard the response, since no
+                // upgrade can be performed at a route that never offered one.
+                // That made any GET route reachable by an unauthenticated
+                // client willing to attach upgrade headers.
+                guard dispatch.acceptsUpgrade(request) else {
+                    logger.debug("websocket upgrade refused: not an upgrade route", metadata: [
+                        "path": "\(head.path ?? "/")"
+                    ])
+                    return .dontUpgrade
+                }
+
+                // The upgrade decision needs the *routed* answer, middleware
+                // included, so the pipeline runs for genuine upgrade routes.
+                switch await dispatch(request) {
                 case .upgrade(let upgradeResponse):
                     return .upgrade([:]) { inbound, outbound, _ in
                         try await Self.runUpgradedConnection(
