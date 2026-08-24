@@ -45,26 +45,35 @@ Merging eight packages into one would otherwise hand every consumer the union
 of their dependencies. Two traits prevent that — SwiftPM resolves only what an
 enabled trait reaches.
 
-| Trait | Default | Brings |
-| --- | --- | --- |
-| `Web` | **on** | HTTP, WebSockets, SSE, Channels, Presence, actuator — Hummingbird, NIO, the TLS stack |
-| `Security` | off | `FlightSecurityCore` — JWTKit, AsyncHTTPClient. Enables `Web`. |
+| Trait | Brings |
+| --- | --- |
+| `Web` | HTTP, WebSockets, SSE, Channels, Presence, actuator — Hummingbird, NIO, the TLS stack |
+| `Security` | `FlightSecurityCore` — JWTKit, AsyncHTTPClient. Implies `Web`. |
 
-`Web` is on by default, so an application that serves HTTP needs no trait
-ceremony at all. Authentication is opt-in:
+**Both are default traits, and you subtract.** Naming nothing gives you
+everything; naming a subset gives you that subset:
 
 ```swift
+// Everything.
+.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.0")
+
+// HTTP without the authentication stack.
 .package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.1.0", traits: ["default", "Security"])
-```
+         from: "0.1.0", traits: ["Web"])
 
-And a consumer that wants only the container and lifecycle opts out, which
-drops it from 28 resolved packages to 7:
-
-```swift
+// Just the container and lifecycle — 7 resolved packages instead of 29.
 .package(url: "https://github.com/Swift-Flight/flight.git",
          from: "0.1.0", traits: [])
 ```
+
+Opt-in would read better than opt-out, and this package tried it first. It
+does not work: on SwiftPM 6.2.3, a consumer enabling a **non-default** trait
+on a **versioned** dependency does not cause that trait's gated package
+dependencies to be resolved, and the build fails with *"exhausted attempts to
+resolve the dependencies graph"*. Path dependencies resolve correctly, so the
+failure appears only once a package is tagged and consumed for real. Default
+traits resolve correctly either way — hence this shape. It is a workaround for
+a toolchain limitation, and it should be revisited when that is fixed.
 
 ### Building this repository
 

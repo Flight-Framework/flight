@@ -56,13 +56,21 @@ let package = Package(
         .library(name: "FlightSecurityCore", targets: ["FlightSecurityCore"]),
     ],
     traits: [
-        // "Web" is on by default: most Flight applications serve HTTP, and
-        // this keeps `.package(url: "...flight.git", from: "0.1.0")` working
-        // with no trait ceremony for them. Consumers that want only the
-        // container and lifecycle — including flight-data's cache and data
-        // protocols — opt out with `traits: []`, and then never resolve
-        // Hummingbird, NIO, or the TLS stack at all.
-        .default(enabledTraits: ["Web"]),
+        // Every optional trait is a DEFAULT trait, and consumers subtract.
+        //
+        // This is not the shape you would choose freely — opt-in reads better
+        // than opt-out. It is forced by SwiftPM 6.2.3: a consumer enabling a
+        // NON-default trait on a *versioned* dependency does not cause that
+        // trait's gated package dependencies to be resolved, and the build
+        // fails with "exhausted attempts to resolve the dependencies graph".
+        // Path dependencies resolve correctly, which is why this only shows
+        // up once a package is tagged and consumed for real. Default traits
+        // resolve correctly either way, so every optional trait is one.
+        //
+        //     traits: []                  container and lifecycle only, 7 packages
+        //     traits: ["Web"]             + HTTP, WebSockets, Channels, Presence
+        //     (unspecified)               everything, including Security
+        .default(enabledTraits: ["Web", "Security"]),
         .trait(
             name: "Web",
             description: "HTTP, WebSockets, SSE, Channels, Presence, and the actuator."
