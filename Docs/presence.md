@@ -67,7 +67,7 @@ maintains the list from those messages:
 
 - **Swift:** `FlightPresenceClient` — `ChannelPresence(channel:)`, an
   `AsyncStream` of changes.
-- **JS/TS:** `@flight/channels/presence` — `new FlightPresence(channel)`,
+- **JS/TS:** `@swift-flight/channels/presence` — `new FlightPresence(channel)`,
   `onChange(({list, joins, leaves}) => …)`.
 
 Both normalize meta updates (a leave+join of the same `ref`) into in-place

@@ -25,8 +25,9 @@ join/leave, routing to handlers, replies, heartbeats, reconnection.
 | `FlightChannelsClient` | Swift reference client: `ChannelClient`, `ChannelHandle`, transport seam, reconnect-with-backoff-and-rejoin | Protocol only |
 | `FlightChannelsTesting` | `InMemoryChannelTransport` (client ↔ in-process server, no socket), `ChannelWireClient` (raw-envelope driver) | the above + WebTesting |
 
-The JS/TS reference client lives beside this package at
-`../flight-channels-js` — same protocol, same versioning.
+The JS/TS reference client is
+[flight-channels-js](https://github.com/Swift-Flight/flight-channels-js)
+(`@swift-flight/channels` on npm) — same protocol, same versioning.
 
 ## Backpressure and blast radius
 
