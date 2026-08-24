@@ -55,7 +55,7 @@ ceremony at all. Authentication is opt-in:
 
 ```swift
 .package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.1.0", traits: ["defaults", "Security"])
+         from: "0.1.0", traits: ["default", "Security"])
 ```
 
 And a consumer that wants only the container and lifecycle opts out, which
