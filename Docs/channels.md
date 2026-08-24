@@ -191,16 +191,24 @@ exercised for real. `ChannelWireClient` drives raw envelopes for
 wire-level assertions. Multi-node behavior is testable with
 `FlightPubSubTesting.InMemoryCluster` (see `MultiNodeTests`).
 
-## Design deltas (doc → implementation)
+## Design notes
 
-1. **`ChannelPrincipal` seam instead of Security Core's `Principal`**.
-   Security Core is not yet built; Channels' actual requirement is "the
-   join gate can read who this is". Channels owns a two-member protocol
-   (`subject`, `hasRole(_:)`) — exactly what the design's own join example
-   uses — plus `BasicPrincipal` for simple cases. When
-   flight-security-core ships, its `Principal` conforms retroactively and
-   its middleware feeds `registerChannelSocket`'s `authenticate` closure;
-   no Channels change. Same "seam, not engine" posture as
+1. **`ChannelPrincipal` is a seam, not Security's `Principal`**. Channels'
+   requirement is only "the join gate can read who this is", so it owns a
+   two-member protocol (`subject`, `hasRole(_:)`) plus `BasicPrincipal` for
+   simple cases, and takes no dependency on Security at all — a WebSocket
+   layer should work with any notion of identity, or none.
+
+   `FlightSecurityCore` ships, and the two meet in application code:
+
+   ```swift
+   extension Principal: @retroactive ChannelPrincipal {}
+   ```
+
+   The conformance is empty because `Principal` already has both members.
+   Its validator then feeds `registerChannelSocket`'s `authenticate`
+   closure, with no Channels change — which is what the seam was for. Same
+   "seam, not engine" posture as
 2. **`JoinResult`/`HandleResult` are structs with static constructors**,
    not enums — the design's call sites (`.ok`, `.ok(initialState:)`) need
    an overload an enum case can't provide; the shapes are otherwise the
