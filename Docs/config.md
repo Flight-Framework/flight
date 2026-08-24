@@ -20,13 +20,13 @@ let certPath: String? = try configuration.getIfPresent("tls.certificate")
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Swift-Flight/flight-config", from: "0.1.0")
+    .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.2")
 ]
 ```
 
 ```swift
 .target(name: "MyApp", dependencies: [
-    .product(name: "FlightConfig", package: "flight-config")
+    .product(name: "FlightConfig", package: "flight")
 ])
 ```
 

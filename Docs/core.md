@@ -28,15 +28,15 @@ struct App {
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Swift-Flight/flight-core", from: "0.1.0")
+    .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.2")
 ]
 ```
 
 ```swift
 .target(
     name: "MyApp",
-    dependencies: [.product(name: "FlightCore", package: "flight-core")],
-    plugins: [.plugin(name: "FlightRegistrationPlugin", package: "flight-core")]
+    dependencies: [.product(name: "FlightCore", package: "flight")],
+    plugins: [.plugin(name: "FlightRegistrationPlugin", package: "flight")]
 )
 ```
 
