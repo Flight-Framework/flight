@@ -50,30 +50,29 @@ enabled trait reaches.
 | `Web` | HTTP, WebSockets, SSE, Channels, Presence, actuator — Hummingbird, NIO, the TLS stack |
 | `Security` | `FlightSecurityCore` — JWTKit, AsyncHTTPClient. Implies `Web`. |
 
-**Both are default traits, and you subtract.** Naming nothing gives you
-everything; naming a subset gives you that subset:
+Both are opt-in. Name what you want:
 
 ```swift
-// Everything.
-.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.0")
-
-// HTTP without the authentication stack.
+// An HTTP service.
 .package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.1.0", traits: ["Web"])
+         from: "0.1.1", traits: ["Web"])
+
+// …with authentication.
+.package(url: "https://github.com/Swift-Flight/flight.git",
+         from: "0.1.1", traits: ["Security"])
 
 // Just the container and lifecycle — 7 resolved packages instead of 29.
-.package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.1.0", traits: [])
+.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.1")
 ```
 
-Opt-in would read better than opt-out, and this package tried it first. It
-does not work: on SwiftPM 6.2.3, a consumer enabling a **non-default** trait
-on a **versioned** dependency does not cause that trait's gated package
-dependencies to be resolved, and the build fails with *"exhausted attempts to
-resolve the dependencies graph"*. Path dependencies resolve correctly, so the
-failure appears only once a package is tagged and consumed for real. Default
-traits resolve correctly either way — hence this shape. It is a workaround for
-a toolchain limitation, and it should be revisited when that is fixed.
+**Swift 6.3 or later is required.** Through 6.2.x, SwiftPM did not resolve the
+gated dependencies of a non-default trait enabled on a *versioned* dependency,
+failing with *"exhausted attempts to resolve the dependencies graph"*
+([#9286](https://github.com/swiftlang/swift-package-manager/issues/9286), fixed
+by [#9269](https://github.com/swiftlang/swift-package-manager/pull/9269)).
+Path dependencies always worked, so it appeared only once this package was
+tagged. The manifest declares tools version 6.3 so an older toolchain says so
+plainly instead of failing obscurely.
 
 ### Building this repository
 

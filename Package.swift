@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.3
 import CompilerPluginSupport
 import Foundation
 import PackageDescription
@@ -56,21 +56,21 @@ let package = Package(
         .library(name: "FlightSecurityCore", targets: ["FlightSecurityCore"]),
     ],
     traits: [
-        // Every optional trait is a DEFAULT trait, and consumers subtract.
+        // Opt-in: a consumer names what it wants, and resolves nothing else.
         //
-        // This is not the shape you would choose freely — opt-in reads better
-        // than opt-out. It is forced by SwiftPM 6.2.3: a consumer enabling a
-        // NON-default trait on a *versioned* dependency does not cause that
-        // trait's gated package dependencies to be resolved, and the build
-        // fails with "exhausted attempts to resolve the dependencies graph".
-        // Path dependencies resolve correctly, which is why this only shows
-        // up once a package is tagged and consumed for real. Default traits
-        // resolve correctly either way, so every optional trait is one.
-        //
-        //     traits: []                  container and lifecycle only, 7 packages
+        //     traits: []                  container and lifecycle only
         //     traits: ["Web"]             + HTTP, WebSockets, Channels, Presence
-        //     (unspecified)               everything, including Security
-        .default(enabledTraits: ["Web", "Security"]),
+        //     traits: ["Security"]        + authentication (implies Web)
+        //
+        // Requires Swift 6.3 or later. Through 6.2.x, SwiftPM did not resolve
+        // the gated dependencies of a non-default trait enabled on a
+        // *versioned* dependency and failed with "exhausted attempts to
+        // resolve the dependencies graph" (swiftlang/swift-package-manager
+        // #9286, fixed by #9269). Path dependencies always worked, so the
+        // failure appeared only once this package was tagged and consumed for
+        // real. Tools version 6.3 below makes the requirement explicit rather
+        // than letting an older toolchain fail obscurely.
+        .default(enabledTraits: []),
         .trait(
             name: "Web",
             description: "HTTP, WebSockets, SSE, Channels, Presence, and the actuator."

@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        swift: ["6.2.3"]
+        swift: ["6.3.3"]
     # The official image pins the exact patch release. swift-actions/setup-swift
     # only accepts a minor version, and "6.2" was resolving to 6.2.1.
     container: swift:${{ matrix.swift }}
@@ -52,7 +52,7 @@ jobs:
     name: Format (advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
-    container: swift:6.2.3
+    container: swift:6.3.3
     steps:
       - uses: actions/checkout@v4
 
