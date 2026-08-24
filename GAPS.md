@@ -34,13 +34,15 @@ former hid 13 broken fixtures. `hangar/CI/run-tests.sh` now reports both.
 **The same pattern should be applied to `flight` and `flight-data`**, which
 still grep for one summary.
 
-### `flight` has no integration tests at all
-Everything in its 692 tests runs in-process. That is mostly right — the point
-of `TestClient` is that no socket is needed — but it means the real transport
-path (`FlightTransport` over an actual socket, TLS, WebSocket upgrade) is
-exercised only by `FlightTransportTests`, which also runs in-process. Nothing
-binds a real port in CI.
-**Size:** medium. **Risk if ignored:** a transport regression ships.
+### ~~`flight` has no integration tests at all~~ — wrong, struck
+I claimed this without checking and it is false. `FlightTransportTests` binds
+real ports: `HTTPWireTests`, `TLSWireTests` and `WebSocketWireTests` connect
+over TCP with a raw socket client, including a TLS handshake against a
+per-run self-signed certificate. 27 tests, ungated, running in CI today.
+
+Left visible rather than deleted, because three of my claims in this audit's
+first draft were about test coverage and two of them were wrong. Check before
+believing an entry here.
 
 ### No macOS build anywhere
 All CI is `ubuntu-latest`, while every package declares `platforms: [.macOS(.v15)]`.
