@@ -39,10 +39,29 @@ fallback (Flight Config).
 
 ## Access gating
 
-In `.prod` (per `FLIGHT_ENV`) the routes are simply **not registered** —
-`/actuator` does not exist in the route table, so there is nothing to probe
-or misconfigure. Prod access is a seam reserved for Flight Security
-and deliberately not built.
+Three levels, decided at bootstrap and never re-read:
+
+| `actuator.exposure` | Routes registered |
+| --- | --- |
+| `disabled` | none |
+| `health_only` | `/actuator/health` — a liveness answer with no topology in it |
+| `full` | health **and** the dashboard: module list, every component's type name, failure messages |
+
+`full` is the default in `dev`, `development`, `test` and `local`.
+**Everywhere else the default is `health_only`** — an orchestrator needs a
+probe in production, and an all-or-nothing gate left production with none.
+
+An unrecognised value fails bootstrap naming the key rather than falling back,
+for the reason given under [What gets published, and where](#what-gets-published-and-where): this decides
+whether an endpoint disclosing your topology exists.
+
+`FLIGHT_ACTUATOR_EXPOSURE` overrides it. That is an environment variable
+rather than a config key because the decision is made while routes are being
+registered, before the configuration container has resolved.
+
+The dashboard is unauthenticated wherever it is on, so `full` in production
+needs something in front of it. `health_only` is safe to expose: it answers
+`200`/`UP` or `503` and discloses nothing else.
 
 For tests and embedders, `ActuatorModule(environment:)` bypasses the
 `FLIGHT_ENV` read; `TestContainer.build` honors such ready-made instances.

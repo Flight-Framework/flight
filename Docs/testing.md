@@ -10,7 +10,7 @@ There are three sizes of test. Most suites want the middle one.
 | | What runs | Reach for it when |
 |---|---|---|
 | [Call the handler](#calling-a-handler-directly) | one method | the logic is the point and routing is not |
-| [`Components`](#components-the-usual-choice) | the real controller, routing, middleware, DI | most of the time |
+| [`Components`](#components--the-usual-choice) | the real controller, routing, middleware, DI | most of the time |
 | [`AppModule` + `override`](#the-whole-application) | every module the application boots | you are testing the wiring itself |
 
 ## Components — the usual choice
