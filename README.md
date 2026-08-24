@@ -104,3 +104,7 @@ builds in Swift 6 language mode.
 
 `swift test --enable-all-traits` — 685 tests across 14 targets, no external
 services required.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
