@@ -100,10 +100,14 @@ does. The prose in `Docs/` is good; the API reference is mostly absent.
   *Deliberate.*
 
 ### flight-actuator
-- **No authenticated production access.** In `.prod` the routes are simply not
-  registered. The seam for exposing them behind Security exists and was never
-  built, so a team wanting health checks in production has no path. *Medium,
-  and the most likely thing a real deployment asks for.*
+- ~~**No authenticated production access.**~~ **Wrong — struck.** I read a
+  stale passage in `Docs/actuator.md` rather than the code. `ActuatorExposure`
+  already has three levels, and `health_only` is the *default* outside
+  development precisely so an orchestrator has a probe. The doc contradicted
+  itself and has been fixed.
+  What remains, and it is small: the `full` dashboard is unauthenticated
+  wherever it is enabled, so running it in production needs something in
+  front. That is now stated in the doc rather than implied. *Small.*
 - No live-updating dashboard, no historical metrics. *Deliberate.*
 
 ### flight-presence
