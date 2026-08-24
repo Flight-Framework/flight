@@ -316,8 +316,11 @@ let package = Package(
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ]
         ),
-        // Macro fixture suites are XCTest-based, because assertMacroExpansion
-        // ships in SwiftSyntaxMacrosTestSupport as XCTest.
+        // Macro fixture suites use SwiftSyntaxMacrosGenericTestSupport, not
+        // SwiftSyntaxMacrosTestSupport: the latter reports through XCTFail and
+        // would force these suites onto XCTest. The generic variant hands
+        // failures back, so they record as swift-testing issues like every
+        // other suite here. See Tests/*/SwiftTestingBridge.swift.
         .testTarget(
             name: "FlightCoreMacroTests",
             dependencies: [
@@ -325,7 +328,7 @@ let package = Package(
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 // MacroSpec — carries declared conformances into assertMacroExpansion.
                 .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
-                .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
             ]
         ),
         .testTarget(
@@ -361,7 +364,7 @@ let package = Package(
                 .target(name: "FlightWebMacrosImpl", condition: .when(traits: ["Web"])),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
-                .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
             ]
         ),
         .testTarget(

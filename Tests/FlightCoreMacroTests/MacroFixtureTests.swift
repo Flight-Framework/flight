@@ -24,8 +24,8 @@
 import SwiftSyntax
 import SwiftSyntaxMacroExpansion
 import SwiftSyntaxMacros
-import SwiftSyntaxMacrosTestSupport
-import XCTest
+import SwiftSyntaxMacrosGenericTestSupport
+import Testing
 
 @testable import FlightCoreMacrosImpl
 
@@ -45,11 +45,13 @@ private let testMacros: [String: MacroSpec] = [
     "Transactional": MacroSpec(type: TransactionalMacro.self),
 ]
 
-final class MacroFixtureTests: XCTestCase {
+@Suite("macro fixture tests")
+struct MacroFixtureTests {
 
     // MARK: Fixture 1 — a component with no dependencies
 
-    func testPlainComponent() {
+    @Test("plain component")
+    func plainComponent() {
         assertMacroExpansion(
             """
             @Component
@@ -81,7 +83,8 @@ final class MacroFixtureTests: XCTestCase {
     // MARK: Fixture 2 — a component with @Autowired dependencies
     // (public type, so the registration thunk is access-matched)
 
-    func testComponentWithDependencies() {
+    @Test("component with dependencies")
+    func componentWithDependencies() {
         assertMacroExpansion(
             """
             @Component
@@ -116,7 +119,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Stereotypes (§5.1.1) — identical expansion, tagged register call
 
-    func testServiceStereotype() {
+    @Test("service stereotype")
+    func serviceStereotype() {
         assertMacroExpansion(
             """
             @Service
@@ -146,7 +150,8 @@ final class MacroFixtureTests: XCTestCase {
         )
     }
 
-    func testRepositoryStereotype() {
+    @Test("repository stereotype")
+    func repositoryStereotype() {
         // Arguments compose exactly as on @Component.
         assertMacroExpansion(
             """
@@ -174,7 +179,8 @@ final class MacroFixtureTests: XCTestCase {
         )
     }
 
-    func testStereotypeDiagnosticsNameTheAttribute() {
+    @Test("stereotype diagnostics name the attribute")
+    func stereotypeDiagnosticsNameTheAttribute() {
         assertMacroExpansion(
             """
             @Repository
@@ -202,7 +208,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 3 — @Transactional on a synchronous throwing method
 
-    func testTransactionalSync() {
+    @Test("transactional sync")
+    func transactionalSync() {
         assertMacroExpansion(
             """
             final class Ledger {
@@ -241,7 +248,8 @@ final class MacroFixtureTests: XCTestCase {
     // the async-native coordinator when one is bound, the sync coordinator
     // otherwise — selected at runtime, awaited rather than blocked on.
 
-    func testTransactionalAsyncVoid() {
+    @Test("transactional async void")
+    func transactionalAsyncVoid() {
         assertMacroExpansion(
             """
             final class Mover {
@@ -275,7 +283,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 5 — a scoped component
 
-    func testScopedComponent() {
+    @Test("scoped component")
+    func scopedComponent() {
         assertMacroExpansion(
             """
             @Component(scope: .scoped)
@@ -304,7 +313,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 6a — two @Autowired of one type, no qualifiers: refuse
 
-    func testAmbiguousAutowiredIsCompileError() {
+    @Test("ambiguous autowired is compile error")
+    func ambiguousAutowiredIsCompileError() {
         assertMacroExpansion(
             """
             @Component
@@ -336,7 +346,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 6b — the qualified resolution
 
-    func testQualifiedAutowired() {
+    @Test("qualified autowired")
+    func qualifiedAutowired() {
         assertMacroExpansion(
             """
             @Component
@@ -371,7 +382,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Supplementary — @ConfigValue expansion
 
-    func testConfigValue() {
+    @Test("config value")
+    func configValue() {
         assertMacroExpansion(
             """
             @Component
@@ -409,7 +421,8 @@ final class MacroFixtureTests: XCTestCase {
     // default. The default expression is parenthesized so low-precedence
     // expressions cannot rebind against `??`.
 
-    func testConfigValueWithDefault() {
+    @Test("config value with default")
+    func configValueWithDefault() {
         assertMacroExpansion(
             """
             @Component
@@ -441,7 +454,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Supplementary — @Component qualifier argument
 
-    func testComponentQualifier() {
+    @Test("component qualifier")
+    func componentQualifier() {
         assertMacroExpansion(
             """
             @Component(qualifier: "primary")
@@ -470,7 +484,8 @@ final class MacroFixtureTests: XCTestCase {
 
     // MARK: Supplementary — diagnostics
 
-    func testNonFinalClassIsRejected() {
+    @Test("non final class is rejected")
+    func nonFinalClassIsRejected() {
         assertMacroExpansion(
             """
             @Component
@@ -496,7 +511,8 @@ final class MacroFixtureTests: XCTestCase {
         )
     }
 
-    func testUninitializedStoredPropertyIsRejected() {
+    @Test("uninitialized stored property is rejected")
+    func uninitializedStoredPropertyIsRejected() {
         // M-3: init(_flight:) assigns only injected properties; anything else
         // stored needs a default. Without this diagnostic the compile error
         // points inside the macro expansion.
@@ -527,7 +543,8 @@ final class MacroFixtureTests: XCTestCase {
         )
     }
 
-    func testTransactionalRequiresThrows() {
+    @Test("transactional requires throws")
+    func transactionalRequiresThrows() {
         assertMacroExpansion(
             """
             final class Quiet {

@@ -8,8 +8,8 @@
 import SwiftSyntax
 import SwiftSyntaxMacroExpansion
 import SwiftSyntaxMacros
-import SwiftSyntaxMacrosTestSupport
-import XCTest
+import SwiftSyntaxMacrosGenericTestSupport
+import Testing
 
 @testable import FlightWebMacrosImpl
 
@@ -21,11 +21,13 @@ private let testMacros: [String: MacroSpec] = [
     "WebSocketMapping": MacroSpec(type: RouteMappingMacro.self),
 ]
 
-final class ControllerMacroFixtureTests: XCTestCase {
+@Suite("controller macro fixture tests")
+struct ControllerMacroFixtureTests {
 
     // MARK: Fixture 1 — plain GET handler with a return value
 
-    func testGetHandlerExpansion() {
+    @Test("get handler expansion")
+    func getHandlerExpansion() {
         assertMacroExpansion(
             """
             @Controller
@@ -68,7 +70,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 2 — body-decoding POST + @Autowired + Void DELETE
 
-    func testBodyAndVoidHandlers() {
+    @Test("body and void handlers")
+    func bodyAndVoidHandlers() {
         assertMacroExpansion(
             """
             @Controller
@@ -131,7 +134,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 3 — WebSocket mapping (§6.1)
 
-    func testWebSocketMappingExpansion() {
+    @Test("web socket mapping expansion")
+    func webSocketMappingExpansion() {
         assertMacroExpansion(
             """
             @Controller
@@ -174,7 +178,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
 
     // MARK: Diagnostics — every misuse names the fix at the site
 
-    func testNonLiteralPathIsAnError() {
+    @Test("non literal path is an error")
+    func nonLiteralPathIsAnError() {
         assertMacroExpansion(
             """
             @Controller
@@ -215,7 +220,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testStaticHandlerIsAnError() {
+    @Test("static handler is an error")
+    func staticHandlerIsAnError() {
         assertMacroExpansion(
             """
             @Controller
@@ -255,7 +261,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testMissingContextParameterIsAnError() {
+    @Test("missing context parameter is an error")
+    func missingContextParameterIsAnError() {
         assertMacroExpansion(
             """
             @Controller
@@ -295,7 +302,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testDuplicateRoutesInOneControllerAreAnError() {
+    @Test("duplicate routes in one controller are an error")
+    func duplicateRoutesInOneControllerAreAnError() {
         assertMacroExpansion(
             """
             @Controller
@@ -325,7 +333,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testNonFinalClassControllerIsAnError() {
+    @Test("non final class controller is an error")
+    func nonFinalClassControllerIsAnError() {
         assertMacroExpansion(
             """
             @Controller
@@ -349,7 +358,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testInvalidPathPatternIsAnError() {
+    @Test("invalid path pattern is an error")
+    func invalidPathPatternIsAnError() {
         assertMacroExpansion(
             """
             @Controller
@@ -394,7 +404,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
 
     // MARK: Fixture 4 — @Controller base path, Spring-style combination
 
-    func testControllerBasePathCombinesWithMethodPaths() {
+    @Test("controller base path combines with method paths")
+    func controllerBasePathCombinesWithMethodPaths() {
         assertMacroExpansion(
             """
             @Controller("/users")
@@ -443,7 +454,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
     }
 
     /// A base path ending in "/" must not double the separator at the seam.
-    func testControllerBasePathTrailingSlashCollapses() {
+    @Test("controller base path trailing slash collapses")
+    func controllerBasePathTrailingSlashCollapses() {
         assertMacroExpansion(
             """
             @Controller("/users/")
@@ -482,7 +494,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
 
     /// Omitted base path is the identity: existing @Controller types are
     /// unaffected (backward compatibility, checked explicitly).
-    func testOmittedControllerPathIsUnprefixed() {
+    @Test("omitted controller path is unprefixed")
+    func omittedControllerPathIsUnprefixed() {
         assertMacroExpansion(
             """
             @Controller
@@ -519,7 +532,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testControllerPathMustStartWithSlash() {
+    @Test("controller path must start with slash")
+    func controllerPathMustStartWithSlash() {
         assertMacroExpansion(
             """
             @Controller("users")
@@ -562,7 +576,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
         )
     }
 
-    func testControllerPathNonLiteralIsAnError() {
+    @Test("controller path non literal is an error")
+    func controllerPathNonLiteralIsAnError() {
         assertMacroExpansion(
             """
             @Controller(somePath)
@@ -611,7 +626,8 @@ final class ControllerMacroFixtureTests: XCTestCase {
     /// in; two relative paths that are themselves distinct ("/:id" and
     /// "/:id" repeated is the trivial case, so this uses the "/" ⇔ base
     /// identity) still collide correctly.
-    func testDuplicateRoutesReportTheCombinedPath() {
+    @Test("duplicate routes report the combined path")
+    func duplicateRoutesReportTheCombinedPath() {
         assertMacroExpansion(
             """
             @Controller("/users")
