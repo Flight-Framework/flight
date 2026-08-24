@@ -35,6 +35,13 @@ public final class Container: @unchecked Sendable {
     /// sequence to report — not a reason to abort the process from inside a
     /// registration call the developer did not write.
     private var duplicateRegistration: ComponentKey?
+
+    /// Keys claimed by ``override(_:qualifier:scope:stereotype:factory:)``.
+    /// A later `register` for one of these is discarded rather than recorded
+    /// as a duplicate — that is the whole point of an override, and it is why
+    /// overriding works regardless of whether it runs before or after the
+    /// module that registers the real component.
+    private var overriddenKeys: Set<ComponentKey> = []
     private var phase: Phase = .registering
     private var registrations: [ComponentKey: Registration] = [:]
     private var order: [ComponentKey] = []
@@ -75,6 +82,9 @@ public final class Container: @unchecked Sendable {
             "Container.register called after freeze(). Registration is only legal during the bootstrap registration phase."
         )
         let key = ComponentKey(type, qualifier: qualifier)
+        // An override already claimed this key: the real registration is
+        // deliberately dropped, and is not a duplicate.
+        if overriddenKeys.contains(key) { return }
         if registrations[key] != nil {
             // Reachable without a hand-written mistake: a generated existential
             // bridge can collide with a hand-written registration, and that is
@@ -86,6 +96,68 @@ public final class Container: @unchecked Sendable {
             typeName: key.typeName,
             scope: scope,
             sourceModule: currentSourceModule,
+            qualifier: qualifier,
+            stereotype: stereotype
+        )
+        registrations[key] = Registration(key: key, scope: scope, descriptor: descriptor) { c in
+            try factory(c)
+        }
+        order.append(key)
+    }
+
+    /// Registers `factory` for this key, replacing anything already there and
+    /// suppressing anything registered for it later.
+    ///
+    /// This exists for tests. The value of dependency injection here is that a
+    /// suite can run the real controller, the real routing, and the real
+    /// middleware while swapping the one seam that would otherwise need a
+    /// database, a network, or a clock. Without an override, doing that means
+    /// hand-rebuilding the object graph in every test module — and the obvious
+    /// alternative, registering a fake alongside the real module, fails at
+    /// `freeze()` with a duplicate-registration error whose advice ("give one
+    /// of them a qualifier") is wrong for this situation.
+    ///
+    ///     let container = try TestContainer.build {
+    ///         AppModule()
+    ///     } overriding: { container in
+    ///         container.override((any UserRepositoryProtocol).self, scope: .scoped) { _ in
+    ///             InMemoryUsers()
+    ///         }
+    ///     }
+    ///
+    /// Order-independent by design: overriding before or after the module that
+    /// registers the real component gives the same result, so a test never has
+    /// to reason about module DAG ordering to swap one dependency.
+    ///
+    /// Calling it twice for the same key is last-wins, not an error — a suite
+    /// refining an override from a shared helper is doing something reasonable.
+    public func override<T: Sendable>(
+        _ type: T.Type,
+        qualifier: String? = nil,
+        scope: Lifetime,
+        stereotype: Stereotype = .component,
+        factory: @escaping @Sendable (Container) throws -> T
+    ) {
+        precondition(
+            phase == .registering,
+            "Container.override called after freeze(). Overrides are only legal during the registration phase."
+        )
+        let key = ComponentKey(type, qualifier: qualifier)
+        overriddenKeys.insert(key)
+
+        // A real registration may already be present, if the module ran first.
+        if registrations[key] != nil {
+            registrations[key] = nil
+            order.removeAll { $0 == key }
+            // It was legitimately replaced, so it must not be reported as the
+            // collision that failed the freeze.
+            if duplicateRegistration == key { duplicateRegistration = nil }
+        }
+
+        let descriptor = ComponentDescriptor(
+            typeName: key.typeName,
+            scope: scope,
+            sourceModule: "<override>",
             qualifier: qualifier,
             stereotype: stereotype
         )

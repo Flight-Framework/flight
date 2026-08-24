@@ -21,13 +21,53 @@ public enum TestContainer {
         }
     }
 
+    /// Builds a frozen container from `modules`, with `overriding` applied on
+    /// top.
+    ///
+    ///     let container = try TestContainer.build {
+    ///         AppModule()
+    ///     } overriding: { container in
+    ///         container.override((any UserRepositoryProtocol).self, scope: .scoped) { _ in
+    ///             InMemoryUsers()
+    ///         }
+    ///     }
+    ///
+    /// This is the shape most suites want: run the application's real modules —
+    /// real controllers, real routing, real middleware — and swap only the
+    /// seams that would otherwise need a database, a network, or a clock.
+    ///
+    /// The alternative is hand-registering each component a test needs, which
+    /// works but drifts: a controller that gains a dependency breaks every
+    /// test module that listed its old ones.
+    public static func build(
+        configuration: Configuration = Configuration(),
+        @ModuleBuilder _ modules: () -> [any FlightModule],
+        overriding: (Container) throws -> Void
+    ) throws -> Container {
+        try build(configuration: configuration, modules, applying: overriding)
+    }
+
     public static func build(
         configuration: Configuration = Configuration(),
         @ModuleBuilder _ modules: () -> [any FlightModule]
     ) throws -> Container {
+        try build(configuration: configuration, modules, applying: { _ in })
+    }
+
+    private static func build(
+        configuration: Configuration,
+        _ modules: () -> [any FlightModule],
+        applying overrides: (Container) throws -> Void
+    ) throws -> Container {
         let instances = modules()
         let container = Container()
         container.register(Configuration.self, scope: .singleton) { _ in configuration }
+
+        // Overrides are applied before the modules run. `Container.override`
+        // suppresses a later registration for the same key, so the ordering
+        // here is an implementation detail rather than something a test has to
+        // know — either order produces the same container.
+        try overrides(container)
 
         // Same ordering rules as bootstrap (Flight Core §7 step 5), with the
         // caller's ready-made instances substituted where types match.
