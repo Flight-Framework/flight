@@ -24,7 +24,9 @@ and `FlightPresence`; a service behind an existing identity provider adds
 | `FlightSecurityCore` | A resource server: validates tokens your identity provider issued. Bring your own auth. |
 | `*Testing` | Test support for Web, PubSub, and Channels — in-memory transports, mock contexts, cluster harnesses. |
 
-Per-product documentation lives in [Docs/](Docs/).
+Per-product documentation lives in [Docs/](Docs/), and
+[Docs/testing.md](Docs/testing.md) covers how to test an application built
+on it.
 
 ## Getting started
 
