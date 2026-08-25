@@ -51,6 +51,9 @@ let package = Package(
         // Operational endpoints: health, info, metrics.
         .library(name: "FlightActuator", targets: ["FlightActuator"]),
 
+        // MARK: Scheduler
+        .library(name: "FlightScheduler", targets: ["FlightScheduler"]),
+
         // Authentication: a resource server. Token *validation* only, with a
         // TokenValidator seam so any issuer can be brought instead.
         .library(name: "FlightSecurityCore", targets: ["FlightSecurityCore"]),
@@ -301,6 +304,19 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
+        // MARK: Scheduler
+
+        .target(
+            name: "FlightScheduler",
+            dependencies: [
+                "FlightCore",
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+            ],
+            path: "Sources/Scheduler/FlightScheduler",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+
         // MARK: Actuator
 
         .target(
@@ -449,6 +465,12 @@ let package = Package(
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
             path: "Tests/Actuator/FlightActuatorTests"
+        ),
+        .testTarget(
+            name: "FlightSchedulerTests",
+            dependencies: ["FlightScheduler"],
+            path: "Tests/Scheduler/FlightSchedulerTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "FlightSecurityCoreTests",
