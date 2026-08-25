@@ -122,3 +122,60 @@ struct ModuleTests {
         #expect(FlightPubSubModule().service == nil)
     }
 }
+
+/// The configuration cross-check on the single-node fallback.
+///
+/// Composing by presence is right, but it means an unloaded adapter module
+/// looks exactly like a deliberate single-node deployment. These pin the one
+/// signal that tells them apart: configuration nobody would have written
+/// unless they wanted the adapter.
+@Suite("Unloaded adapter modules", .serialized, .timeLimit(.minutes(1)))
+struct UnloadedAdapterTests {
+
+    @Test("pubsub.valkey.url with no adapter module fails assembly instead of going single-node")
+    func configuredButNotLoaded() throws {
+        let configuration = Configuration(values: ["pubsub.valkey.url": "valkey://127.0.0.1:6379"])
+
+        // The factory runs at freeze(), so what surfaces is a BootstrapError
+        // carrying the message — assembly refuses, which is the contract.
+        let error = #expect(throws: (any Error).self) {
+            try Flight.assemble(configuration: configuration, modules: [FlightPubSubModule.self])
+        }
+        let message = String(describing: try #require(error))
+        #expect(message.contains("pubsub.valkey.url"))
+        #expect(message.contains("FlightPubSubValkeyModule"))
+    }
+
+    @Test("the message names the module to add and the key to remove")
+    func messageIsActionable() {
+        let error = UnloadedAdapterError(
+            feature: "PubSub",
+            configurationKey: "pubsub.valkey.url",
+            module: "FlightPubSubValkeyModule")
+
+        // Whoever hits this at 3am gets both ways out of it, by name.
+        #expect(error.description.contains("FlightPubSubValkeyModule"))
+        #expect(error.description.contains("pubsub.valkey.url"))
+        #expect(error.description.contains("Flight.bootstrap(modules:)"))
+    }
+
+    @Test("an adapter module present reads its own configuration — no cross-check fires")
+    func configuredAndLoaded() throws {
+        InMemoryAdapterModule.clusterSlot.withLock { $0 = InMemoryCluster() }
+        defer { InMemoryAdapterModule.clusterSlot.withLock { $0 = nil } }
+
+        // Same configuration as the failing case. The adapter here is not the
+        // Valkey one, but presence is what the check is about: something
+        // registered an adapter, so the fallback branch never runs.
+        let configuration = Configuration(values: ["pubsub.valkey.url": "valkey://127.0.0.1:6379"])
+        let app = try Flight.assemble(configuration: configuration, modules: [InMemoryAdapterModule.self])
+
+        #expect(try app.container.resolve((any PubSub).self) is ClusteredPubSub)
+    }
+
+    @Test("no adapter and no configuration is the ordinary single-node app")
+    func neitherConfiguredNorLoaded() throws {
+        let app = try Flight.assemble(configuration: Configuration(), modules: [FlightPubSubModule.self])
+        #expect(try app.container.resolve((any PubSub).self) is LocalPubSub)
+    }
+}

@@ -34,6 +34,16 @@ public struct FlightPubSubModule: FlightModule {
                 // Absent adapter = single-node deployment, the 90% case.
                 // Any other resolution failure is a real wiring bug.
                 guard case .notRegistered = error else { throw error }
+                // ...unless configuration named an adapter nobody loaded, in
+                // which case falling back silently would give every node its
+                // own private fan-out and no symptom until production.
+                try container.resolve(Configuration.self).requireNoUnloadedAdapter(
+                    feature: "PubSub",
+                    candidates: [
+                        AdapterCandidate(
+                            configurationKey: "pubsub.valkey.url",
+                            module: "FlightPubSubValkeyModule")
+                    ])
                 adapter = nil
             }
             guard let adapter else { return local }
