@@ -10,7 +10,7 @@ and not a closure registered during startup:
 
 ```swift
 @Scheduler
-final class ReportJobs: Sendable {
+struct ReportJobs {
     @Autowired var reports: ReportService
 
     @Scheduled("0 0 3 * * *")

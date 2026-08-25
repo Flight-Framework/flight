@@ -28,10 +28,11 @@ struct SchedulerRegistrationTests {
         }
     }
 
+    // No hand registration of `Jobs` itself: @Scheduler registers the
+    // component as well as its jobs, exactly as @Controller does.
     private func freeze() throws -> Container {
         let container = Container()
         try Jobs._flightRegister(container)
-        container.register(Jobs.self, scope: .singleton) { _ in Jobs() }
         try container.freeze()
         return container
     }
@@ -90,7 +91,6 @@ struct SchedulerRegistrationTests {
     func handRegistered() throws {
         let container = Container()
         try Jobs._flightRegister(container)
-        container.register(Jobs.self, scope: .singleton) { _ in Jobs() }
         container.registerScheduledJob("reconcile", cron: try CronExpression("0 */10 * * * *")) {}
         try container.freeze()
         #expect(try container.collectScheduledJobs().count == 3)

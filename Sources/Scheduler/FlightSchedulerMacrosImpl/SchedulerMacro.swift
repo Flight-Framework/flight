@@ -55,12 +55,32 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
             $0.name.tokenKind == .keyword(.public) || $0.name.tokenKind == .keyword(.open)
         } ? "public " : ""
 
+        // A @Scheduler type is an ordinary component: it injects what its
+        // jobs need, exactly as @Controller and @Component do. Without the
+        // resolving initializer, @Autowired in a scheduler would not compile
+        // — which the compiled doc snippet caught.
+        let properties = Injection.scan(declaration.memberBlock.members)
+        let initLines = Injection.initializerLines(for: properties)
+        let initBody =
+            initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
+        let resolvingInit: DeclSyntax = """
+            internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
+            """
+
+        // The component first, then its jobs: a job's factory resolves the
+        // component, so the registration order has to allow that mid-freeze.
+        let thunkLines =
+            [
+                "container.register(Self.self, scope: .singleton) { c in",
+                "    try Self(_flight: c)",
+                "}",
+            ] + lines
         let thunk: DeclSyntax = """
             \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
-            \(raw: lines.map { "    " + $0 }.joined(separator: "\n"))
+            \(raw: thunkLines.map { "    " + $0 }.joined(separator: "\n"))
             }
             """
-        return [thunk]
+        return [resolvingInit, thunk]
     }
 
     private static func registrationLines(for job: ScannedJob) -> [String] {
