@@ -112,13 +112,14 @@ let package = Package(
     targets: [
         // MARK: Configuration
 
-        .target(name: "FlightConfigCore", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "FlightConfigCore", path: "Sources/Config/FlightConfigCore", swiftSettings: [.swiftLanguageMode(.v6)]),
         .target(
             name: "FlightConfig",
             dependencies: [
                 "FlightConfigCore",
                 .product(name: "Configuration", package: "swift-configuration"),
             ],
+            path: "Sources/Config/FlightConfig",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -132,7 +133,8 @@ let package = Package(
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
                 .product(name: "SwiftDiagnostics", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
-            ]
+            ],
+            path: "Sources/Core/FlightCoreMacrosImpl"
         ),
         // Code generator invoked by the build tool plugin. Kept free of
         // swift-argument-parser deliberately (one positional arg: manifest
@@ -148,7 +150,8 @@ let package = Package(
                 "FlightConfigCore",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
-            ]
+            ],
+            path: "Sources/Core/flight-registration-gen"
         ),
         .plugin(
             name: "FlightRegistrationPlugin",
@@ -165,6 +168,7 @@ let package = Package(
             ],
             // Strict concurrency is the default under tools 6.x; kept explicit
             // as documentation of intent.
+            path: "Sources/Core/FlightCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -178,7 +182,8 @@ let package = Package(
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
                 .product(name: "SwiftDiagnostics", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
-            ]
+            ],
+            path: "Sources/Web/FlightWebMacrosImpl"
         ),
         .target(
             name: "FlightWeb",
@@ -191,6 +196,7 @@ let package = Package(
                 .product(name: "Tracing", package: "swift-distributed-tracing", condition: .when(traits: ["Web"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
+            path: "Sources/Web/FlightWeb",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         // The ONLY target in Flight that knows what the transport wraps.
@@ -209,6 +215,7 @@ let package = Package(
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
             ],
+            path: "Sources/Web/FlightTransport",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
@@ -218,6 +225,7 @@ let package = Package(
                 "FlightCore",
                 .product(name: "Logging", package: "swift-log"),
             ],
+            path: "Sources/Web/FlightWebTesting",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -230,23 +238,26 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
+            path: "Sources/PubSub/FlightPubSub",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "FlightPubSubTesting",
             dependencies: ["FlightPubSub"],
+            path: "Sources/PubSub/FlightPubSubTesting",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
         // MARK: Channels
 
-        .target(name: "FlightChannelsProtocol", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "FlightChannelsProtocol", path: "Sources/Channels/FlightChannelsProtocol", swiftSettings: [.swiftLanguageMode(.v6)]),
         .target(
             name: "FlightChannels",
             dependencies: [
                 "FlightChannelsProtocol", "FlightCore", "FlightPubSub", .target(name: "FlightWeb", condition: .when(traits: ["Web"])),
                 .product(name: "Logging", package: "swift-log"),
             ],
+            path: "Sources/Channels/FlightChannels",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
@@ -255,11 +266,13 @@ let package = Package(
                 "FlightChannelsProtocol",
                 .product(name: "Logging", package: "swift-log"),
             ],
+            path: "Sources/Channels/FlightChannelsClient",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "FlightChannelsTesting",
             dependencies: [.target(name: "FlightChannels", condition: .when(traits: ["Web"])), "FlightChannelsClient", .target(name: "FlightWebTesting", condition: .when(traits: ["Web"]))],
+            path: "Sources/Channels/FlightChannelsTesting",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -268,6 +281,7 @@ let package = Package(
         .target(
             name: "FlightPresenceProtocol",
             dependencies: ["FlightChannelsProtocol"],
+            path: "Sources/Presence/FlightPresenceProtocol",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
@@ -277,11 +291,13 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
+            path: "Sources/Presence/FlightPresence",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "FlightPresenceClient",
             dependencies: ["FlightPresenceProtocol", "FlightChannelsClient"],
+            path: "Sources/Presence/FlightPresenceClient",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -290,6 +306,7 @@ let package = Package(
         .target(
             name: "FlightActuator",
             dependencies: [.target(name: "FlightWeb", condition: .when(traits: ["Web"])), "FlightCore"],
+            path: "Sources/Actuator/FlightActuator",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -307,6 +324,7 @@ let package = Package(
                 .product(name: "NIOCore", package: "swift-nio", condition: .when(traits: ["Web"])),
                 .product(name: "NIOFoundationCompat", package: "swift-nio", condition: .when(traits: ["Web"])),
             ],
+            path: "Sources/Security/FlightSecurityCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
@@ -315,6 +333,7 @@ let package = Package(
         .testTarget(
             name: "FlightConfigTests",
             dependencies: ["FlightConfig"],
+            path: "Tests/Config/FlightConfigTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
@@ -322,7 +341,8 @@ let package = Package(
             dependencies: [
                 "FlightCore",
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-            ]
+            ],
+            path: "Tests/Core/FlightCoreTests"
         ),
         // Macro fixture suites use SwiftSyntaxMacrosGenericTestSupport, not
         // SwiftSyntaxMacrosTestSupport: the latter reports through XCTFail and
@@ -337,11 +357,13 @@ let package = Package(
                 // MacroSpec — carries declared conformances into assertMacroExpansion.
                 .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
-            ]
+            ],
+            path: "Tests/Core/FlightCoreMacroTests"
         ),
         .testTarget(
             name: "FlightRegistrationGenTests",
             dependencies: ["flight-registration-gen"],
+            path: "Tests/Core/FlightRegistrationGenTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
@@ -349,7 +371,8 @@ let package = Package(
             dependencies: [
                 .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])), "FlightCore",
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-            ]
+            ],
+            path: "Tests/Web/FlightWebTests"
         ),
         // Real-socket integration suite: HTTP round-trips, SSE streaming,
         // WebSocket upgrade against a bound FlightTransport.
@@ -364,7 +387,8 @@ let package = Package(
                 .product(name: "NIOSSL", package: "swift-nio-ssl", condition: .when(traits: ["Web"])),
                 .product(name: "X509", package: "swift-certificates", condition: .when(traits: ["Web"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-            ]
+            ],
+            path: "Tests/Web/FlightTransportTests"
         ),
         .testTarget(
             name: "FlightWebMacroTests",
@@ -373,7 +397,8 @@ let package = Package(
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
-            ]
+            ],
+            path: "Tests/Web/FlightWebMacroTests"
         ),
         .testTarget(
             name: "FlightPubSubTests",
@@ -381,18 +406,21 @@ let package = Package(
                 "FlightPubSub", "FlightPubSubTesting", "FlightCore",
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
-            ]
+            ],
+            path: "Tests/PubSub/FlightPubSubTests"
         ),
         .testTarget(
             name: "FlightChannelsTests",
             dependencies: [
                 .target(name: "FlightChannels", condition: .when(traits: ["Web"])), .target(name: "FlightChannelsTesting", condition: .when(traits: ["Web"])), "FlightCore",
                 "FlightPubSub", "FlightPubSubTesting", .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])),
-            ]
+            ],
+            path: "Tests/Channels/FlightChannelsTests"
         ),
         .testTarget(
             name: "FlightChannelsClientTests",
-            dependencies: ["FlightChannelsClient", .target(name: "FlightChannelsTesting", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"]))]
+            dependencies: ["FlightChannelsClient", .target(name: "FlightChannelsTesting", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"]))],
+            path: "Tests/Channels/FlightChannelsClientTests"
         ),
         .testTarget(
             name: "FlightChannelsE2ETests",
@@ -400,7 +428,8 @@ let package = Package(
                 .target(name: "FlightChannels", condition: .when(traits: ["Web"])), "FlightChannelsClient", "FlightCore", "FlightPubSub",
                 .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])), .target(name: "FlightTransport", condition: .when(traits: ["Web"])),
                 .product(name: "HummingbirdWSClient", package: "hummingbird-websocket", condition: .when(traits: ["Web"])),
-            ]
+            ],
+            path: "Tests/Channels/FlightChannelsE2ETests"
         ),
         .testTarget(
             name: "FlightPresenceTests",
@@ -410,14 +439,16 @@ let package = Package(
                 .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
-            ]
+            ],
+            path: "Tests/Presence/FlightPresenceTests"
         ),
         .testTarget(
             name: "FlightActuatorTests",
             dependencies: [
                 .target(name: "FlightActuator", condition: .when(traits: ["Web"])), .target(name: "FlightWeb", condition: .when(traits: ["Web"])), .target(name: "FlightWebTesting", condition: .when(traits: ["Web"])), "FlightCore",
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-            ]
+            ],
+            path: "Tests/Actuator/FlightActuatorTests"
         ),
         .testTarget(
             name: "FlightSecurityCoreTests",
@@ -426,6 +457,7 @@ let package = Package(
                 .product(name: "JWTKit", package: "jwt-kit", condition: .when(traits: ["Security"])),
                 .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(traits: ["Web"])),
             ],
+            path: "Tests/Security/FlightSecurityCoreTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

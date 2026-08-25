@@ -15,11 +15,20 @@ struct GeneratorTests {
     /// The built generator. Declaring the executable as a dependency of this
     /// test target is what guarantees it exists by the time these run.
     static let executable: URL = {
-        // …/Tests/FlightRegistrationGenTests/GeneratorTests.swift → package root
-        var root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        // Walk up from this file until the directory holding Package.swift —
+        // the package root — rather than counting directory levels. Counting
+        // broke the moment the test target moved from Tests/X to Tests/Core/X,
+        // and would break again on any future regrouping.
+        var root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Package.swift").path)
+        {
+            let parent = root.deletingLastPathComponent()
+            precondition(
+                parent.path != root.path,
+                "no Package.swift above \(#filePath) — cannot locate the built generator")
+            root = parent
+        }
         root.appendPathComponent(".build")
         for configuration in ["debug", "release"] {
             let candidate =

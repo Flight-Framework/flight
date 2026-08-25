@@ -15,7 +15,7 @@ public protocol _FlightRegistrable {
 /// 2. a static registration thunk `_flightRegister(_:)`;
 /// 3. conformance to `_FlightRegistrable`.
 ///
-/// The exact expansions are pinned by Tests/FlightCoreMacroTests — those
+/// The exact expansions are pinned by Tests/Core/FlightCoreMacroTests — those
 /// fixtures are the spec, more precise than this comment.
 @attached(member, names: named(init), named(_flightRegister))
 @attached(extension, conformances: _FlightRegistrable)

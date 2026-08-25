@@ -108,7 +108,7 @@ An adapter package provides one `FlightModule` that:
    the relay and the connection are the distributed deployment's
    long-running half).
 
-`Tests/FlightPubSubTests/ModuleTests.swift` contains a complete working
+`Tests/PubSub/FlightPubSubTests/ModuleTests.swift` contains a complete working
 example (`InMemoryAdapterModule`), including two bootstrapped apps forming a
 cluster and shutting down gracefully.
 

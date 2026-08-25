@@ -288,15 +288,15 @@ Recorded here the way Core records its spec deviations in SPIKE-FINDINGS:
 ## Layout
 
 ```
-Sources/FlightWeb/             runtime: context, middleware, router, response
+Sources/Web/FlightWeb/             runtime: context, middleware, router, response
                                encoding, SSE, upgrade hook, transport seam,
                                FlightWebModule, macro declarations
-Sources/FlightWebMacrosImpl/   compiler plugin: Controller + mapping markers
-Sources/FlightTransport/       the default transport wrapping HummingbirdCore (§5.2, §5.6)
-Sources/FlightWebTesting/      §7 test-support surface
-Tests/FlightWebTests/          runtime suites (swift-testing)
-Tests/FlightWebMacroTests/     §4 macro fixtures (XCTest, normative expansions)
-Tests/FlightTransportTests/    real-socket HTTP/SSE/WebSocket integration
+Sources/Web/FlightWebMacrosImpl/   compiler plugin: Controller + mapping markers
+Sources/Web/FlightTransport/       the default transport wrapping HummingbirdCore (§5.2, §5.6)
+Sources/Web/FlightWebTesting/      §7 test-support surface
+Tests/Web/FlightWebTests/          runtime suites (swift-testing)
+Tests/Web/FlightWebMacroTests/     §4 macro fixtures (XCTest, normative expansions)
+Tests/Web/FlightTransportTests/    real-socket HTTP/SSE/WebSocket integration
 ```
 
 ## Deliberately not here (§10)
