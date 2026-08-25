@@ -37,6 +37,7 @@ actor JobRunner {
     private let coordinator: any JobCoordinator
     private let clock: any SchedulerClock
     private let logger: Logger
+    private let status_: SchedulerStatus?
 
     private var status: JobStatus
     private var isRunning = false
@@ -46,18 +47,24 @@ actor JobRunner {
         job: ScheduledJobRegistration,
         coordinator: any JobCoordinator,
         clock: any SchedulerClock,
-        logger: Logger
+        logger: Logger,
+        status: SchedulerStatus? = nil
     ) {
         self.job = job
         self.coordinator = coordinator
         self.clock = clock
         self.logger = logger
+        self.status_ = status
         self.status = JobStatus(
             name: job.name, lastFired: nil, lastOutcome: nil, lastDuration: nil,
             nextFire: nil, runCount: 0, failureCount: 0)
     }
 
     func currentStatus() -> JobStatus { status }
+
+    /// Mirrors the local status into the shared holder, so `/jobs` and the
+    /// like see it without reaching into the actor on every request.
+    private func publish() { status_?.record(status) }
 
     /// The scheduling loop. Returns when the task is cancelled.
     func run() async {
@@ -75,6 +82,7 @@ actor JobRunner {
                 return
             }
             status.nextFire = next
+            publish()
 
             do {
                 try await clock.sleep(until: next)
@@ -98,6 +106,7 @@ actor JobRunner {
                 logger.warning(
                     "scheduled job skipped: the previous run has not finished",
                     metadata: ["job": .string(job.name)])
+                publish()
                 return
             case .queue:
                 // The caller is this job's own serial loop, so "queue" is
@@ -115,7 +124,8 @@ actor JobRunner {
                     logger.debug(
                         "scheduled job claimed by another process",
                         metadata: ["job": .string(job.name)])
-                    return
+                    publish()
+                return
                 }
             } catch {
                 // A coordinator that cannot answer must not be read as "yes".
@@ -127,6 +137,7 @@ actor JobRunner {
                 logger.error(
                     "scheduled job skipped: the coordinator could not be reached",
                     metadata: ["job": .string(job.name), "error": .string("\(error)")])
+                publish()
                 return
             }
         }
@@ -154,6 +165,7 @@ actor JobRunner {
                 metadata: ["job": .string(job.name), "error": .string("\(error)")])
         }
         status.lastDuration = .seconds(Int(clock.now.timeIntervalSince(started)))
+        publish()
 
         if job.scope == .once {
             await coordinator.release(job: job.name, scheduledFor: scheduledFor)

@@ -54,6 +54,7 @@ let package = Package(
         // MARK: Scheduler
         .library(name: "FlightScheduler", targets: ["FlightScheduler"]),
         .library(name: "FlightCronCore", targets: ["FlightCronCore"]),
+        .library(name: "FlightSchedulerTesting", targets: ["FlightSchedulerTesting"]),
 
         // Authentication: a resource server. Token *validation* only, with a
         // TokenValidator seam so any issuer can be brought instead.
@@ -334,6 +335,13 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
 
+        .target(
+            name: "FlightSchedulerTesting",
+            dependencies: ["FlightScheduler"],
+            path: "Sources/Scheduler/FlightSchedulerTesting",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+
         // MARK: Actuator
 
         .target(
@@ -495,7 +503,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FlightSchedulerTests",
-            dependencies: ["FlightScheduler"],
+            dependencies: ["FlightScheduler", "FlightSchedulerTesting"],
             path: "Tests/Scheduler/FlightSchedulerTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

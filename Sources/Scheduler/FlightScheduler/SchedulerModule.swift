@@ -26,6 +26,9 @@ public final class FlightSchedulerModule: FlightModule, @unchecked Sendable {
 
     public func configure(_ container: Container) throws {
         self.container = container
+        container.register(SchedulerStatus.self, scope: .singleton) { _ in
+            SchedulerStatus()
+        }
     }
 
     public var service: (any Service)? {

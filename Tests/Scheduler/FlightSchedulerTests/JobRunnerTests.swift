@@ -3,6 +3,8 @@ import Logging
 import Synchronization
 import Testing
 
+import FlightSchedulerTesting
+
 @testable import FlightScheduler
 
 /// The runtime's decision logic: who runs a firing, and what happens when
@@ -32,16 +34,16 @@ struct JobRunnerTests {
     @Test("a claimed firing runs the job and releases afterwards")
     func claimedRuns() async {
         let ran = Mutex(0)
-        let coordinator = StubCoordinator(claims: true)
+        let coordinator = StubJobCoordinator.claiming
         let runner = JobRunner(
             job: job { ran.withLock { $0 += 1 } },
-            coordinator: coordinator, clock: TestClock(now: epoch), logger: quiet)
+            coordinator: coordinator, clock: TestSchedulerClock(now: epoch), logger: quiet)
 
         await runner.fire(scheduledFor: epoch)
 
         #expect(ran.withLock { $0 } == 1)
-        #expect(coordinator.claims.withLock { $0 } == ["job"])
-        #expect(coordinator.releases.withLock { $0 } == ["job"], "a claim must be released")
+        #expect(coordinator.claimedJobs == ["job"])
+        #expect(coordinator.releasedJobs == ["job"], "a claim must be released")
         #expect(await runner.currentStatus().lastOutcome == .succeeded)
     }
 
@@ -50,8 +52,8 @@ struct JobRunnerTests {
         let ran = Mutex(0)
         let runner = JobRunner(
             job: job { ran.withLock { $0 += 1 } },
-            coordinator: StubCoordinator(claims: false),
-            clock: TestClock(now: epoch), logger: quiet)
+            coordinator: StubJobCoordinator.refusing,
+            clock: TestSchedulerClock(now: epoch), logger: quiet)
 
         await runner.fire(scheduledFor: epoch)
 
@@ -62,15 +64,15 @@ struct JobRunnerTests {
     @Test("an onEveryNode job never consults the coordinator")
     func everyNodeSkipsCoordination() async {
         let ran = Mutex(0)
-        let coordinator = StubCoordinator(claims: false)  // would refuse, if asked
+        let coordinator = StubJobCoordinator.refusing  // would refuse, if asked
         let runner = JobRunner(
             job: job(scope: .onEveryNode) { ran.withLock { $0 += 1 } },
-            coordinator: coordinator, clock: TestClock(now: epoch), logger: quiet)
+            coordinator: coordinator, clock: TestSchedulerClock(now: epoch), logger: quiet)
 
         await runner.fire(scheduledFor: epoch)
 
         #expect(ran.withLock { $0 } == 1)
-        #expect(coordinator.claims.withLock { $0 }.isEmpty)
+        #expect(coordinator.claimedJobs.isEmpty)
     }
 
     @Test("a coordinator that cannot answer skips rather than assuming yes")
@@ -80,8 +82,8 @@ struct JobRunnerTests {
         let ran = Mutex(0)
         let runner = JobRunner(
             job: job { ran.withLock { $0 += 1 } },
-            coordinator: StubCoordinator(failsWith: StubError(message: "down")),
-            clock: TestClock(now: epoch), logger: quiet)
+            coordinator: StubJobCoordinator.failing(StubError(message: "down")),
+            clock: TestSchedulerClock(now: epoch), logger: quiet)
 
         await runner.fire(scheduledFor: epoch)
 
@@ -100,7 +102,7 @@ struct JobRunnerTests {
         // One broken job must not stop the scheduler or its siblings.
         let runner = JobRunner(
             job: job { throw StubError(message: "boom") },
-            coordinator: StubCoordinator(), clock: TestClock(now: epoch), logger: quiet)
+            coordinator: StubJobCoordinator.claiming, clock: TestSchedulerClock(now: epoch), logger: quiet)
 
         await runner.fire(scheduledFor: epoch)
 
@@ -117,14 +119,14 @@ struct JobRunnerTests {
     @Test("a failed run still releases its claim")
     func failureStillReleases() async {
         // Otherwise a job that throws would hold its lock and never run again.
-        let coordinator = StubCoordinator()
+        let coordinator = StubJobCoordinator.claiming
         let runner = JobRunner(
             job: job { throw StubError(message: "boom") },
-            coordinator: coordinator, clock: TestClock(now: epoch), logger: quiet)
+            coordinator: coordinator, clock: TestSchedulerClock(now: epoch), logger: quiet)
 
         await runner.fire(scheduledFor: epoch)
 
-        #expect(coordinator.releases.withLock { $0 } == ["job"])
+        #expect(coordinator.releasedJobs == ["job"])
     }
 
     @Test("status accumulates across firings")
@@ -134,7 +136,7 @@ struct JobRunnerTests {
             job: job {
                 if shouldThrow.withLock({ $0 }) { throw StubError(message: "x") }
             },
-            coordinator: StubCoordinator(), clock: TestClock(now: epoch), logger: quiet)
+            coordinator: StubJobCoordinator.claiming, clock: TestSchedulerClock(now: epoch), logger: quiet)
 
         await runner.fire(scheduledFor: epoch)
         shouldThrow.withLock { $0 = true }

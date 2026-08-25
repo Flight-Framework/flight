@@ -85,7 +85,7 @@ jobs:
                         FlightPubSub FlightPubSubTesting FlightPresence \
                         FlightPresenceProtocol FlightPresenceClient \
                         FlightActuator FlightSecurityCore FlightWebTesting \
-                        FlightTransport; do
+                        FlightTransport FlightScheduler; do
             echo "::group::$target"
             swift package --enable-all-traits \
               --allow-writing-to-directory "./docs/$target" \

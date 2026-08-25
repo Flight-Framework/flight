@@ -29,6 +29,8 @@ public struct SchedulerService: Service, Sendable {
         let jobs = try container.collectScheduledJobs()
         let coordinator = Self.resolveCoordinator(in: container)
         let mode = Self.mode(for: coordinator)
+        let status = try? container.resolve(SchedulerStatus.self)
+        status?.setMode(mode)
 
         guard !jobs.isEmpty else {
             logger.info("scheduler started with no jobs")
@@ -59,7 +61,8 @@ public struct SchedulerService: Service, Sendable {
         }
 
         let runners = jobs.map {
-            JobRunner(job: $0, coordinator: coordinator, clock: clock, logger: logger)
+            JobRunner(
+                job: $0, coordinator: coordinator, clock: clock, logger: logger, status: status)
         }
 
         await withTaskGroup(of: Void.self) { group in
