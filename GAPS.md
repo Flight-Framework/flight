@@ -14,24 +14,44 @@ day it was started; its history moved with it. Entries closed overnight on
 first draft were **wrong** and are struck rather than deleted, because the
 useful thing about a wrong entry is knowing it was wrong.
 
-**Still open, in rough priority order:** flight-web HTTP/2 (now a design
+**Still open, in rough priority order:** a distributed PubSub adapter — the
+single highest-value gap, because `DistributedPubSubAdapter` has no
+implementation and three documented features rest on it (Channels broadcast
+across nodes, Presence's membership mode, `ClusteredPubSub` itself); the
+three-way duplication of macro injection scanning; flight-web HTTP/2 (a design
 decision, not a task — see below); hangar composite-key associations; the
-presence gossip trust model; the scheduler package; npm and Homebrew
-publishing; format debt.
+presence gossip trust model; npm and Homebrew publishing; format debt.
+
+**Closed since this was written:** the scheduler (flight 0.2.0/0.2.1, with the
+Postgres coordinator in flight-data 0.2.0 and a tutorial stage), the target
+regrouping, DocC coverage and its CI jobs, and the macOS jobs.
 
 **DocC is done** where it makes sense: 17 of flight's 20 targets, 8 of
 flight-data's, hangar and swift-changeset. The three flight targets without
 catalogues are the two macro implementations and the registration generator,
 which have no consumer-facing API.
 
-**Needs a decision from you, not more work:**
-- **Tag hangar v0.2.0.** Soft delete, pagination, slow-query diagnostics,
-  introspection, `EXPLAIN` and CTEs all landed after 0.1.0. `hangar-vapor`
-  cannot be published until that tag exists.
-- **Create the `hangar-vapor` repository.** The package is written, tested
-  against a real pool in a real Vapor app, and committed locally at
-  `Hangar/hangar-vapor` — but creating a public repo under the org is yours
-  to do, not mine to assume.
+**Both former decisions are done:** hangar v0.2.0 is tagged and
+`hangar-vapor` is published. Released since: flight 0.2.0 and 0.2.1,
+flight-data 0.2.0, hangar 0.2.0, swift-changeset (nested changesets and
+optimistic locking, untagged).
+
+### ⚠ A feature shipped inert, and every check passed
+`@Scheduler` went out in flight 0.2.0 with 743 passing tests, a DocC
+catalogue, a prose guide and compiled snippets — and did nothing. The build
+plugin's `registrableAttributes` did not list `Scheduler`, so the macro's
+`_flightRegister` thunk was never called and jobs never ran.
+
+Nothing caught it because every scheduler test called `_flightRegister` by
+hand, which is exactly the step the bug skips. What caught it was *booting the
+demo*, which printed `scheduler started with no jobs`.
+
+Fixed in 0.2.1. The regression test reads both sides out of the sources —
+every macro emitting a registration thunk must appear in the generator's list
+— so it also covers the next registering macro somebody adds. Recorded here
+because the lesson generalises: a suite, a docs build and compiled snippets
+can all pass *above* the layer that is broken, and the tutorial was the only
+artifact exercising the real path end to end.
 
 ---
 
