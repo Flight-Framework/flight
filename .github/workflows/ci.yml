@@ -95,6 +95,20 @@ jobs:
   macos:
     name: Build on macOS
     runs-on: macos-15
+    # Advisory, and the reason is upstream rather than here.
+    #
+    # apple/swift-configuration 1.2.0 — the latest release — does not
+    # compile on Darwin: FileProvider.swift reaches for `Data.bytes`, which
+    # exists on the Linux Foundation it was written against and not on the
+    # Darwin one. Nothing in this package can fix that, and pinning to an
+    # unreleased main is worse than knowing.
+    #
+    # So the job runs and reports honestly, and does not gate merges. The
+    # moment upstream releases a fix, drop this line — the `platforms:
+    # [.macOS(.v15)]` claim in Package.swift is either true or it is not,
+    # and a permanently red required check just teaches people to ignore
+    # CI.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
