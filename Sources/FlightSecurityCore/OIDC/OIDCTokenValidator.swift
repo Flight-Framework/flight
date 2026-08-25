@@ -6,7 +6,7 @@ import Logging
 ///
 /// JWTKit owns the cryptographic core — signature verification, JWS
 /// structure, JWK parsing. This type owns the orchestration:
-/// JWKS fetching and rotation via ``JWKSCache``, and the claim policy —
+/// JWKS fetching and rotation via its internal `JWKSCache`, and the claim policy —
 /// issuer must match, audience must include this application, `exp`/`nbf`
 /// enforced with configurable clock-skew leeway, `sub` required.
 ///

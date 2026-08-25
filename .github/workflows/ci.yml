@@ -59,3 +59,48 @@ jobs:
 
       - name: Check formatting
         run: swift format lint --recursive --strict Sources Tests
+
+  docs:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    container: swift:6.3.3
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every module with a .docc catalogue, each with --warnings-as-errors:
+      # an unresolved symbol link, a doc comment naming a renamed parameter,
+      # or a Topics entry pointing at a symbol that no longer exists all fail
+      # the job. Documentation that nothing checks rots into documentation
+      # that is wrong, which is worse than none.
+      - name: Generate documentation
+        env:
+          FLIGHT_BUILD_DOCS: "1"
+        run: |
+          for target in FlightCore FlightConfig FlightWeb FlightChannels \
+                        FlightPubSub FlightActuator FlightSecurityCore \
+                        FlightWebTesting FlightTransport; do
+            echo "::group::$target"
+            swift package --enable-all-traits \
+              --allow-writing-to-directory "./docs/$target" \
+              generate-documentation --target "$target" \
+              --warnings-as-errors --output-path "./docs/$target"
+            echo "::endgroup::"
+          done
+
+  macos:
+    name: Build on macOS
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # 6.2 rather than the 6.3.3 the Linux jobs use: setup-swift does not
+      # index 6.3 yet. It satisfies the package's tools version, so the job
+      # still answers what it exists to answer — whether the
+      # platforms: [.macOS(.v15)] claim actually compiles.
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2"
+
+      - name: Build
+        run: swift build --enable-all-traits

@@ -52,6 +52,12 @@ public final class ClusteredPubSub: PubSub, Sendable {
     private let reportedCollisions = Mutex(Set<String>())
 
     /// - Parameters:
+    ///   - local: In-process delivery. Every publish reaches these
+    ///     subscribers first and synchronously, whatever the adapter does.
+    ///   - adapter: The cluster hop — what carries a publish to the other
+    ///     nodes and delivers theirs back. The Valkey adapter in
+    ///     `flight-data` is one; the protocol is narrow enough to write
+    ///     another.
     ///   - nodeID: A human-meaningful name for this node. Need not be
     ///     unique; correctness does not depend on it.
     ///   - broadcastTimeout: How long `publish` will wait on the adapter
@@ -59,6 +65,9 @@ public final class ClusteredPubSub: PubSub, Sendable {
     ///     happened by then and is unaffected. `nil` waits forever, which is
     ///     what this used to do unconditionally — an adapter that stopped
     ///     answering blocked every publisher in the process indefinitely.
+    ///   - logger: Where the relay reports adapter failures and topic
+    ///     collisions. These are the only places a clustered publish
+    ///     differs observably from a local one.
     public init(
         local: LocalPubSub,
         adapter: any DistributedPubSubAdapter,
