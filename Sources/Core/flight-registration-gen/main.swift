@@ -458,8 +458,16 @@ let bridgedProtocolBaseNames = Set(bridges.map { baseName($0.protocolName) })
 // type name is suspicious, not proven wrong. Cycles among scanned components
 // are errors: those are fully decidable from what the scanner sees.
 let knownTypeNames = Set(components.map(\.typeName))
+// Types the container answers for without anyone registering them. A demand
+// for one of these is satisfied at runtime no matter what the scanner sees,
+// so warning about it would be a false positive on correct code — and a
+// false positive that appears on every build is how a useful warning gets
+// tuned out.
 let alwaysAvailable: Set<String> = [
     "Configuration", "FlightCore.Configuration", "FlightConfig.Configuration",
+    // The container resolves to itself, which is how a gateway — a channel
+    // or a scheduled job that must open its own scope — gets one.
+    "Container", "FlightCore.Container",
 ]
 
 for component in components {

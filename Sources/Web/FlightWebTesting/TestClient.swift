@@ -52,6 +52,16 @@ public struct TestClient: Sendable {
         await execute(Request(method: .put, path: path, headers: headers, body: try JSONEncoder().encode(value)))
     }
 
+    /// PATCH, which is what a partial update is: the verb a changeset-backed
+    /// endpoint uses, and the one this client was missing.
+    public func patch(_ path: String, headers: HTTPFields = [:], body: Data = Data()) async -> Response {
+        await execute(Request(method: .patch, path: path, headers: headers, body: body))
+    }
+
+    public func patch(_ path: String, headers: HTTPFields = [:], json value: some Encodable) async throws -> Response {
+        await execute(Request(method: .patch, path: path, headers: headers, body: try JSONEncoder().encode(value)))
+    }
+
     public func delete(_ path: String, headers: HTTPFields = [:]) async -> Response {
         await execute(Request(method: .delete, path: path, headers: headers))
     }

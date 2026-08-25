@@ -112,3 +112,76 @@ extension String {
         return names
     }
 }
+
+/// The generator's always-available list, checked against what the container
+/// actually answers for.
+///
+/// Same failure shape as the attribute list above, one layer over: the
+/// generator warns about any `@Autowired` type it cannot see a registration
+/// for, and two types need no registration at all. A demand for one of those
+/// is correct code, so a warning on it is noise on every build — and a
+/// warning that is noise on every build is one nobody reads when it is real.
+///
+/// Reading the list from source rather than restating it is again the point.
+@Suite("Always-available types")
+struct AlwaysAvailableTests {
+
+    private static func packageRoot() -> URL {
+        var root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Package.swift").path)
+        {
+            let parent = root.deletingLastPathComponent()
+            precondition(parent.path != root.path, "no Package.swift above \(#filePath)")
+            root = parent
+        }
+        return root
+    }
+
+    /// The names the generator will not warn about, read out of its source.
+    private func alwaysAvailableNames() throws -> Set<String> {
+        let source = Self.packageRoot()
+            .appendingPathComponent("Sources/Core/flight-registration-gen/main.swift")
+        let text = try String(contentsOf: source, encoding: .utf8)
+
+        guard let start = text.range(of: "let alwaysAvailable: Set<String> = ["),
+            let end = text.range(of: "]", range: start.upperBound..<text.endIndex)
+        else {
+            Issue.record("could not find alwaysAvailable in \(source.path)")
+            return []
+        }
+
+        var names: Set<String> = []
+        for line in text[start.upperBound..<end.lowerBound].split(separator: "\n") {
+            let code = line.split(separator: "//", maxSplits: 1).first ?? ""
+            for piece in code.split(separator: ",") {
+                let name = piece.trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                if !name.isEmpty { names.insert(name) }
+            }
+        }
+        return names
+    }
+
+    @Test("the container is on the list, because it resolves to itself")
+    func containerIsAlwaysAvailable() throws {
+        let names = try alwaysAvailableNames()
+        // Both spellings: a property may be declared as either.
+        #expect(names.contains("Container"))
+        #expect(names.contains("FlightCore.Container"))
+    }
+
+    @Test("configuration is on the list, because bootstrap registers it")
+    func configurationIsAlwaysAvailable() throws {
+        let names = try alwaysAvailableNames()
+        #expect(names.contains("Configuration"))
+    }
+
+    @Test("the list is short — it is a list of exceptions, not a workaround")
+    func listStaysSmall() throws {
+        // If this ever fails, the question to ask is whether the entries
+        // added are genuinely resolvable without registration, or whether
+        // someone silenced a true warning by adding a name to a list.
+        #expect(try alwaysAvailableNames().count <= 6)
+    }
+}

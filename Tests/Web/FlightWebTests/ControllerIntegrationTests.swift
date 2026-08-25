@@ -34,6 +34,10 @@ final class UserService: Sendable {
         }
     }
 
+    func replace(_ user: User) {
+        storage.withLock { $0[user.id] = user }
+    }
+
     func delete(_ id: Int) {
         _ = storage.withLock { $0.removeValue(forKey: id) }
     }
@@ -76,6 +80,19 @@ struct UserController {
             throw HTTPError(.badRequest, "user id must be an integer")
         }
         userService.delete(id)
+    }
+
+    @PatchMapping("/users/:id")
+    func renameUser(_ context: RequestContext, body: CreateUserRequest) async throws -> User {
+        guard let id = context.pathParam("id").flatMap(Int.init) else {
+            throw HTTPError(.badRequest, "user id must be an integer")
+        }
+        guard let existing = userService.find(id) else {
+            throw HTTPError(.notFound, "no user \(id)")
+        }
+        let renamed = User(id: existing.id, name: body.name)
+        userService.replace(renamed)
+        return renamed
     }
 
     @GetMapping("/users")
@@ -222,6 +239,18 @@ struct ControllerIntegrationTests {
         #expect(response.bodyText.contains("name"))
     }
 
+    @Test func patchSendsABodyAndReadsTheAnswer() async throws {
+        // The verb a partial update uses. TestClient had get/post/put/delete
+        // and no patch, so a changeset-backed endpoint could only be reached
+        // by hand-building a Request — which is exactly the kind of friction
+        // that ends with the PATCH path going untested.
+        let client = try client()
+        let response = try await client.patch("/users/1", json: CreateUserRequest(name: "ada"))
+        #expect(response.status == .ok)
+        #expect(try response.decodeJSON(User.self).name == "ada")
+        #expect(try await client.get("/users/1").decodeJSON(User.self).name == "ada")
+    }
+
     @Test func voidHandlerAnswers204() async throws {
         let client = try client()
         let response = await client.delete("/users/1")
@@ -285,7 +314,10 @@ struct ControllerIntegrationTests {
         let routeBeans = container.allRegistrations().filter {
             $0.typeName == String(reflecting: RouteRegistration.self)
         }
-        #expect(routeBeans.count == 8)
+        // One per @*Mapping on UserController; adding a route here means
+        // updating this number, which is the point — a route that appears
+        // without anyone noticing is a route nobody meant to publish.
+        #expect(routeBeans.count == 9)
         #expect(routeBeans.allSatisfy { $0.qualifier != nil })
     }
 }
