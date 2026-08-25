@@ -284,12 +284,19 @@ Recorded so they are not rediscovered as bugs:
   the shared `.swift-format`. Both lint jobs are advisory. `flight-cli` is
   clean and blocking. A bulk reformat must avoid the macro fixture files,
   whose expected-expansion strings a careless regex corrupts.
-- **The tutorial checkpoint runner had been red since it landed** — 6 of 9
-  passing, 3 failing as exit 127. All three were `curl: command not found`:
-  the Swift images carry neither python3 nor curl, and only python3 had been
-  installed. Fixed 2026-08-25. Recorded here because the failure *looked*
-  like "the tutorial is broken" and was actually "the image is thin", and
-  that misattribution is how a useful check gets ignored.
+- **The tutorial checkpoint runner had been red since it landed** — 6 of 9,
+  and it took two fixes. All three failures were `curl: command not found`;
+  the Swift images carry neither python3 nor curl, and only python3 was
+  installed. That took it to 8 of 9. The last one was a real race the
+  tutorial teaches: the checkpoint backgrounds `swift run App` and curls it
+  on the next line, so a reader copying the block gets connection refused
+  while the server is still binding. Now waits on `/actuator/health` with a
+  bounded `curl --retry-connrefused`.
+
+  Both fixed 2026-08-25. Recorded because the first failure *looked* like
+  "the tutorial is broken" and was "the image is thin", and the second
+  looked like CI flakiness and was a defect in the documentation. That
+  misattribution is how a useful check gets ignored.
 - **One unexplained test failure**, flight-data, 2026-08-25: a single issue
   in a 375-test run that did not reproduce in ten subsequent runs, cold
   containers included. The Valkey readiness gap was fixed because it was
