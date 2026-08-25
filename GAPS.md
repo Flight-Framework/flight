@@ -5,7 +5,11 @@ v0.1.2 tags. Each entry says what is absent, why it matters, and how much work
 it looks like — so the list can be argued with rather than just worked
 through.
 
-Ordered by consequence, not by library. Entries closed overnight on
+Ordered by consequence, not by library. It lives here, in the flagship
+repository, because it covers the whole ecosystem — `flight`, `flight-data`,
+`hangar`, `swift-changeset`, `flight-cli` and the JS client. It was written
+in `flight-cli` only because that happened to be the working directory the
+day it was started; its history moved with it. Entries closed overnight on
 2026-08-24/25 are marked ✅ with what actually landed; three entries in the
 first draft were **wrong** and are struck rather than deleted, because the
 useful thing about a wrong entry is knowing it was wrong.
