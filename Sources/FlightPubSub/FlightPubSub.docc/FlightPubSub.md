@@ -20,8 +20,15 @@ for await message in try await pubsub.subscribe("orders") {
 
 ``LocalPubSub`` delivers in-process and is what a single node uses.
 ``ClusteredPubSub`` wraps it with a ``DistributedPubSubAdapter`` so a publish
-on one node reaches subscribers on every node — the Valkey adapter in
-`flight-data` is one, and the seam is narrow enough to write another.
+on one node reaches subscribers on every node.
+
+**No adapter ships yet.** ``DistributedPubSubAdapter`` is a seam, not a
+feature with an implementation behind it: two methods — broadcast one
+message, receive a stream of others' — narrow enough to write against Valkey,
+NATS or Redis in an afternoon, but until you do, every deployment is
+effectively single-node. `FlightPubSubTesting`'s `InMemoryCluster` is the
+only conforming implementation today, and it exists to test the clustered
+paths rather than to run them.
 
 ## Local first, clustered by configuration
 
