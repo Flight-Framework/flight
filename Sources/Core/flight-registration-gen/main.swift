@@ -97,8 +97,17 @@ final class ComponentVisitor: SyntaxVisitor {
     /// thunk as `@Component`, so the generator's only job is knowing the
     /// *name* — it never references another package's types, keeping the
     /// "Core imports nothing above it" boundary intact at the code level.
+    /// Every attribute that makes a type registrable.
+    ///
+    /// A new one must be added here as well as given a macro, or the macro
+    /// generates a `_flightRegister` thunk that nothing ever calls and the
+    /// type is silently never registered. That is exactly what happened to
+    /// `@Scheduler`: it shipped in 0.2.0 with a working macro, a working
+    /// runtime, and no entry here, so a scheduled job never ran. There is a
+    /// test below pinning this list against the macros the framework
+    /// actually declares.
     static let registrableAttributes: Set<String> = [
-        "Component", "Service", "Repository", "Controller",
+        "Component", "Service", "Repository", "Controller", "Scheduler",
     ]
 
     let module: String
