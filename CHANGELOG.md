@@ -4,7 +4,115 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-08-25
+
+### Added
+
+- **`FlightScheduler` — cron and interval jobs as annotated methods.**
+
+  ```swift
+  @Scheduler
+  struct ReportJobs {
+      @Autowired var reports: ReportService
+
+      @Scheduled("0 0 3 * * *")
+      func nightlyRollup() async throws { try await reports.rollUpYesterday() }
+
+      @Scheduled(every: .minutes(5), onEveryNode: true)
+      func refreshCache() async { await reports.warmCache() }
+  }
+  ```
+
+  The schedule is checked **by the build**: `@Scheduled("0 0 25 * * *")`
+  fails to compile, naming the hour field and its range. That is only worth
+  trusting if the build and the runtime agree about the grammar, so the cron
+  engine ships as `FlightCronCore` — a dependency-free target the macro
+  plugin and the scheduler both import. There is no second parser to drift.
+
+  Six fields, seconds first, with the classic five-field crontab shape
+  accepted as the same schedule at second zero. `?`, `L`, `W`, `#` and
+  `@daily`-style nicknames are refused rather than guessed at: implementations
+  disagree about what they mean, and a schedule that quietly means something
+  other than its author intended is worse than one that fails to parse.
+
+  Daylight saving is handled and pinned by tests. A job in the hour that does
+  not exist on the spring-forward day runs once, late; a job in the hour that
+  happens twice on the fall-back day runs once. The first case caught a real
+  bug during development — the search normalized its own state through
+  `Calendar`, which resolved the missing hour mid-search and skipped the day
+  entirely.
+
+- **Running once, without cluster vocabulary.** `@Scheduled("0 0 3 * * *")`
+  runs once — which reads the same whether a deployment has one server or
+  five, and is the safe default either way. `onEveryNode: true` is the opt-in
+  for work that is per-process by nature. On several servers `once` needs a
+  `JobCoordinator`; if none is registered the scheduler says so loudly at
+  startup rather than silently running every job everywhere, the same
+  discipline `PresenceMode` follows.
+
+  `LocalJobCoordinator` is not a stub — on a single process it is the correct
+  implementation — but no distributed coordinator ships yet, and the
+  documentation says so plainly rather than implying otherwise.
+
+- **`FlightSchedulerTesting`** — an injectable clock that jumps straight to
+  each instant, so scheduler tests run a year of firings in microseconds
+  instead of sleeping, and `StubJobCoordinator.refusing` for the
+  "another process took this firing" path that is otherwise reachable only by
+  running two servers.
+
+- **`SchedulerStatus`**, a resolvable component carrying last firing, last
+  outcome, next firing and run/failure counts. Deliberately not an actuator
+  endpoint: the actuator collects what it shows through generic container
+  introspection, and adding one there would make every application that wants
+  `/actuator/health` link the scheduler.
+
+- **`Duration.minutes`, `.hours`, `.days`.** The standard library stops at
+  seconds. `days` is 24 hours exactly and says so — across a daylight-saving
+  change a civil day is 23 or 25 hours, which is what cron expressions are
+  for.
+
+- **DocC catalogues for fifteen more modules**, and a CI job that builds every
+  one with `--warnings-as-errors`. Neither this package nor flight-data had a
+  docs job at all, so even the two existing catalogues had never been
+  verified. Turning the check on immediately found broken symbol links in
+  shipped doc comments and an initializer documenting two of its five
+  parameters.
+
+- **A macOS build job.** Every package declares `platforms: [.macOS(.v15)]`
+  and nothing had ever compiled there.
+
+### Changed
+
+- **Targets are grouped into family directories.** `Sources/` held twenty
+  siblings with no structure; it is now eight families — Core, Config, Web,
+  Channels, Presence, PubSub, Actuator, Security — mirrored in `Tests/`.
+  Product names are unchanged, so this is invisible to consumers.
+
+### Fixed
+
+- **`FlightPubSub`'s documentation claimed a Valkey adapter exists.** It does
+  not, in flight-data or anywhere else. `DistributedPubSubAdapter` is an
+  unimplemented seam and `InMemoryCluster` is the only conforming type,
+  written to test the clustered paths rather than run them. Both the
+  catalogue and `ClusteredPubSub`'s initializer now say so.
+- **`Docs/channels.md` said Security Core was not built.** It ships, and the
+  demo uses it.
+- **`Docs/actuator.md` contradicted itself about production access.**
+- Two tests located files by deleting a fixed number of path components from
+  `#filePath`, which silently resolved to the wrong directory once targets
+  moved. Both now walk up to the directory containing `Package.swift`.
+
+### Known issues
+
+- **This package does not build on macOS.** `apple/swift-configuration`
+  1.2.0 — the latest release — calls `Data.bytes` in `FileProvider.swift`,
+  which exists on the Linux Foundation it was written against and not on the
+  Darwin one. Tracked upstream as apple/swift-configuration#178 and
+  swiftlang/swift#87196, where it is described as an SDK gap on Apple's own
+  CI. Nothing here can fix it; the macOS job is advisory until upstream ships
+  a fix.
+
+## [0.1.2] - 2026-08-24
 
 ### Security
 

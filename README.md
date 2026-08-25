@@ -22,7 +22,8 @@ and `FlightPresence`; a service behind an existing identity provider adds
 | `FlightPresence` | CRDT-merged "who is here", correct across a cluster without central coordination. |
 | `FlightActuator` | Health, info, and metrics endpoints, off by default outside development. |
 | `FlightSecurityCore` | A resource server: validates tokens your identity provider issued. Bring your own auth. |
-| `*Testing` | Test support for Web, PubSub, and Channels — in-memory transports, mock contexts, cluster harnesses. |
+| `FlightScheduler` / `FlightCronCore` | Cron and interval jobs as annotated methods, with the schedule checked at build time. `FlightCronCore` is the dependency-free engine the macro validates with. |
+| `*Testing` | Test support for Web, PubSub, Channels, and the Scheduler — in-memory transports, mock contexts, cluster harnesses, a clock that does not sleep. |
 
 Per-product documentation lives in [Docs/](Docs/), and
 [Docs/testing.md](Docs/testing.md) covers how to test an application built
@@ -31,7 +32,7 @@ on it.
 ## Getting started
 
 ```swift
-.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.0")
+.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.2.0")
 ```
 
 ```swift
@@ -57,14 +58,14 @@ Both are opt-in. Name what you want:
 ```swift
 // An HTTP service.
 .package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.1.1", traits: ["Web"])
+         from: "0.2.0", traits: ["Web"])
 
 // …with authentication.
 .package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.1.1", traits: ["Security"])
+         from: "0.2.0", traits: ["Security"])
 
 // Just the container and lifecycle — 7 resolved packages instead of 29.
-.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.1")
+.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.2.0")
 ```
 
 **Swift 6.3 or later is required.** Through 6.2.x, SwiftPM did not resolve the
