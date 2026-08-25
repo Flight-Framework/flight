@@ -81,7 +81,9 @@ jobs:
           mkdir -p ./docs
           for target in FlightCore FlightConfig FlightConfigCore FlightWeb \
                         FlightChannels FlightChannelsProtocol \
-                        FlightChannelsClient FlightPubSub FlightPresence \
+                        FlightChannelsClient FlightChannelsTesting \
+                        FlightPubSub FlightPubSubTesting FlightPresence \
+                        FlightPresenceProtocol FlightPresenceClient \
                         FlightActuator FlightSecurityCore FlightWebTesting \
                         FlightTransport; do
             echo "::group::$target"
