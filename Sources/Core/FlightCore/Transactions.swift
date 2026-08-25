@@ -1,3 +1,6 @@
+import Logging
+import Synchronization
+
 /// The seam `@Transactional`'s expansion targets.
 ///
 /// Core owns only the *shape* of transaction coordination — begin, commit,
@@ -98,9 +101,59 @@ public enum FlightTransactions {
 
 /// Default coordinator: allocates tokens, does nothing else. Also handy in
 /// tests as a base for recording coordinators.
+///
+/// Reaching this coordinator from a real `@Transactional` method is almost
+/// always a wiring mistake, and it is a silent one: the method runs, every
+/// write lands, every test passes, and the first time a body throws halfway
+/// through, the writes before the throw stay. So the first time it is asked
+/// to begin a transaction, it says so.
+///
+/// Once per process, at warning level, rather than a thrown error: this is
+/// also the honest default for an application with no data layer at all, and
+/// for the coordinator-recording fakes a test suite builds on it. Loud
+/// enough to be found, not so loud it cannot be lived with.
 public struct NoopTransactionCoordinator: FlightTransactionCoordinator {
+    private static let warnings = Mutex(0)
+
+    /// The text, held as a constant so the test asserting it is actionable
+    /// reads the same string the log does.
+    static let warningMessage = """
+        @Transactional ran with no transaction coordinator bound, so it did nothing: \
+        the method's writes are not atomic and a thrown error will not roll them back. \
+        Bind one around the unit of work — withPostgresScope for a job, CLI command or \
+        test, or withPostgresTransactions(in:) for a scope you already have, such as a \
+        web request's. This warning is logged once per process.
+        """
+
+    /// How many times the warning has actually been emitted. The
+    /// once-per-process behaviour is the contract; this is how a test sees it.
+    static var warningCountForTesting: Int { warnings.withLock { $0 } }
+
     public init() {}
-    public func begin() throws -> FlightTransactionToken { FlightTransactionToken(id: 0) }
+
+    public func begin() throws -> FlightTransactionToken {
+        Self.warnOnce()
+        return FlightTransactionToken(id: 0)
+    }
+
     public func commit(_ token: FlightTransactionToken) throws {}
     public func rollback(_ token: FlightTransactionToken) {}
+
+    /// Lets a test observe the first warning more than once. The
+    /// once-per-process behaviour is the contract; this only exists so the
+    /// test asserting it can run twice in one process.
+    static func resetWarningForTesting() {
+        warnings.withLock { $0 = 0 }
+    }
+
+    /// Says what happened, and both ways to fix it, once.
+    static func warnOnce() {
+        let first = warnings.withLock { count -> Bool in
+            guard count == 0 else { return false }
+            count = 1
+            return true
+        }
+        guard first else { return }
+        Logger(label: "flight.transactions").warning("\(warningMessage)")
+    }
 }

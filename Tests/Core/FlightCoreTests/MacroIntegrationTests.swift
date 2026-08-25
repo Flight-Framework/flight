@@ -7,9 +7,11 @@
 // one to comment out while fixing FlightCoreMacrosImpl — nothing else in
 // FlightCoreTests uses macros.
 
-import FlightCore
+import Logging
 import Synchronization
 import Testing
+
+@testable import FlightCore
 
 // MARK: - Components under test
 
@@ -311,5 +313,62 @@ struct MacroIntegrationTests {
         }
         #expect(sync.events == ["begin", "commit#7"])
         #expect(asyncNative.events.isEmpty)
+    }
+}
+
+/// The no-op coordinator says so.
+///
+/// This is the default `@Transactional` reaches when nothing bound a real
+/// coordinator, and the failure it produces is invisible: the method runs,
+/// the writes land, the tests pass, and the first body that throws halfway
+/// leaves the writes before the throw behind. Found in an application whose
+/// web handlers never bound one — every "transactional" service method there
+/// had been a no-op since the day it was written.
+@Suite("The no-op coordinator announces itself", .serialized)
+struct NoopCoordinatorWarningTests {
+
+    @Test("beginning a transaction on it warns, once, however many times it is called")
+    func warnsOnce() throws {
+        NoopTransactionCoordinator.resetWarningForTesting()
+
+        let coordinator = NoopTransactionCoordinator()
+        _ = try coordinator.begin()
+        _ = try coordinator.begin()
+        _ = try coordinator.begin()
+
+        // Once per process: repeating it per call would be noise on a busy
+        // server, and noise is how a real warning gets filtered out.
+        #expect(NoopTransactionCoordinator.warningCountForTesting == 1)
+    }
+
+    @Test("a second coordinator does not warn again — the flag is per process")
+    func flagIsProcessWide() throws {
+        NoopTransactionCoordinator.resetWarningForTesting()
+
+        _ = try NoopTransactionCoordinator().begin()
+        _ = try NoopTransactionCoordinator().begin()
+
+        #expect(NoopTransactionCoordinator.warningCountForTesting == 1)
+    }
+
+    @Test("the message names both ways out")
+    func messageIsActionable() {
+        let message = NoopTransactionCoordinator.warningMessage
+        #expect(message.contains("withPostgresScope"))
+        #expect(message.contains("withPostgresTransactions"))
+        // And says what actually happened, not just what to do about it.
+        #expect(message.contains("not atomic"))
+    }
+
+    @Test("commit and rollback stay silent — one warning per process, at begin")
+    func onlyBeginWarns() throws {
+        NoopTransactionCoordinator.resetWarningForTesting()
+
+        let coordinator = NoopTransactionCoordinator()
+        let token = FlightTransactionToken(id: 7)
+        try coordinator.commit(token)
+        coordinator.rollback(token)
+
+        #expect(NoopTransactionCoordinator.warningCountForTesting == 0)
     }
 }
