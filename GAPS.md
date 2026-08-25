@@ -5,7 +5,24 @@ v0.1.2 tags. Each entry says what is absent, why it matters, and how much work
 it looks like — so the list can be argued with rather than just worked
 through.
 
-Ordered by consequence, not by library.
+Ordered by consequence, not by library. Entries closed overnight on
+2026-08-24/25 are marked ✅ with what actually landed; three entries in the
+first draft were **wrong** and are struck rather than deleted, because the
+useful thing about a wrong entry is knowing it was wrong.
+
+**Still open, in rough priority order:** flight-web HTTP/2; DocC for the
+remaining modules (13 of 27 now covered); hangar composite-key associations;
+the presence gossip trust model; the scheduler package; npm and Homebrew
+publishing; format debt.
+
+**Needs a decision from you, not more work:**
+- **Tag hangar v0.2.0.** Soft delete, pagination, slow-query diagnostics,
+  introspection, `EXPLAIN` and CTEs all landed after 0.1.0. `hangar-vapor`
+  cannot be published until that tag exists.
+- **Create the `hangar-vapor` repository.** The package is written, tested
+  against a real pool in a real Vapor app, and committed locally at
+  `Hangar/hangar-vapor` — but creating a public repo under the org is yours
+  to do, not mine to assume.
 
 ---
 
@@ -18,7 +35,11 @@ exercise is a claim nobody has tested since the day it was written.
 Its CI had neither a Postgres nor a Valkey service, so every driver suite
 skipped on every push. The drivers are the whole reason the package exists.
 Fixed, and the fix immediately surfaced a flaky TTL test that had been passing
-only because nobody ran it.
+only because nobody ran it. The gate itself then failed for a day because it
+used bash-only `${!var}` indirect expansion and the Swift image's default
+shell for a `run:` step is `sh`. 49 integration tests run in CI now; only the
+outage-recovery suite skips, and it has to — it kills and restarts a server,
+which a service container cannot do.
 
 ### ✅ hangar's CI was two releases stale *(fixed 2026-08-24)*
 It still checked `swift-changeset` out as a sibling for a path dependency that
@@ -44,53 +65,103 @@ Left visible rather than deleted, because three of my claims in this audit's
 first draft were about test coverage and two of them were wrong. Check before
 believing an entry here.
 
-### No macOS build anywhere
-All CI is `ubuntu-latest`, while every package declares `platforms: [.macOS(.v15)]`.
-Nothing has ever compiled on macOS. This blocks the Homebrew work and means
-the platform claim is untested.
-**Size:** small (one job). **Note:** macOS runners bill at 10× on private
-repos, so this is cheap only once the repos are public.
+### ✅ No macOS build anywhere *(fixed 2026-08-25)*
+Every package now has a `macos-15` job. The repos are public, so the 10×
+private-repo billing note no longer applies.
+
+Two things had to be learned the hard way: `swift-actions/setup-swift` only
+indexes up to 6.2, so the packages declaring tools 6.3 install via `swiftly`
+instead — which is also what the toolchain is managed with locally, so CI and
+a developer's machine now resolve the same way. And the jobs are build-only
+except `flight-cli`'s: macOS runners have no Docker and GitHub service
+containers are Linux-only, while these integration suites *fail* rather than
+skip without a database. There is no honest way to run them there.
+
+hangar's macOS build went green on the first try. `flight-cli`'s matters
+most — Homebrew runs on macOS.
 
 ---
 
 ## 2. Documentation that is wrong or absent
 
-### `flight/Docs/channels.md` states something untrue
+### ✅ `flight/Docs/channels.md` states something untrue *(fixed 2026-08-24)*
 > "Security Core is not yet built"
 
 It ships, the demo uses it, and the retroactive `Principal` conformance the
 passage predicts is exactly what `Main.swift` now does. A reader takes this as
 current.
-**Size:** trivial. **Do it first** — a wrong doc is worse than a missing one.
 
-### The testing libraries are barely documented
+### ✅ The testing libraries are barely documented *(fixed 2026-08-24)*
+`flight/Docs/testing.md` now covers the three sizes of test, and
+`Snippets/TestingShapes.swift` compiles every shape it shows — which
+immediately caught an `InMemoryCluster(nodes:)` initializer the guide claimed
+and that never existed. `FlightWebTesting` also has a DocC catalogue now.
+
+Original entry:
+
 `FlightWebTesting`, `FlightPubSubTesting`, `FlightChannelsTesting`,
 `FlightCacheTesting`, `FlightDataTesting` and the new `Components` are each
 mentioned in one or two pages in passing. They are what someone reaches for on
 day two, and there is no page that says how to test a Flight application.
 **Size:** medium. **Highest doc value on the list.**
 
-### DocC covers 3 of 27 modules
-`FlightCore`, `FlightConfig`, `FlightMigrate` have catalogues. Nothing else
-does. The prose in `Docs/` is good; the API reference is mostly absent.
-**Size:** large. **Value:** moderate — prose is doing most of the work today.
+### ◐ DocC covers 3 of 27 modules — now 13 *(partly closed 2026-08-25)*
+Ten new catalogues: `FlightWeb`, `FlightChannels`, `FlightPubSub`,
+`FlightActuator`, `FlightSecurityCore`, `FlightWebTesting`,
+`FlightTransport`, `FlightDataCore`, `FlightCache`, `FlightDataPostgres` —
+plus `HangarVapor`'s README and hangar's existing catalogue.
+
+The more important half: **nothing was building any of them.** Neither
+`flight` nor `flight-data` had a docs job at all, so even the three original
+catalogues had never been verified. Both now build every catalogue with
+`--warnings-as-errors`, which found real breakage on the first run — an
+`OIDCTokenValidator` doc comment linking an internal type, a
+`DataSourceError` case link that named a case that does not exist, and a
+`ClusteredPubSub` initializer documenting two of its five parameters.
+
+It also caught two pages of *mine* that described APIs incorrectly: a
+`Channel.join` that took a payload and threw (it does neither), and
+`@Cacheable("prices", ttl: .minutes(5))` (the macro takes `namespace:` and
+`Duration` has no `.minutes`). Both were rewritten from the source. That is
+the argument for the CI job in one paragraph.
+
+Remaining: the macro-impl targets, the protocol/client modules, and
+`flight-data`'s Valkey drivers.
 
 ---
 
 ## 3. Declared gaps, by library
 
 ### hangar
-- **No CTEs (`WITH … AS`).** The last query-shape gap; recursive queries and
-  complex reporting need the raw-SQL hatch. *Medium.*
+- ✅ **No CTEs (`WITH … AS`).** *Closed 2026-08-25.* `with`/`withRecursive`
+  define them; `reading(from:)` makes one the query's source, rendered as
+  `FROM "cte" AS "entity_table"` so every column reference downstream
+  resolves unchanged. Non-recursive bodies can be a typed `Query`; recursive
+  ones take a typed anchor and a raw step. `count`, `exists`, `delete` and
+  `update` all carry the clause; a bulk write may be *fed* by a CTE but is
+  refused if it tries to target one.
+
+  Found while wiring it: `Query.rebinding` — the projection pivot — copied
+  every clause except `deletedRows`, so `.withDeleted().select {}` quietly
+  went back to hiding deleted rows and `.onlyDeleted()` inverted to mean its
+  opposite. Fixed and pinned.
 - **No composite-key associations.** `@HasMany`/`@BelongsTo` assume a single
   column. *Medium, and nobody has asked.*
-- **No `EXPLAIN` helper.** The diagnostics added today say which query is slow;
-  they cannot say why. *Small, and pairs naturally with what is there.*
+- ✅ **No `EXPLAIN` helper.** *Closed 2026-08-24.*
 
-### swift-changeset
-- **No nested or embedded changesets** — validating a parent and its children
-  as one unit. Its README names this. Ecto has it and people use it. *Large.*
-- **No optimistic locking.** Also named. *Small.*
+### ✅ swift-changeset *(both closed 2026-08-25)*
+- **Nested changesets.** `nest` attaches children under an association name;
+  the parent is invalid while any child is, and child errors surface under
+  the path a nested form renders against (`lineItems[2].quantity`). It
+  deliberately does not write or decide write order — an insert's children
+  need the parent's generated key, so `validatedChanges()` and
+  `validatedNestedChanges()` are two calls.
+- **Optimistic locking.** `optimisticLock(\.version)` puts the incremented
+  value in the `SET` and the value read from the original in the `WHERE`, so
+  a driver that has never heard of locking emits the right SQL and matches
+  zero rows when someone else got there first. `ValidatedChanges.lock` exists
+  only so a driver can raise `ChangesetConflictError` instead of reporting a
+  bare row count.
 
 ### flight-web
 - No HTTP/2 or HTTP/3 — HummingbirdCore supports HTTP/2 and the transport seam
@@ -130,24 +201,32 @@ does. The prose in `Docs/` is good; the API reference is mostly absent.
 
 ## 4. Product gaps — things that would decide adoption
 
-### A Vapor shim for hangar
-Hangar has zero Flight coupling and `Repo(client:)` is the whole entry point,
-so a Vapor app can use it today. What is missing is packaging and proof: a
-`req.hangar` accessor with request-scoped connection handling, and a page
-saying "keep Vapor and Fluent, use Hangar for the query Fluent cannot express."
-**Nobody switches frameworks for an ORM; plenty would add a library.**
-*Small-to-medium, high leverage.*
+### ◐ A Vapor shim for hangar *(written 2026-08-25, not published)*
+`hangar-vapor` exists at `Hangar/hangar-vapor`, committed locally: three
+pieces and nothing else — `app.hangar.use(config)` owns the pool's lifetime,
+`req.hangar` is a `Repo` carrying the request's logger, and
+`req.transaction { }` runs on one connection and binds `Repo.current` so a
+service type can join without every signature threading a repo through. Nine
+integration tests against a real pool in a real application, gated so they
+cannot skip; `Snippets/ReadmeShapes.swift` compiles every example the README
+shows.
 
-### A contributor test script
-"You need Postgres" is a paragraph in CONTRIBUTING. It should be
-`./scripts/test.sh` — start a throwaway container, run the suite, tear it down.
-*Small.*
+`req.hangar` deliberately does *not* pin a connection for the request's
+lifetime — a handler awaiting an HTTP call between two queries should not be
+holding one.
 
-### `flight new --with` flags
-The CLI takes `--tier` only. Trait selection (`--with postgres,valkey,security`)
-is implied by the tier today, which is fine until someone wants Valkey in a
-`basics` project.
-*Small.*
+**Blocked on two decisions of yours:** a hangar v0.2.0 tag, and creating the
+public repository.
+
+### ✅ A contributor test script *(done 2026-08-24/25)*
+`./scripts/test.sh` in hangar, flight-data and hangar-vapor: starts throwaway
+containers, runs everything through `CI/run-tests.sh`, tears them down.
+
+flight-data's waited for Postgres and then started the suite, leaving Valkey
+to race the Swift build. It usually won — which is how a suite becomes
+intermittently red for reasons nobody can reproduce. It waits for both now.
+
+### ✅ `flight new --with` flags *(done 2026-08-24)*
 
 ---
 
@@ -159,6 +238,11 @@ Recorded so they are not rediscovered as bugs:
   the shared `.swift-format`. Both lint jobs are advisory. `flight-cli` is
   clean and blocking. A bulk reformat must avoid the macro fixture files,
   whose expected-expansion strings a careless regex corrupts.
+- **One unexplained test failure**, flight-data, 2026-08-25: a single issue
+  in a 375-test run that did not reproduce in ten subsequent runs, cold
+  containers included. The Valkey readiness gap was fixed because it was
+  genuinely there, not because it was shown to be the cause. Recorded so the
+  next occurrence is the second one rather than the first.
 - **Root builds need `--enable-all-traits`.** A root build compiles every
   target regardless of traits, so a plain `swift build` in `flight` or
   `flight-data` fails by design. Documented in both READMEs.
