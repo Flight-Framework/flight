@@ -10,10 +10,15 @@ Ordered by consequence, not by library. Entries closed overnight on
 first draft were **wrong** and are struck rather than deleted, because the
 useful thing about a wrong entry is knowing it was wrong.
 
-**Still open, in rough priority order:** flight-web HTTP/2; DocC for the
-remaining modules (13 of 27 now covered); hangar composite-key associations;
-the presence gossip trust model; the scheduler package; npm and Homebrew
+**Still open, in rough priority order:** flight-web HTTP/2 (now a design
+decision, not a task — see below); hangar composite-key associations; the
+presence gossip trust model; the scheduler package; npm and Homebrew
 publishing; format debt.
+
+**DocC is done** where it makes sense: 17 of flight's 20 targets, 8 of
+flight-data's, hangar and swift-changeset. The three flight targets without
+catalogues are the two macro implementations and the registration generator,
+which have no consumer-facing API.
 
 **Needs a decision from you, not more work:**
 - **Tag hangar v0.2.0.** Soft delete, pagination, slow-query diagnostics,
@@ -140,8 +145,10 @@ It also caught two pages of *mine* that described APIs incorrectly: a
 `Duration` has no `.minutes`). Both were rewritten from the source. That is
 the argument for the CI job in one paragraph.
 
-Remaining: the macro-impl targets, the protocol/client modules, and
-`flight-data`'s Valkey drivers.
+Finished the same night: the protocol and client modules, the testing
+helpers, presence, and `flight-data`'s Valkey drivers, its testing
+datasource and its migration core. Every catalogue is built in CI. What is
+left has no consumer-facing API to document.
 
 ---
 
@@ -179,8 +186,32 @@ Remaining: the macro-impl targets, the protocol/client modules, and
   bare row count.
 
 ### flight-web
-- No HTTP/2 or HTTP/3 — HummingbirdCore supports HTTP/2 and the transport seam
-  would take it. *Medium.*
+- **No HTTP/2 or HTTP/3.** I looked into this properly on 2026-08-25 and the
+  original entry — "HummingbirdCore supports HTTP/2 and the transport seam
+  would take it" — is **too optimistic**, so it is now a decision rather than
+  a task.
+
+  The seam does take it: `ServerTransport` does not care. The problem is one
+  layer down. `FlightTransport` builds its server with
+  `HTTPServerBuilder.http1WebSocketUpgrade`, and Hummingbird's HTTP/2 entry
+  point is `HTTPServerBuilder.http2Upgrade(tlsConfiguration:configuration:)`,
+  which constructs a whole `HTTP2UpgradeChannel` from a responder. It takes
+  an `HTTP2ChannelConfiguration` and has **no WebSocket upgrade hook**, and
+  hummingbird-websocket 2.7.0 has no HTTP/2 integration at all — no RFC 8441
+  extended CONNECT.
+
+  So on hummingbird 2.26.0 / hummingbird-websocket 2.7.0, **HTTP/2 and
+  WebSockets are mutually exclusive on one listener.** Channels — arguably
+  the framework's most distinctive feature — are WebSockets.
+
+  The options, none of which I should pick unattended:
+  1. HTTP/2 as an opt-in that disables WebSockets on that listener. Honest,
+     documented, and a footgun for anyone who enables it without reading.
+  2. Two listeners: HTTP/2 on one port, HTTP/1.1 + WebSockets on another.
+     Works today, complicates deployment and the actuator's self-report.
+  3. Wait for RFC 8441 support upstream, and ship HTTP/1.1 only until then.
+
+  *Medium once the choice is made; the choice is the hard part.*
 - No templating or SSR. *Deliberate; out of scope.*
 - No runtime route-registration API beyond the bootstrap escape hatch.
   *Deliberate.*
