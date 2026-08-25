@@ -77,8 +77,23 @@ except `flight-cli`'s: macOS runners have no Docker and GitHub service
 containers are Linux-only, while these integration suites *fail* rather than
 skip without a database. There is no honest way to run them there.
 
-hangar's macOS build went green on the first try. `flight-cli`'s matters
-most — Homebrew runs on macOS.
+hangar's, swift-changeset's and `flight-cli`'s macOS builds are green.
+`flight-cli`'s matters most — Homebrew runs on macOS, so that gap is now
+unblocked.
+
+**And the job immediately earned its place.** `flight` and `flight-data` do
+**not** build on macOS, and the cause is upstream:
+`apple/swift-configuration` 1.2.0 — the latest release — calls `Data.bytes`
+in `FileProvider.swift`, which exists on the Linux Foundation it was written
+against and not on the Darwin one. Nothing in either package can fix it, and
+pinning to an unreleased `main` is worse than knowing.
+
+So `platforms: [.macOS(.v15)]` in those two `Package.swift` files is
+**false today**. Both jobs are `continue-on-error: true` with the reason
+written into the workflow; drop that line the moment upstream ships a fix. A
+permanently red required check only teaches people to ignore CI.
+
+*Worth reporting upstream — an outward-facing action, so yours to make.*
 
 ---
 
