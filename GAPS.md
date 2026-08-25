@@ -293,24 +293,41 @@ Recorded so they are not rediscovered as bugs:
   while the server is still binding. Now waits on `/actuator/health` with a
   bounded `curl --retry-connrefused`.
 
-  Then cp06 and cp08 broke — one checkpoint poisoning the next. The runner
-  cleaned up with `pkill -f "$work"`, which can never match: the server
-  appears in `ps` as a relative path with the work directory nowhere in its
-  command line. Any checkpoint failing before its `kill %1` left a server
-  holding port 8080, and everything after it died on "Address already in
-  use". Each block now runs under `setsid` and cleanup kills the process
-  group. (I hit this myself — the sabotage run I used to test the cp03 fix
-  leaked a server that quietly broke every local run for an hour, which is
-  how I found it.)
+  Then cp06 and cp08 showed red — and they had **never** been passing
+  legitimately. The application reads its database URL from `flight.yaml`
+  (`127.0.0.1:55432`, hardcoded in the tutorial on purpose so a starter
+  project does not fight a local 5432); CI's Postgres is a service container
+  elsewhere. The runner rewrote `$FLIGHT_DATABASE_URL`, which is the
+  *migrate CLI's* variable and one the application never reads — a split the
+  tutorial documents and the runner did not honour.
 
-  All fixed 2026-08-25. Recorded because each failure was misattributed in
-  the same way: the first *looked* like "the tutorial is broken" and was
-  "the image is thin"; the second looked like CI flakiness and was a defect
-  in the documentation; the third looked like three unrelated failures and
-  was one leaked process. That is how a useful check gets ignored.
+  So the app died on connection refused every run. Those checkpoints looked
+  green because their curls were racing a socket that exists for a few
+  milliseconds: the transport binds 8080 and logs "listening" *before* the
+  pool gives up, so an immediate request sometimes landed. Adding the health
+  check removed the race, and the pre-existing failure became visible —
+  which is what a health check is for. The runner now rewrites both sources.
+
+  Fixed along the way, though it turned out **not** to be the cause of the
+  above: cleanup used `pkill -f "$work"`, which can never match, because the
+  server appears in `ps` as a relative path with the work directory nowhere
+  in its command line. Any checkpoint failing before its `kill %1` leaked a
+  server holding port 8080. I hit that myself — the sabotage run I used to
+  test the cp03 fix leaked a server that broke every local run for an hour.
+  Blocks now run under `setsid` and cleanup kills the process group.
+
+  All fixed 2026-08-25; 9 of 9 pass. Recorded because every one of these was
+  misattributed on first read: the first *looked* like "the tutorial is
+  broken" and was "the image is thin"; the second looked like CI flakiness
+  and was a defect in the documentation; the third looked like a leaked
+  process and was a config source nobody was patching. I guessed wrong twice
+  on that last one before the crash fix below made the app say what was
+  actually wrong.
 
 ### ✅ A generated app crashed instead of failing to start *(fixed 2026-08-25)*
-Found while chasing the above, and worse than the thing I was chasing. When
+Found while chasing the above, worse than the thing I was chasing, and the
+reason the thing I was chasing became solvable — two rounds went to guessing
+because the app's only output was a register dump. When
 bootstrap failed, a generated app died with `Fatal error: Error raised at
 top level`, a register dump, thread backtraces and a loaded-image list —
 because the template's `main` was `async throws` and the Swift runtime traps
