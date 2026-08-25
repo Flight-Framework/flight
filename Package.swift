@@ -53,6 +53,7 @@ let package = Package(
 
         // MARK: Scheduler
         .library(name: "FlightScheduler", targets: ["FlightScheduler"]),
+        .library(name: "FlightCronCore", targets: ["FlightCronCore"]),
 
         // Authentication: a resource server. Token *validation* only, with a
         // TokenValidator seam so any issuer can be brought instead.
@@ -306,10 +307,26 @@ let package = Package(
 
         // MARK: Scheduler
 
+        .target(name: "FlightCronCore", path: "Sources/Scheduler/FlightCronCore", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .macro(
+            name: "FlightSchedulerMacrosImpl",
+            dependencies: [
+                "FlightCronCore",
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+                .product(name: "SwiftDiagnostics", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
+            ],
+            path: "Sources/Scheduler/FlightSchedulerMacrosImpl",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .target(
             name: "FlightScheduler",
             dependencies: [
                 "FlightCore",
+                "FlightCronCore",
+                "FlightSchedulerMacrosImpl",
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
@@ -465,6 +482,16 @@ let package = Package(
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ],
             path: "Tests/Actuator/FlightActuatorTests"
+        ),
+        .testTarget(
+            name: "FlightSchedulerMacroTests",
+            dependencies: [
+                "FlightSchedulerMacrosImpl",
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
+            ],
+            path: "Tests/Scheduler/FlightSchedulerMacroTests"
         ),
         .testTarget(
             name: "FlightSchedulerTests",
