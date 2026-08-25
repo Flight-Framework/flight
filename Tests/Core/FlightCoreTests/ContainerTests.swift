@@ -142,3 +142,111 @@ struct ContainerTests {
         }
     }
 }
+
+/// The container resolves to itself.
+///
+/// Needed by components that outlive every scope and must open one of their
+/// own — a channel that lives as long as a browser tab, a scheduled job that
+/// runs on its own clock. Before this, the gateway pattern that does it could
+/// only be built by hand-writing a factory per gateway.
+@Suite("Container resolves to itself")
+struct ContainerSelfResolutionTests {
+
+    @Test("resolve(Container.self) is the container")
+    func identity() throws {
+        let container = Container()
+        try container.freeze()
+
+        #expect(try container.resolve(Container.self) === container)
+    }
+
+    @Test("a component can be injected with it")
+    func injectable() throws {
+        // The shape a gateway has: a singleton holding the container so it
+        // can open a scope per call later.
+        struct Gateway: Sendable {
+            let container: Container
+        }
+        let container = Container()
+        container.register(Gateway.self, scope: .singleton) { c in
+            Gateway(container: try c.resolve(Container.self))
+        }
+        try container.freeze()
+
+        #expect(try container.resolve(Gateway.self).container === container)
+    }
+
+    @Test("two containers resolve to themselves, not to each other")
+    func notGlobal() throws {
+        let first = Container()
+        let second = Container()
+        try first.freeze()
+        try second.freeze()
+
+        #expect(try first.resolve(Container.self) === first)
+        #expect(try second.resolve(Container.self) === second)
+    }
+
+    @Test("it is not in the singleton map, so there is no cycle to leak")
+    func noRetainCycle() throws {
+        weak var weakContainer: Container?
+        do {
+            let container = Container()
+            container.register(Alpha.self, scope: .singleton) { _ in Alpha() }
+            try container.freeze()
+            // Resolve it, which is what would populate a singleton slot if
+            // this were an ordinary registration.
+            _ = try container.resolve(Container.self)
+            weakContainer = container
+            #expect(weakContainer != nil)
+        }
+        // Storing self in `frozen.singletons` would keep this alive forever;
+        // a suite building a thousand containers would leak a thousand.
+        #expect(weakContainer == nil)
+    }
+
+    @Test("a qualified Container is an ordinary lookup, and still absent")
+    func qualifierIsNotSpecialCased() throws {
+        let container = Container()
+        try container.freeze()
+
+        #expect(throws: ResolutionError.self) {
+            try container.resolve(Container.self, qualifier: "other")
+        }
+    }
+}
+
+/// The precedence question the fallback answers.
+///
+/// Hand-registering `Container.self { c in c }` was the workaround before the
+/// container resolved to itself, and applications did it — Actuator's own
+/// suite has a test for an app that does. So self-resolution answers only
+/// when the lookup misses; a registration that is there still wins.
+@Suite("Container self-resolution defers to a registration")
+struct ContainerSelfResolutionPrecedenceTests {
+
+    @Test("the old hand-registration still wins, and still resolves")
+    func registrationWins() throws {
+        let container = Container()
+        container.register(Container.self, scope: .singleton) { c in c }
+        try container.freeze()
+
+        #expect(try container.resolve(Container.self) === container)
+    }
+
+    @Test("a registration producing a different container is honoured, not shadowed")
+    func differentContainerIsNotShadowed() throws {
+        // Contrived, but it is the case that distinguishes a fallback from an
+        // interception: whoever registers this meant it, and silently
+        // returning the outer container instead would be the same class of
+        // bug as configuration nobody reads.
+        let other = Container()
+        try other.freeze()
+
+        let container = Container()
+        container.register(Container.self, scope: .singleton) { _ in other }
+        try container.freeze()
+
+        #expect(try container.resolve(Container.self) === other)
+    }
+}

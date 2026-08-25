@@ -255,9 +255,41 @@ public final class Container: @unchecked Sendable {
         }
     }
 
+    /// The container resolves to itself.
+    ///
+    /// Not a registration — a fallback *after* the lookup misses, so the
+    /// container never appears in its own singleton map. Storing it there
+    /// would be a strong reference cycle: a container that outlives the
+    /// process is fine, but a test that builds a thousand of them leaks a
+    /// thousand.
+    ///
+    /// After rather than before, because hand-registering
+    /// `Container.self { c in c }` was the workaround before this existed,
+    /// and applications did it. Intercepting ahead of the lookup would make
+    /// those registrations dead code that still looks wired — and would
+    /// silently return the wrong container to anyone deliberately registering
+    /// a different one. A registration that is there still wins; this only
+    /// answers when nothing else does.
+    ///
+    /// This exists because some components genuinely need it. A channel
+    /// lives as long as a browser tab and a scheduled job runs on its own
+    /// clock; neither is inside a request, and both need request-scoped
+    /// repositories, which means opening a scope of their own. The gateway
+    /// pattern that does it has to hold the container, and before this it
+    /// could only be built by hand-writing a factory — one per gateway,
+    /// every one of them the same three lines.
+    ///
+    /// It is still the escape hatch and not the habit. A component that
+    /// resolves everything from a captured container has opted out of the
+    /// wiring being checked at build time, and reads like a service locator
+    /// because it is one. Inject what you need; reach for this when what you
+    /// need is a scope.
+    private static let selfKey = ComponentKey(Container.self, qualifier: nil)
+
     private func resolveAny(key: ComponentKey) throws -> Any {
         if let frozen = frozenStorage {
             guard let registration = frozen.registrations[key] else {
+                if key == Self.selfKey { return self }
                 throw ResolutionError.notRegistered(key.description)
             }
             switch registration.scope {
@@ -299,6 +331,7 @@ public final class Container: @unchecked Sendable {
             "resolve() called during the registration phase — resolution begins at freeze()."
         )
         guard let registration = registrations[key] else {
+            if key == Self.selfKey { return self }
             throw ResolutionError.notRegistered(key.description)
         }
         switch registration.scope {
