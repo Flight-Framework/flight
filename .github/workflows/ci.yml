@@ -79,9 +79,11 @@ jobs:
           # The plugin *moves* its archive to --output-path, so the parent
           # has to exist first.
           mkdir -p ./docs
-          for target in FlightCore FlightConfig FlightWeb FlightChannels \
-                        FlightPubSub FlightActuator FlightSecurityCore \
-                        FlightWebTesting FlightTransport; do
+          for target in FlightCore FlightConfig FlightConfigCore FlightWeb \
+                        FlightChannels FlightChannelsProtocol \
+                        FlightChannelsClient FlightPubSub FlightPresence \
+                        FlightActuator FlightSecurityCore FlightWebTesting \
+                        FlightTransport; do
             echo "::group::$target"
             swift package --enable-all-traits \
               --allow-writing-to-directory "./docs/$target" \

@@ -34,7 +34,7 @@ public enum ConfigError: Error, CustomStringConvertible, Sendable, Equatable, Ha
     /// development layer without saying so, which is the one failure mode
     /// layered configuration must never have.
     ///
-    /// Read these through ``Configuration/reader`` and ask for the array
+    /// Read these through `Configuration.reader` (in FlightConfig) and ask for the array
     /// type directly.
     case unrepresentableValue(key: String, provider: String, kind: String)
 
