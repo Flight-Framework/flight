@@ -4,6 +4,26 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-25
+
+### Fixed
+
+- **`@Scheduler` types were never registered, so scheduled jobs never ran.**
+  The macro generated its `_flightRegister` thunk and the runtime was correct,
+  but the build plugin's list of registrable attributes did not include
+  `Scheduler` — so nothing ever called the thunk. `FlightScheduler` was inert
+  in 0.2.0: an application would log `scheduler started with no jobs` and
+  otherwise behave normally.
+
+  Every scheduler test called `_flightRegister` by hand, which is exactly the
+  step the bug skips, so the whole suite passed. The regression test now reads
+  both sides out of the sources — every macro whose expansion emits a
+  `_flightRegister` thunk must appear in the generator's list — rather than
+  restating a list that would have been copied from the same wrong one.
+
+  Anyone on 0.2.0 using `@Scheduler` should upgrade; nothing else in 0.2.0 is
+  affected.
+
 ## [0.2.0] - 2026-08-25
 
 ### Added
