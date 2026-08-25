@@ -76,6 +76,9 @@ jobs:
         env:
           FLIGHT_BUILD_DOCS: "1"
         run: |
+          # The plugin *moves* its archive to --output-path, so the parent
+          # has to exist first.
+          mkdir -p ./docs
           for target in FlightCore FlightConfig FlightWeb FlightChannels \
                         FlightPubSub FlightActuator FlightSecurityCore \
                         FlightWebTesting FlightTransport; do
@@ -93,14 +96,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 6.2 rather than the 6.3.3 the Linux jobs use: setup-swift does not
-      # index 6.3 yet. It satisfies the package's tools version, so the job
-      # still answers what it exists to answer — whether the
-      # platforms: [.macOS(.v15)] claim actually compiles.
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.2"
+      # swiftly rather than swift-actions/setup-swift: this package declares
+      # swift-tools-version 6.3, and setup-swift only indexes up to 6.2.
+      # swiftly is also what the toolchain is managed with locally, so CI and
+      # a developer's machine resolve the same way.
+      - name: Install Swift
+        run: |
+          curl -fsSL -o swiftly.pkg https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          "$HOME/.swiftly/bin/swiftly" init --quiet-shell-followup --assume-yes --skip-install
+          . "$HOME/.swiftly/env.sh"
+          swiftly install 6.3.3 --use --assume-yes
+          echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
+
+      - name: Report the toolchain
+        run: swift --version
 
       - name: Build
         run: swift build --enable-all-traits
