@@ -44,6 +44,22 @@ public struct AssetMountOptions: Sendable {
     }
     public var symlinks: SymlinkPolicy = .withinRoot
 
+    public enum ETagPolicy: Sendable {
+        /// Device/inode/size/mtime-ns — free (one fstat, already paid) and
+        /// weak: correct for ordinary caching, but `If-Range` refuses weak
+        /// validators, so careful download managers re-fetch in full, and
+        /// tags churn on redeploys that rewrite mtimes without changing
+        /// bytes.
+        case fileIdentity
+        /// SHA-256 of the content, cached by file identity
+        /// (``ContentHashCache``): strong — `If-Range` resumption works —
+        /// and restart-stable. Costs one full read per file per identity
+        /// change.
+        case contentHash
+    }
+    /// How this mount's validators are built.
+    public var etag: ETagPolicy = .fileIdentity
+
     public enum DotfilePolicy: Sendable {
         /// Any `.`-prefixed path component is a miss. The default —
         /// `.env`, `.git`, `.htpasswd` in a served directory is a breach
@@ -104,6 +120,9 @@ public struct AssetMountRegistration: Sendable {
     public let root: String
     public let pipelines: [String]
     public let options: AssetMountOptions
+    /// Present exactly when `options.etag == .contentHash` — constructed
+    /// with the mount, so "declared but never initialized" cannot happen.
+    let hashCache: ContentHashCache?
 }
 
 extension Container {
@@ -134,9 +153,15 @@ extension Container {
     ) {
         var options = AssetMountOptions()
         configure(&options)
+        let hashCache: ContentHashCache?
+        if case .contentHash = options.etag {
+            hashCache = ContentHashCache()
+        } else {
+            hashCache = nil
+        }
         let registration = AssetMountRegistration(
             prefix: prefix.hasSuffix("/") && prefix != "/" ? String(prefix.dropLast()) : prefix,
-            root: root, pipelines: pipelines, options: options)
+            root: root, pipelines: pipelines, options: options, hashCache: hashCache)
         register(
             AssetMountRegistration.self, qualifier: "assets.\(registration.prefix)",
             scope: .singleton
@@ -257,7 +282,7 @@ extension AssetMountRegistration {
 
         var extraHeaders: HTTPFields = [:]
         var chosen: any ByteSource = source
-        var etag = EntityTag.file(source)
+        var etag = await validator(for: source)
         if !options.precompressed.isEmpty {
             extraHeaders[.vary] = "Accept-Encoding"
             let accepted = context.request.headers[.acceptEncoding] ?? ""
@@ -266,9 +291,13 @@ extension AssetMountRegistration {
                     chosen = sidecar
                     // The variant is its own representation: its own bytes,
                     // its own validator — a 304 for the brotli variant must
-                    // never validate the identity bytes.
-                    etag = EntityTag(
-                        EntityTag.file(sidecar).value + "-" + encoding.rawValue, weak: true)
+                    // never validate the identity bytes. Under contentHash
+                    // the sidecar's own digest is already distinct; under
+                    // identity the encoding suffix keeps it so.
+                    let sidecarTag = await validator(for: sidecar)
+                    etag = sidecarTag.isWeak
+                        ? EntityTag(sidecarTag.value + "-" + encoding.rawValue, weak: true)
+                        : sidecarTag
                     extraHeaders[.contentEncoding] = encoding.rawValue
                     break
                 }
@@ -285,6 +314,15 @@ extension AssetMountRegistration {
                 cacheControl: cacheControl(for: decoded),
                 extraHeaders: extraHeaders,
                 chunkSize: options.chunkSize))
+    }
+
+    /// The mount's validator for one open file, per its ETag policy. A
+    /// hashing failure (file vanished mid-read) falls back to the identity
+    /// tag: a weak validator beats no validator, and the request itself
+    /// will surface the real error if the file is truly gone.
+    private func validator(for source: FileByteSource) async -> EntityTag {
+        guard let hashCache else { return .file(source) }
+        return (try? await hashCache.strongTag(for: source)) ?? .file(source)
     }
 
     private func contentType(for relative: String) -> String? {

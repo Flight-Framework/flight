@@ -67,6 +67,13 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
     /// inode, same path) does not keep one.
     public let deviceID: UInt64
     public let inode: UInt64
+    /// Inode change time (`st_ctim`) at full resolution. Unlike mtime, the
+    /// kernel updates this on every write *and on attempts to rewrite the
+    /// mtime itself*, and userspace cannot set it — which makes it the one
+    /// timestamp a change-detection key can trust against in-place rewrites
+    /// that preserve size and forge mtime (reproducible-build pipelines
+    /// normalizing timestamps included).
+    public let changeNanoseconds: Int64
 
     /// The default read size. Large enough that syscall and hop overhead
     /// amortizes, small enough that one connection holds one buffer of
@@ -108,8 +115,10 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
             }
             #if canImport(Darwin)
                 let ts = status.st_mtimespec
+                let cts = status.st_ctimespec
             #else
                 let ts = status.st_mtim
+                let cts = status.st_ctim
             #endif
             return .success(
                 FileByteSource(
@@ -118,6 +127,7 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
                     count: Int64(status.st_size),
                     modificationSeconds: Int64(ts.tv_sec),
                     modificationNanosecondsPart: Int64(ts.tv_nsec),
+                    changeNanoseconds: Int64(cts.tv_sec) * 1_000_000_000 + Int64(cts.tv_nsec),
                     deviceID: UInt64(bitPattern: Int64(status.st_dev)),
                     inode: UInt64(status.st_ino)
                 ))
@@ -127,6 +137,7 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
     private init(
         fd: Int32, path: String, count: Int64,
         modificationSeconds: Int64, modificationNanosecondsPart: Int64,
+        changeNanoseconds: Int64,
         deviceID: UInt64, inode: UInt64
     ) {
         self.fd = fd
@@ -134,6 +145,7 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
         self.count = count
         self.modificationDate = Date(timeIntervalSince1970: TimeInterval(modificationSeconds))
         self.modificationNanoseconds = modificationSeconds * 1_000_000_000 + modificationNanosecondsPart
+        self.changeNanoseconds = changeNanoseconds
         self.deviceID = deviceID
         self.inode = inode
     }

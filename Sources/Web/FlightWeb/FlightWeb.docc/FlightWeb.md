@@ -134,6 +134,7 @@ whole application without binding a port.
 - ``ByteSourceError``
 - ``FileResponse``
 - ``EntityTag``
+- ``ContentHashCache``
 - ``HTTPDate``
 
 ### Errors

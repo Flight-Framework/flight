@@ -108,6 +108,36 @@ public struct ContentDescriptor: Sendable {
     }
 }
 
+extension ContentDescriptor {
+    /// Marks the response as a download: `Content-Disposition: attachment`
+    /// with the filename carried per RFC 6266/8187 — an ASCII-safe
+    /// `filename=` fallback for old clients, and the exact UTF-8 name in
+    /// `filename*=` when the two differ. Header-injection characters (CR,
+    /// LF, quotes) can never reach the wire: they are stripped from the
+    /// fallback and percent-encoded in the extended form.
+    public func download(filename: String) -> ContentDescriptor {
+        var copy = self
+        copy.extraHeaders[.contentDisposition] = Self.attachmentDisposition(filename: filename)
+        return copy
+    }
+
+    static func attachmentDisposition(filename: String) -> String {
+        let fallback = String(
+            filename.map { character in
+                character.isASCII && character != "\"" && character != "\\"
+                    && !character.isNewline && character != "\r" ? character : "_"
+            })
+        var disposition = "attachment; filename=\"\(fallback)\""
+        if fallback != filename {
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+            let encoded =
+                filename.addingPercentEncoding(withAllowedCharacters: allowed) ?? fallback
+            disposition += "; filename*=UTF-8''\(encoded)"
+        }
+        return disposition
+    }
+}
+
 /// Serves `content` for `request` with full conditional-request and range
 /// semantics: `If-None-Match` (list and `*`, weak comparison),
 /// `If-Modified-Since`, single byte ranges including suffix ranges, range
