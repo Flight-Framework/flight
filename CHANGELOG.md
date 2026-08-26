@@ -4,6 +4,36 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-26
+
+### Added
+
+- **Form bodies.** `application/x-www-form-urlencoded` decodes into the
+  same `body:` handler parameters JSON does, via `FormDecoder` — wire
+  semantics documented and pinned (last-occurrence-wins scalars,
+  every-occurrence arrays, the checkbox rule for absent `Bool`, strict
+  escapes and UTF-8, flat bodies only). `WebCoders` gains `formDecoder`.
+- **`body: Data` and `body: String`** handler parameters: raw bytes under
+  any label; strictly-validated UTF-8 text. Both previously fell into the
+  JSON path by accident of `Data: Decodable`.
+- **`MediaType`** — an RFC 9110 §8.3 parser shared by everything that asks
+  "what is this body?".
+- **Strong content-hash validators**: `options.etag = .contentHash` on an
+  asset mount serves `sha256-…` ETags (hand-rolled FIPS 180-4, no new
+  dependencies) cached by file identity *including ctime* in a bounded LRU
+  — so `If-Range` download resumption actually resumes, and validators
+  survive redeploys that rewrite mtimes. Plus
+  `ContentDescriptor.download(filename:)` for attachment downloads with
+  RFC 8187 filename encoding.
+
+### Changed
+
+- **Request bodies are content-negotiated, and a wrong label is now 415.**
+  Absent `Content-Type` still decodes as JSON (the documented leniency,
+  kept); `application/json` and `+json` suffixes are JSON; urlencoded is
+  the form decoder; anything else answers 415 naming both sides. Breaking:
+  a JSON body mislabeled `text/plain` used to decode and no longer does.
+
 ## [0.5.0] - 2026-08-26
 
 ### Added
