@@ -4,6 +4,43 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-26
+
+### Added
+
+- **`@Middleware`**, a stereotype for middleware layers, scanned and
+  registered exactly like `@Component`. A type gets its dependencies through
+  its initializer like any other component, is independently resolvable and
+  testable, and conforms to `Middleware` — `func handle(_ context:
+  RequestContext, next: Next) async throws -> Response`.
+- **`container.pipeline { }`**, the one place middleware order is declared —
+  outermost first, top to bottom. Calling it more than once composes: a
+  framework module can install its own middleware ahead of whatever the
+  application declares in its own call. A `@Middleware` type listed nowhere
+  simply never runs.
+- **`Middleware` is now a protocol; `Next` drops `inout`.** `Next` is
+  `@Sendable (RequestContext) async throws -> Response` — a plain value in,
+  a value out, throwing. Per-request state that must reach downstream layers
+  goes through `context.scope`, not context mutation.
+
+### Changed
+
+- Flight Security's authentication middleware is now `Authentication`, a
+  `@Middleware` type with `@Autowired var validator: (any TokenValidator)`,
+  replacing two near-identical closure-returning functions that existed
+  solely because a closure could not hold a dependency. A missing validator
+  is now a construction-time failure (caught at `freeze()`), not a
+  per-request 500. `requireAuthentication` is now `RequireAuthentication`,
+  a `@Middleware` type with the same behavior.
+
+### Deprecated
+
+- `container.registerMiddleware` (both closure forms) and
+  `MiddlewareResult` still work, retyped against `ClosureMiddleware`/
+  `ClosureNext` — the pre-`@Middleware` `inout` shape. Existing inline
+  closures at call sites keep compiling unchanged. Conform a type to
+  `Middleware` and list it in `container.pipeline { }` instead.
+
 ## [0.2.4] - 2026-08-26
 
 ### Added
