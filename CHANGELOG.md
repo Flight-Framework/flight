@@ -4,6 +4,21 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-26
+
+### Added
+
+- **`multipart/form-data`** — `request.multipart()` yields parts as
+  streams: constant-memory parsing with named limits (parts, header bytes,
+  header count, collect caps), strict CRLF and close-delimiter handling,
+  filename hardening, and Go's post-CVE caps from day one. Works over
+  buffered and streaming bodies alike.
+- **Streaming request bodies** — a handler taking `body: RequestBodyStream`
+  is recorded as streaming-bodied in the route table; the transport asks
+  before reading (like `acceptsUpgrade`) and hands chunks through live,
+  cap enforced as bytes arrive. `maxBodyBytes:` on any route mapping
+  overrides the global body cap per route.
+
 ## [0.6.0] - 2026-08-26
 
 ### Added
