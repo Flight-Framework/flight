@@ -4,6 +4,30 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-26
+
+### Added
+
+- **Pipeline lanes** — middleware stacks as a property of the route.
+  `container.pipeline("assets") { … }` declares a named lane;
+  `@Controller(pipelines: ["assets"])` (or `registerRoute(pipelines:)`)
+  opts routes into it, alone or concatenated with
+  `MiddlewareRegistration.defaultLane`. Naming none means the default lane
+  — every existing route and `pipeline { }` call behaves identically.
+  Dispatch now routes first and runs the matched route's chain, precomposed
+  per route at build time; 404s run the default lane so logging still sees
+  every miss. Referencing an undeclared lane fails at bootstrap, naming the
+  route and the lane.
+- **Static asset mounts** — `container.assets(at:root:pipelines:_:)` serves
+  a directory as a fallback after routing: real routes always win, and the
+  mount runs its own lanes (the reason lanes exist — an asset request needs
+  no transaction binding). Conditional requests and ranges via
+  `serveContent`; Cache-Control by ordered path-glob rules; SPA fallback
+  gated on `Accept` with `exclude` prefixes so API 404s stay API-shaped;
+  resolve-then-contain path safety with explicit symlink (`.withinRoot`
+  default) and dotfile (deny default) policies; precompressed `.br`/`.gz`
+  sidecar negotiation with per-variant validators and `Vary`.
+
 ## [0.4.0] - 2026-08-26
 
 ### Added
