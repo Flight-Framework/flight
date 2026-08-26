@@ -22,7 +22,6 @@ private final class StubSecurityModule: FlightModule {
     }
 }
 
-
 /// Runs one middleware layer and reports both what came back and whether the
 /// rest of the pipeline was reached.
 ///
@@ -30,10 +29,10 @@ private final class StubSecurityModule: FlightModule {
 /// "continued" shows up as the terminal having run. `reached` is what the old
 /// `case .continue` assertions were really checking.
 private func run(
-    _ layer: Middleware, _ context: inout RequestContext
-) async -> (response: Response, reached: Bool) {
+    _ layer: any Middleware, _ context: RequestContext
+) async throws -> (response: Response, reached: Bool) {
     let reached = Mutex(false)
-    let response = await layer(&context) { _ in
+    let response = try await layer.handle(context) { _ in
         reached.withLock { $0 = true }
         return .status(.noContent)
     }
@@ -51,10 +50,18 @@ struct MiddlewareTests {
         return RequestContext.mock(path: "/", headers: headers, container: container)
     }
 
+    /// `Authentication`'s validator is a hard constructor dependency now, not
+    /// a per-request lookup — this resolves the same validator
+    /// `StubSecurityModule` registered and hands it to the manual
+    /// `init(validator:)` the type exists for exactly this case.
+    private func authentication(in context: RequestContext) throws -> Authentication {
+        Authentication(validator: try context.resolve((any TokenValidator).self))
+    }
+
     @Test("a valid token puts the Principal on the request")
     func validToken() async throws {
-        var context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        let result = await run(authenticationMiddleware(), &context)
+        let context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
+        let result = try await run(authentication(in: context), context)
         guard result.reached else {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
@@ -65,8 +72,8 @@ struct MiddlewareTests {
 
     @Test("no token continues as anonymous — enforcement is separate")
     func noToken() async throws {
-        var context = try makeContext()
-        let result = await run(authenticationMiddleware(), &context)
+        let context = try makeContext()
+        let result = try await run(authentication(in: context), context)
         guard result.reached else {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
@@ -79,8 +86,8 @@ struct MiddlewareTests {
 
     @Test("an invalid token continues unauthenticated, with the failure recorded")
     func invalidToken() async throws {
-        var context = try makeContext(authorization: "Bearer forged")
-        let result = await run(authenticationMiddleware(), &context)
+        let context = try makeContext(authorization: "Bearer forged")
+        let result = try await run(authentication(in: context), context)
         guard result.reached else {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
@@ -91,24 +98,23 @@ struct MiddlewareTests {
         }
     }
 
-    @Test("a missing TokenValidator bean fails closed with an opaque 500")
-    func missingValidator() async throws {
-        var context = RequestContext.mock(
-            headers: [.authorization: "Bearer x"], container: TestContainer.empty()
-        )
-        let result = await run(authenticationMiddleware(), &context)
-        guard !result.reached else {
-            Issue.record("expected the layer to answer; the request continued instead")
-            return
+    @Test("a missing TokenValidator dependency fails at construction, not at request time")
+    func missingValidator() throws {
+        // Not a per-request 500 any more: @Autowired makes the validator a
+        // hard constructor dependency, so an application missing this wiring
+        // finds out at freeze() — before its first real request — rather
+        // than from whichever request happens to be first to authenticate.
+        // That is the improvement migrating this type to @Middleware bought
+        // for free.
+        #expect(throws: (any Error).self) {
+            _ = try Authentication(_flight: TestContainer.empty())
         }
-        let response = result.response
-        #expect(response.status == .internalServerError)
     }
 
     @Test("requireAuthentication rejects anonymous requests with a Bearer challenge")
     func requireAuthenticationAnonymous() async throws {
-        var context = try makeContext()
-        let result = await run(requireAuthentication, &context)
+        let context = try makeContext()
+        let result = try await run(RequireAuthentication(), context)
         guard !result.reached else {
             Issue.record("expected the layer to answer; the request continued instead")
             return
@@ -120,9 +126,9 @@ struct MiddlewareTests {
 
     @Test("requireAuthentication distinguishes a rejected credential (RFC 6750) without leaking detail")
     func requireAuthenticationInvalid() async throws {
-        var context = try makeContext(authorization: "Bearer forged")
-        _ = await run(authenticationMiddleware(), &context)
-        let result = await run(requireAuthentication, &context)
+        let context = try makeContext(authorization: "Bearer forged")
+        _ = try await run(authentication(in: context), context)
+        let result = try await run(RequireAuthentication(), context)
         guard !result.reached else {
             Issue.record("expected the layer to answer; the request continued instead")
             return
@@ -137,9 +143,9 @@ struct MiddlewareTests {
 
     @Test("requireAuthentication passes authenticated requests")
     func requireAuthenticationPasses() async throws {
-        var context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        _ = await run(authenticationMiddleware(), &context)
-        let result = await run(requireAuthentication, &context)
+        let context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
+        _ = try await run(authentication(in: context), context)
+        let result = try await run(RequireAuthentication(), context)
         guard result.reached else {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
@@ -150,42 +156,48 @@ struct MiddlewareTests {
     func chainedMiddleware() async throws {
         // Authenticate, then enforce, then the handler — folded the way
         // `DispatchBuilder` folds them.
-        let chain: [Middleware] = [authenticationMiddleware(), requireAuthentication]
         let handler: Next = { context in
             .text("hello " + (context.principal?.subject ?? "?"))
         }
-        let pipeline = compose(chain, around: handler)
 
-        var authed = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        let ok = await pipeline(&authed)
+        let authed = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
+        let authedChain = [
+            MiddlewareRegistration(try authentication(in: authed)),
+            MiddlewareRegistration(RequireAuthentication()),
+        ]
+        let ok = try await compose(authedChain, around: handler)(authed)
         #expect(ok.status == .ok)
         #expect(ok.bodyText == "hello stub-user")
 
-        var anonymous = try makeContext()
-        let denied = await pipeline(&anonymous)
+        let anonymous = try makeContext()
+        let anonymousChain = [
+            MiddlewareRegistration(try authentication(in: anonymous)),
+            MiddlewareRegistration(RequireAuthentication()),
+        ]
+        let denied = try await compose(anonymousChain, around: handler)(anonymous)
         #expect(denied.status == .unauthorized)
         #expect(denied.headers[.wwwAuthenticate] == "Bearer")
     }
 
     @Test("withPrincipal binds Principal.current for the operation")
     func withPrincipalBinds() async throws {
-        var context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        _ = await run(authenticationMiddleware(), &context)
+        let context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
+        _ = try await run(authentication(in: context), context)
 
         let subject = await context.withPrincipal { Principal.current?.subject }
         #expect(subject == "stub-user")
         #expect(Principal.current == nil, "binding unwinds after the operation")
 
-        var anonymous = try makeContext()
-        _ = await run(authenticationMiddleware(), &anonymous)
+        let anonymous = try makeContext()
+        _ = try await run(authentication(in: anonymous), anonymous)
         let none = await anonymous.withPrincipal { Principal.current?.subject }
         #expect(none == nil)
     }
 
     @Test("handler-level guards: requirePrincipal / requireRole / requireScope")
     func handlerGuards() async throws {
-        var context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        _ = await run(authenticationMiddleware(), &context)
+        let context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
+        _ = try await run(authentication(in: context), context)
 
         #expect(try context.requirePrincipal().subject == "stub-user")
         #expect(try context.requireRole("admin").subject == "stub-user")
@@ -197,7 +209,7 @@ struct MiddlewareTests {
             try context.requireScope("read:everything")
         }
 
-        var anonymous = try makeContext()
+        let anonymous = try makeContext()
         #expect(throws: SecurityError.unauthenticated) {
             try anonymous.requirePrincipal()
         }

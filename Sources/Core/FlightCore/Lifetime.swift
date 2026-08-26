@@ -69,6 +69,10 @@ public enum Stereotype: Sendable, Equatable {
     /// is a different question from "what is this app made of", and deserves
     /// its own answer.
     case settings
+    /// A `@Middleware` type. The `@Middleware` *macro* lives in Flight Web,
+    /// same reason `@Controller`'s does; the case lives here for the same
+    /// reason `.controller`'s does.
+    case middleware
 }
 
 /// Introspection metadata. Captured explicitly at registration time —

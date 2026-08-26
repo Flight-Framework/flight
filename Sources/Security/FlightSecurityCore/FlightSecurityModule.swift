@@ -12,21 +12,19 @@ import ServiceLifecycle
 ///   custom-validator module *before* this one in the bootstrap module
 ///   list);
 /// - the request-scoped ``PrincipalHolder`` carrying the principal;
-/// - the authentication middleware, early in Flight Web's pipeline
-///   (order ``middlewareOrder``);
+/// - ``Authentication`` in its own `pipeline { }` call, ahead of whatever the
+///   application declares in its own — see `Container.pipeline(_:)` for why
+///   calling it more than once composes rather than conflicts;
 /// - a maintenance `Service` that pre-warms the JWKS at startup and
 ///   refreshes it on the cache-TTL cadence.
 ///
-/// ``requireAuthentication`` is deliberately *not* registered — apps add it
-/// where wanted.
+/// ``RequireAuthentication`` is deliberately *not* added to any pipeline —
+/// apps add it where wanted, since unlike authentication itself, enforcement
+/// is not something every route wants.
 ///
 /// Missing required configuration (`security.oidc.issuer`/`audience`) fails
 /// at container freeze — startup, not first request.
 public final class FlightSecurityModule: FlightModule {
-    /// Authentication runs early so every later middleware and handler sees
-    /// the principal. Lower than the default 0 of app middleware.
-    public static let middlewareOrder = -100
-
     private var container: Container?
     private var registeredOIDCValidator = false
 
@@ -56,11 +54,9 @@ public final class FlightSecurityModule: FlightModule {
             }
         }
 
-        container.registerMiddleware(
-            "flight.security.authentication",
-            order: Self.middlewareOrder,
-            authenticationMiddleware()
-        )
+        container.pipeline {
+            Authentication.self
+        }
     }
 
     public var service: (any Service)? {

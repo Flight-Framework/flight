@@ -8,6 +8,7 @@ struct FlightWebMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ControllerMacro.self,
         RouteMappingMacro.self,
+        MiddlewareMacro.self,
     ]
 }
 

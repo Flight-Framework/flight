@@ -277,13 +277,14 @@ public struct Router: Sendable {
                 return context.coders.renderError(.methodNotAllowed, "Method Not Allowed")
                     .settingHeader(.allow, allowed)
             case .matched(let match):
-                context.pathParameters = match.pathParameters
+                var boundContext = context
+                boundContext.pathParameters = match.pathParameters
                 do {
-                    let response = try await match.route.handler(context)
-                    context.response = response
+                    let response = try await match.route.handler(boundContext)
+                    boundContext.response = response
                     return response
                 } catch {
-                    return errorResponse(for: error, context: context)
+                    return errorResponse(for: error, context: boundContext)
                 }
             }
         }

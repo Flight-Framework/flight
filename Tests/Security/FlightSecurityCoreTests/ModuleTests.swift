@@ -18,7 +18,10 @@ struct ModuleTests {
     @Test("the module registers the OIDC validator, holder, and middleware")
     func registersEverything() throws {
         let module = FlightSecurityModule()
-        let container = try TestContainer.build(configuration: minimalConfig) { module }
+        let container = try TestContainer.build(configuration: minimalConfig) {
+            module
+            MiddlewareScannerStandIn()
+        }
 
         let validator = try container.resolve((any TokenValidator).self)
         #expect(validator is OIDCTokenValidator)
@@ -33,9 +36,8 @@ struct ModuleTests {
         #expect(holderA1 !== holderB)
 
         let middleware = try container.collectMiddleware()
-        let auth = middleware.first { $0.name == "flight.security.authentication" }
+        let auth = middleware.first { $0.name.contains("Authentication") }
         #expect(auth != nil)
-        #expect(auth?.order == FlightSecurityModule.middlewareOrder)
 
         #expect(module.service != nil, "OIDC path owns the JWKS maintenance service")
     }
@@ -61,6 +63,7 @@ struct ModuleTests {
         let container = try TestContainer.build {
             CustomValidatorModule(validator: stub)
             securityModule
+            MiddlewareScannerStandIn()
         }
 
         let validator = try container.resolve((any TokenValidator).self)
@@ -68,7 +71,7 @@ struct ModuleTests {
         #expect(securityModule.service == nil, "no JWKS to maintain for a custom validator")
         #expect(
             try container.collectMiddleware()
-                .contains { $0.name == "flight.security.authentication" },
+                .contains { $0.name.contains("Authentication") },
             "middleware still registered"
         )
     }

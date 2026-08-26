@@ -118,7 +118,7 @@ final class ComponentVisitor: SyntaxVisitor {
     /// test below pinning this list against the macros the framework
     /// actually declares.
     static let registrableAttributes: Set<String> = [
-        "Component", "Service", "Repository", "Controller", "Scheduler", "Settings",
+        "Component", "Service", "Repository", "Controller", "Scheduler", "Settings", "Middleware",
     ]
 
     let module: String

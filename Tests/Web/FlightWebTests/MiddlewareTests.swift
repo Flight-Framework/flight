@@ -5,6 +5,17 @@ import HTTPTypes
 import Synchronization
 import Testing
 
+/// A `Middleware` built from a closure, purely for tests: production code
+/// conforms a real type so a layer has somewhere to hold dependencies and
+/// somewhere to be tested on its own — a fixture that only ever needs one
+/// inline behavior has no such need.
+private struct AdHocMiddleware: Middleware {
+    let body: @Sendable (RequestContext, Next) async throws -> Response
+    func handle(_ context: RequestContext, next: Next) async throws -> Response {
+        try await body(context, next)
+    }
+}
+
 /// The terminal every pipeline test folds around: answers with whatever the
 /// context currently holds, so a chain that never reaches a handler still
 /// produces the context's default 404 — the same observable behaviour the flat
@@ -14,160 +25,196 @@ private let contextResponder: Next = { context in context.response }
 @Suite("Middleware pipeline")
 struct MiddlewareTests {
 
-    @Test func chainRunsInOrderAndSharesContext() async {
-        let first = middleware(from: { context in
+    @Test func chainRunsInOrderAndSharesContext() async throws {
+        let first = AdHocMiddleware { context, next in
+            var context = context
             context.pathParameters["trace"] = "first"
-            return .continue
-        })
-        let second = middleware(from: { context in
-            .respond(.text(context.pathParameters["trace"] ?? "missing"))
-        })
-        var context = RequestContext.mock(path: "/")
-        let response = await compose([first, second], around: contextResponder)(&context)
+            return try await next(context)
+        }
+        let second = AdHocMiddleware { context, _ in
+            .text(context.pathParameters["trace"] ?? "missing")
+        }
+        let context = RequestContext.mock(path: "/")
+        let response = try await compose(
+            [MiddlewareRegistration(first), MiddlewareRegistration(second)],
+            around: contextResponder
+        )(context)
         #expect(response.bodyText == "first")
     }
 
-    @Test func respondShortCircuits() async {
-        let auth = middleware(from: { _ in .respond(.status(.unauthorized)) })
-        let mustNotRun = middleware(from: { _ in
-            Issue.record("middleware after .respond must not run")
-            return .continue
-        })
-        var context = RequestContext.mock(path: "/")
-        let response = await compose([auth, mustNotRun], around: contextResponder)(&context)
+    @Test func respondShortCircuits() async throws {
+        let auth = AdHocMiddleware { _, _ in .status(.unauthorized) }
+        let mustNotRun = AdHocMiddleware { context, next in
+            Issue.record("middleware after an early answer must not run")
+            return try await next(context)
+        }
+        let context = RequestContext.mock(path: "/")
+        let response = try await compose(
+            [MiddlewareRegistration(auth), MiddlewareRegistration(mustNotRun)],
+            around: contextResponder
+        )(context)
         #expect(response.status == .unauthorized)
     }
 
-    @Test func failShortCircuitsThroughErrorResponse() async {
-        let failing = middleware(from: { _ in .fail(HTTPError(.tooManyRequests, "slow down")) })
-        let mustNotRun = middleware(from: { _ in
-            Issue.record("middleware after .fail must not run")
-            return .continue
-        })
-        var context = RequestContext.mock(path: "/")
-        let response = await compose([failing, mustNotRun], around: contextResponder)(&context)
-        #expect(response.status == .tooManyRequests)
-        #expect(response.bodyText.contains("slow down"))
+    @Test func throwingShortCircuitsThroughErrorResponse() async throws {
+        let failing = AdHocMiddleware { _, _ in throw HTTPError(.tooManyRequests, "slow down") }
+        let mustNotRun = AdHocMiddleware { context, next in
+            Issue.record("middleware after a thrown error must not run")
+            return try await next(context)
+        }
+        let context = RequestContext.mock(path: "/")
+        // The pipeline itself does not convert the throw — that is
+        // Dispatch's job, above the whole chain (see DispatchIntegrationTests)
+        // — so a test composing the chain directly sees the throw.
+        do {
+            _ = try await compose(
+                [MiddlewareRegistration(failing), MiddlewareRegistration(mustNotRun)],
+                around: contextResponder
+            )(context)
+            Issue.record("expected the error to propagate")
+        } catch let error as HTTPError {
+            #expect(error.httpStatus == .tooManyRequests)
+        }
     }
 
-    @Test func emptyChainReachesTheResponder() async {
-        var context = RequestContext.mock(path: "/")
-        let response = await compose([], around: contextResponder)(&context)
+    @Test func emptyChainReachesTheResponder() async throws {
+        let context = RequestContext.mock(path: "/")
+        let response = try await compose([], around: contextResponder)(context)
         #expect(response.status == .notFound)  // the context default
     }
 
-    @Test func authRejectionShape() async {
-        let authMiddleware = middleware(from: { context in
+    @Test func authRejectionShape() async throws {
+        let authMiddleware = AdHocMiddleware { context, next in
             guard context.request.headers[.authorization] != nil else {
-                return .respond(.status(.unauthorized))
+                return .status(.unauthorized)
             }
-            return .continue
-        })
-        var anonymous = RequestContext.mock(path: "/private")
-        #expect(
-            await compose([authMiddleware], around: contextResponder)(&anonymous).status
-                == .unauthorized)
+            return try await next(context)
+        }
+        let anonymous = RequestContext.mock(path: "/private")
+        let rejected = try await compose([MiddlewareRegistration(authMiddleware)], around: contextResponder)(
+            anonymous)
+        #expect(rejected.status == .unauthorized)
 
         var headers = HTTPFields()
         headers[.authorization] = "Bearer token"
         var authed = RequestContext.mock(path: "/private", headers: headers)
         authed.response = .noContent
-        #expect(
-            await compose([authMiddleware], around: contextResponder)(&authed).status
-                == .noContent)
+        let accepted = try await compose([MiddlewareRegistration(authMiddleware)], around: contextResponder)(
+            authed)
+        #expect(accepted.status == .noContent)
     }
 }
 
-/// What the flat pipeline could not do at all: see and change the response.
+/// What a flat pre-handler chain could not do at all: see and change the
+/// response, and hold something open across the handler.
 @Suite("Middleware sees the response")
 struct ResponseObservingMiddlewareTests {
 
     @Test("a layer can read the status the handler produced")
-    func readsResponse() async {
+    func readsResponse() async throws {
         let observed = Mutex<Int?>(nil)
-        let logging: Middleware = { context, next in
-            let response = await next(&context)
+        let logging = AdHocMiddleware { context, next in
+            let response = try await next(context)
             observed.withLock { $0 = response.status.code }
             return response
         }
-        var context = RequestContext.mock(path: "/")
+        let context = RequestContext.mock(path: "/")
         let responder: Next = { _ in .status(.created) }
-        _ = await compose([logging], around: responder)(&context)
+        _ = try await compose([MiddlewareRegistration(logging)], around: responder)(context)
         #expect(observed.withLock { $0 } == 201)
     }
 
     @Test("a layer can add a header on the way out")
-    func modifiesResponse() async {
-        let cors: Middleware = { context, next in
-            await next(&context).settingHeader(.accessControlAllowOrigin, "*")
+    func modifiesResponse() async throws {
+        let cors = AdHocMiddleware { context, next in
+            try await next(context).settingHeader(.accessControlAllowOrigin, "*")
         }
-        var context = RequestContext.mock(path: "/")
-        let response = await compose([cors], around: { _ in .noContent })(&context)
+        let context = RequestContext.mock(path: "/")
+        let response = try await compose([MiddlewareRegistration(cors)], around: { _ in .noContent })(
+            context)
         #expect(response.headers[.accessControlAllowOrigin] == "*")
     }
 
     @Test("outer layers wrap inner ones: in order, out reversed")
-    func onionOrdering() async {
+    func onionOrdering() async throws {
         let trace = Mutex<[String]>([])
-        func layer(_ name: String) -> Middleware {
-            { context, next in
+        func layer(_ name: String) -> AdHocMiddleware {
+            AdHocMiddleware { context, next in
                 trace.withLock { $0.append("\(name)-in") }
-                let response = await next(&context)
+                let response = try await next(context)
                 trace.withLock { $0.append("\(name)-out") }
                 return response
             }
         }
-        var context = RequestContext.mock(path: "/")
-        _ = await compose([layer("a"), layer("b")], around: { _ in
-            trace.withLock { $0.append("handler") }
-            return .noContent
-        })(&context)
+        let context = RequestContext.mock(path: "/")
+        _ = try await compose(
+            [MiddlewareRegistration(layer("a")), MiddlewareRegistration(layer("b"))],
+            around: { _ in
+                trace.withLock { $0.append("handler") }
+                return .noContent
+            }
+        )(context)
         #expect(trace.withLock { $0 } == ["a-in", "b-in", "handler", "b-out", "a-out"])
     }
 
-    @Test("an outer layer still sees the response when an inner one fails")
-    func observesErrorResponses() async {
-        // The flat pipeline returned from the error path immediately, so
-        // access logging would have missed every 500 — the failure mode most
-        // worth logging.
+    @Test("an outer layer still sees the response when an inner one throws")
+    func observesErrorResponses() async throws {
+        // A flat pipeline would return from the error path immediately, so
+        // access logging would miss every 500 — the failure mode most worth
+        // logging. Here the outer layer catches, so it still sees a real
+        // response rather than the throw passing through it.
         let seen = Mutex<Int?>(nil)
-        let logging: Middleware = { context, next in
-            let response = await next(&context)
-            seen.withLock { $0 = response.status.code }
-            return response
+        let logging = AdHocMiddleware { context, next in
+            do {
+                let response = try await next(context)
+                seen.withLock { $0 = response.status.code }
+                return response
+            } catch {
+                let response = errorResponse(for: error, context: context)
+                seen.withLock { $0 = response.status.code }
+                return response
+            }
         }
-        let failing = middleware(from: { _ in .fail(HTTPError(.badGateway, "upstream")) })
-        var context = RequestContext.mock(path: "/")
-        let response = await compose([logging, failing], around: contextResponder)(&context)
+        let failing = AdHocMiddleware { _, _ in throw HTTPError(.badGateway, "upstream") }
+        let context = RequestContext.mock(path: "/")
+        let response = try await compose(
+            [MiddlewareRegistration(logging), MiddlewareRegistration(failing)],
+            around: contextResponder
+        )(context)
         #expect(response.status == .badGateway)
         #expect(seen.withLock { $0 } == 502)
     }
 
     @Test("a layer can hold a task local open across the handler")
-    func bindsTaskLocalAcrossHandler() async {
+    func bindsTaskLocalAcrossHandler() async throws {
         // The capability that decided the design: a scope held open around the
         // handler cannot be expressed as two separate before/after closures.
         enum Tenant { @TaskLocal static var current: String? = nil }
-        let scoping: Middleware = { context, next in
-            await Tenant.$current.withValue("acme") { await next(&context) }
+        let scoping = AdHocMiddleware { context, next in
+            try await Tenant.$current.withValue("acme") { try await next(context) }
         }
-        var context = RequestContext.mock(path: "/")
+        let context = RequestContext.mock(path: "/")
         let responder: Next = { _ in .text(Tenant.current ?? "unbound") }
-        let response = await compose([scoping], around: responder)(&context)
+        let response = try await compose([MiddlewareRegistration(scoping)], around: responder)(context)
         #expect(response.bodyText == "acme")
         #expect(Tenant.current == nil, "the binding must not outlive the layer")
     }
 
     @Test("a layer that never calls next answers alone")
-    func skippingNextIsTotal() async {
-        // Documented, not desirable: this is the tradeoff the MiddlewareResult
-        // form exists to avoid.
-        let blocking: Middleware = { _, _ in .status(.serviceUnavailable) }
-        var context = RequestContext.mock(path: "/")
-        let response = await compose([blocking], around: { _ in
-            Issue.record("the responder must not run")
-            return .noContent
-        })(&context)
+    func skippingNextIsTotal() async throws {
+        // Documented, not desirable: a layer that means to inspect-then-answer
+        // still has to remember not to call next on the paths that answer —
+        // the same tradeoff MiddlewareResult once existed to avoid, now
+        // carried by ordinary control flow instead of a dedicated type.
+        let blocking = AdHocMiddleware { _, _ in .status(.serviceUnavailable) }
+        let context = RequestContext.mock(path: "/")
+        let response = try await compose(
+            [MiddlewareRegistration(blocking)],
+            around: { _ in
+                Issue.record("the responder must not run")
+                return .noContent
+            }
+        )(context)
         #expect(response.status == .serviceUnavailable)
     }
 }

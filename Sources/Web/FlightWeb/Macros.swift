@@ -37,6 +37,40 @@ import FlightCore
 public macro Controller(_ path: String? = nil) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "ControllerMacro")
 
+/// Marks a type as a middleware layer. Expands like `@Component` — resolving
+/// `init(_flight:)`, a `_flightRegister(_:)` thunk, `_FlightRegistrable`
+/// conformance — and additionally declares the type's conformance to
+/// ``Middleware``, so the type only needs to supply `handle(_:next:)`:
+///
+/// ```swift
+/// @Middleware
+/// struct RequestTiming {
+///     func handle(_ context: RequestContext, next: Next) async throws -> Response {
+///         let started = ContinuousClock.now
+///         let response = try await next(context)
+///         context.logger.info("\(response.status.code) in \(started.duration(to: .now))")
+///         return response
+///     }
+/// }
+/// ```
+///
+/// `@Autowired` and `@ConfigValue` properties work exactly as on `@Component`
+/// types. Always `.singleton` — there is no `scope:` argument — because a
+/// `container.pipeline { }` resolves each type exactly once, when the chain
+/// is first assembled; a `.scoped` instance resolved there would be
+/// permanently pinned to whichever request happened to trigger that.
+///
+/// `@Middleware` registers the type as an ordinary component. It does
+/// **not** add it to any request pipeline — list it in
+/// `container.pipeline { }` for that, which is also where its position
+/// relative to other middleware is decided. A `@Middleware` type in no
+/// `pipeline { }` block is a fully-formed, independently resolvable and
+/// testable component that simply never runs.
+@attached(member, names: named(init), named(_flightRegister))
+@attached(extension, conformances: _FlightRegistrable, Middleware)
+public macro Middleware() =
+    #externalMacro(module: "FlightWebMacrosImpl", type: "MiddlewareMacro")
+
 // MARK: - Route mappings (§4)
 //
 // Pure markers, same family as `@Autowired`: the generated code lives in

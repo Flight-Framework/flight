@@ -436,6 +436,7 @@ let package = Package(
             name: "FlightWebMacroTests",
             dependencies: [
                 .target(name: "FlightWebMacrosImpl", condition: .when(traits: ["Web"])),
+                "FlightCoreMacrosImpl",
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),

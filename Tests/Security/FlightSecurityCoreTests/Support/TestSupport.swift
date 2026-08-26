@@ -204,3 +204,18 @@ func testPrincipal(
 ) -> Principal {
     Principal(subject: subject, issuer: testIssuer, roles: roles, scopes: scopes)
 }
+
+/// `TestContainer.build` never runs the build-time scanner
+/// (`flightRegisterAll`) — that is what would ordinarily make
+/// `Authentication`, a `@Middleware` type living in FlightSecurityCore,
+/// resolvable in a real bootstrapped app with nothing further written for
+/// it. Add this alongside `FlightSecurityModule()` in any `TestContainer.build`
+/// list that exercises `configure(_:)` end to end (its
+/// `container.pipeline { Authentication.self }` call needs something to
+/// resolve) — the same reason `MacroIntegrationTests` calls a type's
+/// generated `_flightRegister` by hand rather than relying on scanning.
+struct MiddlewareScannerStandIn: FlightModule {
+    func configure(_ container: Container) throws {
+        try Authentication._flightRegister(container)
+    }
+}

@@ -76,7 +76,7 @@ public enum DispatchBuilder {
         ])
 
         return makeDispatch(
-            chain: userMiddleware.map(\.middleware),
+            chain: userMiddleware,
             responder: router.responder,
             acceptsUpgrade: { router.acceptsUpgrade(method: $0.method, path: $0.path) },
             container: container,
@@ -84,13 +84,14 @@ public enum DispatchBuilder {
     }
 
     /// The assembled per-request pipeline, exposed separately so test
-    /// harnesses can run a hand-built chain without a container full of
-    /// controller components.
+    /// harnesses can run a hand-built chain — via `collectMiddleware()` on a
+    /// container that never has a single controller in it — without needing
+    /// a full application's worth of components.
     ///
     /// `chain` is folded around `responder` **once, here** — a request pays
     /// one call per layer, never the cost of building the chain.
     public static func makeDispatch(
-        chain: [Middleware],
+        chain: [MiddlewareRegistration],
         responder: @escaping Next,
         acceptsUpgrade: @escaping @Sendable (Request) -> Bool = { _ in false },
         container: Container,
@@ -125,14 +126,24 @@ public enum DispatchBuilder {
                 // One Scope per request (§2): created directly, ends when the
                 // request's last reference drops — streaming bodies and
                 // upgraded connections legitimately outlive this closure.
-                var context = RequestContext(
+                let context = RequestContext(
                     request: request,
                     scope: Scope(),
                     logger: requestLogger,
                     tracingContext: span.context,
                     container: container
                 )
-                let response = await pipeline(&context)
+                // The backstop: a route handler's own thrown errors are
+                // already turned into a response inside the router (the
+                // innermost layer), so only a middleware throwing — a
+                // transaction coordinator failing to bind, a pool exhausted
+                // before a handler ever runs — reaches here uncaught.
+                let response: Response
+                do {
+                    response = try await pipeline(context)
+                } catch {
+                    response = errorResponse(for: error, context: context)
+                }
 
                 span.attributes["http.response.status_code"] = response.status.code
                 if response.status.kind == .serverError {
