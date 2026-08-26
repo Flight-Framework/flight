@@ -117,6 +117,11 @@ whole application without binding a port.
 - ``ContentType``
 - ``WebCoders``
 
+### Static assets
+
+- ``AssetMountOptions``
+- ``AssetMountRegistration``
+
 ### Serving sized content
 
 - ``serveContent(for:_:)``

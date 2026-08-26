@@ -201,7 +201,23 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
     }
 
     /// Runs a blocking syscall body on the IO queue and awaits its result.
-    private static func blocking<T: Sendable>(
+    /// `realpath(3)` on the shared IO queue: the fully-resolved absolute
+    /// path — every symlink followed, every `.` and `..` collapsed — or nil
+    /// when the path does not fully exist. The asset layer's containment
+    /// check ("does this resolve to somewhere under the root?") is built on
+    /// this; asking the filesystem is the only version of that question
+    /// that symlinks and encodings cannot lie to.
+    internal static func realPath(_ path: String) async -> String? {
+        try? await blocking {
+            var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
+            guard realpath(path, &buffer) != nil else {
+                return .failure(ByteSourceError.io(operation: "realpath(\(path))", code: errno))
+            }
+            return .success(String(cString: buffer))
+        }
+    }
+
+    internal static func blocking<T: Sendable>(
         _ body: @escaping @Sendable () -> Result<T, any Error>
     ) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in

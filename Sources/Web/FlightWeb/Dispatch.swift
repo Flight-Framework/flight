@@ -129,6 +129,27 @@ public enum DispatchBuilder {
             ])
         }
 
+        // Asset mounts: fallbacks for GET/HEAD routing misses, each wrapped
+        // in its own lane chain — composed here, once, like every route.
+        let mounts = try container.collectAssetMounts()
+        var mountResponders: [(mount: AssetMountRegistration, responder: Next)] = []
+        for mount in mounts {
+            var chain: [MiddlewareRegistration] = []
+            for lane in mount.pipelines {
+                guard let laneChain = chainsByLane[lane] else {
+                    throw UndeclaredLaneError(lane: lane, route: "assets at \(mount.prefix)")
+                }
+                chain += laneChain
+            }
+            mountResponders.append(
+                (mount, compose(chain, around: { context in await mount.respond(to: context) })))
+            logger.debug("asset mount registered", metadata: [
+                "prefix": "\(mount.prefix)",
+                "root": "\(mount.root)",
+                "pipelines": .array(mount.pipelines.map { .string($0) }),
+            ])
+        }
+
         let defaultChain = chainsByLane[MiddlewareRegistration.defaultLane] ?? []
         let noMatchResponder: Next = compose(
             defaultChain,
@@ -145,6 +166,7 @@ public enum DispatchBuilder {
         ])
 
         let responders = respondersByRoute
+        let fallbacks = mountResponders
         let respond: Next = { context in
             switch router.route(method: context.request.method, path: context.request.path) {
             case .matched(let match):
@@ -154,7 +176,18 @@ public enum DispatchBuilder {
                 // Unreachable: every route in the table got a responder
                 // above. The fallback keeps this total rather than trapping.
                 return await Router.execute(match, context: context)
-            case .notFound, .methodNotAllowed:
+            case .notFound:
+                // A routing miss under a mount's prefix is that mount's to
+                // answer — file, shell, or its own 404 — inside its own
+                // lanes. First claiming mount wins; a request no mount
+                // claims takes the ordinary path. 405 never reaches mounts:
+                // a path the route table knows under another method is the
+                // router's answer, not a file's.
+                for (mount, responder) in fallbacks where mount.claims(context.request) {
+                    return try await responder(context)
+                }
+                return try await noMatchResponder(context)
+            case .methodNotAllowed:
                 return try await noMatchResponder(context)
             }
         }
