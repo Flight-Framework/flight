@@ -47,7 +47,7 @@ struct IntegrationTests {
 
         // Every bean the sample module registered is attributed to it.
         let sampleBeans = wire.beans.filter { $0.sourceModule == "SampleAppModule" }
-        #expect(sampleBeans.count == 5)
+        #expect(sampleBeans.count == 7)
     }
 
     @Test("actuator registers no service — it is request-response only")

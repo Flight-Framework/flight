@@ -25,6 +25,12 @@ struct SampleAppModule: FlightModule {
         container.register(SampleQualified.self, qualifier: "secondary", scope: .singleton) { _ in
             SampleQualified()
         }
+        container.register(SampleMiddleware.self, scope: .singleton, stereotype: .middleware) { _ in
+            SampleMiddleware()
+        }
+        container.register(SampleSettings.self, scope: .singleton, stereotype: .settings) { _ in
+            SampleSettings()
+        }
     }
 }
 
@@ -32,6 +38,8 @@ struct SampleService: Sendable {}
 struct SampleRepository: Sendable {}
 struct SampleTransient: Sendable {}
 struct SampleQualified: Sendable {}
+struct SampleMiddleware: Sendable {}
+struct SampleSettings: Sendable {}
 
 /// A module registering a bean whose qualifier is an XSS probe — the SSR
 /// escaping tests feed the renderer through this.

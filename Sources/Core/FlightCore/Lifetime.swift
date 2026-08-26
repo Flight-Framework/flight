@@ -52,7 +52,7 @@ public enum ResolutionError: Error, CustomStringConvertible, Sendable {
 /// and it is the pointcut for any future default AOP policy ("all
 /// @Repository methods join the ambient transaction"). Not part of component
 /// identity — resolution never consults it.
-public enum Stereotype: Sendable, Equatable {
+public enum Stereotype: Sendable, Equatable, CaseIterable {
     /// Generic registration (`@Component`), incl. third-party client wrappers.
     case component
     /// Business logic (`@Service`).
