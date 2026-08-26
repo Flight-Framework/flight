@@ -117,6 +117,18 @@ whole application without binding a port.
 - ``ContentType``
 - ``WebCoders``
 
+### Serving sized content
+
+- ``serveContent(for:_:)``
+- ``ContentDescriptor``
+- ``ByteSource``
+- ``FileByteSource``
+- ``DataByteSource``
+- ``ByteSourceError``
+- ``FileResponse``
+- ``EntityTag``
+- ``HTTPDate``
+
 ### Errors
 
 - ``HTTPError``

@@ -9,9 +9,21 @@ import HTTPTypes
 // nothing to do with HTTP. HTTPTypes' own names are re-exported instead, and
 // `.ok` / `[:]` still infer at every call site.
 
-/// A response in one of three shapes (§6.2): a complete fixed body, a
-/// streaming body written chunk-by-chunk as produced (SSE, large downloads),
-/// or a connection-upgrade directive (WebSocket, §6.1).
+/// A response in one of four shapes (§6.2): a complete fixed body, a
+/// streaming body written chunk-by-chunk as produced (SSE), a byte-range of
+/// a sized source (files, blobs — the shape downloads want), or a
+/// connection-upgrade directive (WebSocket, §6.1).
+///
+/// `.file` earns its place beside `.streaming` for one reason: **it knows
+/// its length.** A streaming body goes out chunked with no `Content-Length`,
+/// which is right for SSE and wrong for a download — no progress bars, no
+/// resumption, no cheap cache validation. `.file` carries a sized
+/// ``ByteSource`` plus the half-open range to send, so the transport writes
+/// an exact length and streams the bytes in constant memory. It is also the
+/// case neither incumbent Swift framework can retrofit — their body types
+/// shipped `ByteBuffer`-only, foreclosing kernel-side file transfer forever;
+/// carrying the source (not its bytes) keeps that door open for a future
+/// transport even though today's writes chunks.
 ///
 /// Design delta, recorded in README: the doc sketches
 /// `case upgrade(handler: any ConnectionUpgradeHandler)`, but the handler's
@@ -23,7 +35,43 @@ import HTTPTypes
 public enum Response: Sendable {
     case fixed(status: HTTPResponse.Status, headers: HTTPFields, body: Data)
     case streaming(status: HTTPResponse.Status, headers: HTTPFields, body: AsyncStream<Data>)
+    case file(FileResponse)
     case upgrade(UpgradeResponse)
+}
+
+/// The `.file` payload: which bytes of which source, under which headers.
+///
+/// Built by ``serveContent(for:_:)`` in the normal case — that is where
+/// conditional requests, ranges, and validator headers are decided — and
+/// constructible directly by anything that already knows exactly what it
+/// wants to send.
+public struct FileResponse: Sendable {
+    public let status: HTTPResponse.Status
+    /// Complete, including `Content-Length` for `range.count` — the
+    /// transport writes these verbatim.
+    public let headers: HTTPFields
+    public let source: any ByteSource
+    /// Half-open, within `0..<source.count`. Empty is legal (a zero-length
+    /// file): headers only, no read ever issued.
+    public let range: Range<Int64>
+    public let chunkSize: Int
+
+    public init(
+        status: HTTPResponse.Status,
+        headers: HTTPFields,
+        source: any ByteSource,
+        range: Range<Int64>,
+        chunkSize: Int = FileByteSource.defaultChunkSize
+    ) {
+        precondition(
+            range.lowerBound >= 0 && range.upperBound <= source.count,
+            "range \(range) outside 0..<\(source.count)")
+        self.status = status
+        self.headers = headers
+        self.source = source
+        self.range = range
+        self.chunkSize = chunkSize
+    }
 }
 
 extension Response {
@@ -140,6 +188,8 @@ extension Response {
         switch self {
         case .fixed(let status, _, _), .streaming(let status, _, _):
             return status
+        case .file(let file):
+            return file.status
         case .upgrade:
             return .switchingProtocols
         }
@@ -149,12 +199,15 @@ extension Response {
         switch self {
         case .fixed(_, let headers, _), .streaming(_, let headers, _):
             return headers
+        case .file(let file):
+            return file.headers
         case .upgrade:
             return [:]
         }
     }
 
-    /// The complete body for `.fixed`; nil for streaming/upgrade responses.
+    /// The complete body for `.fixed`; nil for streaming/file/upgrade
+    /// responses, whose bytes exist only as they are written.
     public var bodyData: Data? {
         if case .fixed(_, _, let body) = self { return body }
         return nil
@@ -171,6 +224,13 @@ extension Response {
         case .streaming(let status, var headers, let body):
             headers[name] = value
             return .streaming(status: status, headers: headers, body: body)
+        case .file(let file):
+            var headers = file.headers
+            headers[name] = value
+            return .file(
+                FileResponse(
+                    status: file.status, headers: headers, source: file.source,
+                    range: file.range, chunkSize: file.chunkSize))
         case .upgrade:
             return self
         }

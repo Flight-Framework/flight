@@ -137,4 +137,26 @@ extension Response {
         }
         return collected
     }
+
+    /// Collects any body shape to completion — the test-side equivalent of
+    /// what a transport writes to the wire. `.fixed` returns its data,
+    /// `.streaming` drains, `.file` reads the response's declared range from
+    /// its source, `.upgrade` is empty.
+    public func collectedBody(maxBytes: Int = 1 << 22) async throws -> Data {
+        switch self {
+        case .fixed(_, _, let body):
+            return body
+        case .streaming:
+            return await collectStreamingBody(maxBytes: maxBytes)
+        case .file(let file):
+            var collected = Data()
+            for try await chunk in file.source.chunks(in: file.range, chunkSize: file.chunkSize) {
+                collected.append(chunk)
+                if collected.count >= maxBytes { break }
+            }
+            return collected
+        case .upgrade:
+            return Data()
+        }
+    }
 }

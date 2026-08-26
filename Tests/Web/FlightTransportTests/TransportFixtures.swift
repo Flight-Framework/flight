@@ -37,6 +37,21 @@ struct WireController {
         return "counted"
     }
 
+    /// A `.file`-shaped response over the wire: 26 fixed bytes served
+    /// through serveContent, so the socket tests can assert the transport's
+    /// chunked write of a sized source, HEAD stripping, and 206 slicing.
+    @GetMapping("/alphabet")
+    func alphabet(_ context: RequestContext) -> Response {
+        serveContent(
+            for: context.request,
+            ContentDescriptor(
+                source: DataByteSource(Data("abcdefghijklmnopqrstuvwxyz".utf8)),
+                contentType: "text/plain",
+                etag: EntityTag("alpha-v1"),
+                chunkSize: 7  // deliberately misaligned with the size
+            ))
+    }
+
     @WebSocketMapping("/ws/:room")
     func socket(_ context: RequestContext) -> any WebSocketUpgradeHandler {
         WireEchoHandler(room: context.pathParam("room") ?? "?")

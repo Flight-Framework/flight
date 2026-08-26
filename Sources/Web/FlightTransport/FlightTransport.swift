@@ -194,6 +194,36 @@ public struct FlightTransport: ServerTransport {
                 )
             }
 
+        case .file(let file):
+            var head = HTTPResponse(status: file.status)
+            head.headerFields = file.headers
+            // serveContent always sets Content-Length; this is the safety
+            // net for a hand-built FileResponse, because a sized body with
+            // no declared length silently downgrades to chunked coding —
+            // losing exactly the property .file exists to provide.
+            if Self.statusAllowsBody(file.status), head.headerFields[.contentLength] == nil {
+                head.headerFields[.contentLength] = "\(file.range.count)"
+            }
+            if isHeadRequest || file.range.isEmpty || !Self.statusAllowsBody(file.status) {
+                // HEAD carries the full header set — Content-Length and
+                // Content-Range included — with no read ever issued against
+                // the source: the descriptor just closes unread.
+                try await writer.writeResponse(head)
+            } else {
+                var bodyWriter = try await writer.writeHead(head)
+                // A mid-stream throw (source truncated under us, disk error)
+                // propagates out and tears the connection down with the body
+                // short of its declared length — the client sees a broken
+                // transfer, never a silently complete-looking wrong one.
+                for try await chunk in file.source.chunks(
+                    in: file.range, chunkSize: file.chunkSize)
+                {
+                    guard !chunk.isEmpty else { continue }
+                    try await bodyWriter.write(ByteBuffer(bytes: chunk))
+                }
+                try await bodyWriter.finish(nil)
+            }
+
         case .streaming(let status, let headers, let bodyStream):
             var head = HTTPResponse(status: status)
             head.headerFields = headers

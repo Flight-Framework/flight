@@ -105,6 +105,56 @@ struct HTTPWireTests {
         }
     }
 
+    @Test func fileResponseArrivesWithExactLengthNotChunked() async throws {
+        // The whole reason `.file` exists beside `.streaming`: a sized body
+        // must go out with Content-Length, not chunked coding — chunked is
+        // what forecloses progress bars and resumption.
+        try await withRunningServer { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                try await session.send(
+                    "GET /alphabet HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                )
+                let response = try await session.readToEnd()
+                #expect(response.hasPrefix("HTTP/1.1 200 OK\r\n"))
+                #expect(response.lowercased().contains("content-length: 26"))
+                #expect(!response.lowercased().contains("transfer-encoding"))
+                #expect(response.lowercased().contains("accept-ranges: bytes"))
+                #expect(response.hasSuffix("\r\n\r\nabcdefghijklmnopqrstuvwxyz"))
+            }
+        }
+    }
+
+    @Test func fileRangeRequestYields206Slice() async throws {
+        try await withRunningServer { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                try await session.send(
+                    "GET /alphabet HTTP/1.1\r\nHost: localhost\r\nRange: bytes=-4\r\nConnection: close\r\n\r\n"
+                )
+                let response = try await session.readToEnd()
+                #expect(response.hasPrefix("HTTP/1.1 206 Partial Content\r\n"))
+                #expect(response.lowercased().contains("content-range: bytes 22-25/26"))
+                #expect(response.lowercased().contains("content-length: 4"))
+                #expect(response.hasSuffix("\r\n\r\nwxyz"))
+            }
+        }
+    }
+
+    @Test func headOnFileRouteKeepsHeadersDropsBody() async throws {
+        try await withRunningServer { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                try await session.send(
+                    "HEAD /alphabet HTTP/1.1\r\nHost: localhost\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n"
+                )
+                let response = try await session.readToEnd()
+                // HEAD+Range: the 206 and its headers, no body at all.
+                #expect(response.hasPrefix("HTTP/1.1 206 Partial Content\r\n"))
+                #expect(response.lowercased().contains("content-range: bytes 0-3/26"))
+                #expect(response.lowercased().contains("content-length: 4"))
+                #expect(response.hasSuffix("\r\n\r\n"), "no body after the header block")
+            }
+        }
+    }
+
     @Test func sseStreamsChunkedEvents() async throws {
         try await withRunningServer { port in
             try await RawSocketClient.withConnection(port: port) { session in
