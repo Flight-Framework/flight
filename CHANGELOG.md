@@ -4,6 +4,26 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-26
+
+### Added
+
+- **Resumable uploads (tus 1.0)** — `container.uploads(at:store:)` mounts
+  the protocol as five ordinary routes with pipeline-lane support.
+  Supports `creation`, `creation-with-upload`, `termination`, and
+  `expiration`; a stale append is refused with the true offset rather than
+  applied twice. `DiskUploadStore` records only fsynced offsets (enforced
+  by construction) and truncates unacknowledged bytes on reopen, so an
+  interrupted upload resumes byte-exactly. `UploadStore` is the seam for
+  object storage.
+
+### Fixed
+
+- **Streaming request bodies had no backpressure.** The transport fed an
+  unbounded `AsyncThrowingStream`, reading large uploads entirely into
+  memory while claiming to stream them; body delivery is now pull-based,
+  one chunk per consumer demand.
+
 ## [0.7.0] - 2026-08-26
 
 ### Added
