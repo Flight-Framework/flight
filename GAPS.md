@@ -401,3 +401,22 @@ ones. Blocked on a flight release, since templates pin 0.1.2.
   `Repo.with` takes a concrete `Repo` — and is worth doing: it would also make
   the `.waiting` acquisition unnecessary for request handlers that only
   sometimes touch the database.
+- **Flight Web has no static-file handling.** An application that ships a
+  browser interface — a single-page application, or just a favicon — has to
+  write its own, and the hazards are the usual ones: a path that escapes the
+  root, a directory read as a file, content types, and caching rules that
+  differ between a content-hashed asset and the shell that names it.
+
+  Flightdeck wrote about a hundred lines to do it, and the first version had a
+  live traversal bug that only a test with six spellings of `..` caught. That
+  is a bad thing for every application to write once each.
+
+  What belongs in FlightWeb: `Response.file(at:)` plus a
+  `container.registerStaticFiles(root:at:)` covering the same ground — resolve
+  the path and compare against the root rather than pattern-matching for `..`,
+  refuse directories, map extensions to content types, `no-cache` for the
+  entry document and `immutable` for hashed assets, and a fall-through mode
+  for client-side routing. Range requests and ETags are the obvious next
+  layer and not needed for a first version.
+
+  Flightdeck's `WebAppController` is a working reference, tests included.
