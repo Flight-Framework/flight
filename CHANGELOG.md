@@ -4,6 +4,27 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-08-26
+
+### Added
+
+- **`@Settings`**, a macro for typed configuration bound once, at bootstrap.
+  Every stored property becomes a binding under
+  `namespace.<kebab-cased-property-name>`; a property with its own default
+  is optional, one without is required and checked against `flight.yaml`'s
+  base layer at compile time, the same guarantee `@ConfigValue`'s no-default
+  form already had. A declared `validate()` runs once, right after
+  construction. Registers like any other component — resolve it with
+  `@Autowired` anywhere.
+- **`@Secret`**, marking a `@Settings` property that must not appear in logs.
+  Generates a redacting `CustomStringConvertible` when at least one field
+  needs it.
+- **`Duration: ConfigDecodable`**, requiring an explicit unit (`"500ms"`,
+  `"30s"`, `"12h"`) — a bare number does not guess what unit was meant.
+- **`ConfigKeyNaming`** in `FlightConfigCore`: the camelCase → kebab-case
+  transform `@Settings` uses, shared between the macro and the build-time
+  scanner rather than duplicated.
+
 ## [0.2.1] - 2026-08-25
 
 ### Fixed
