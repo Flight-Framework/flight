@@ -1,5 +1,6 @@
 import FlightPresenceProtocol
 import FlightPubSub
+import Synchronization
 import Testing
 @testable import FlightPresence
 
@@ -349,4 +350,100 @@ struct DiffOrderingTests {
         for diff in collector.diffs { _ = view.applyDiff(diff) }
         #expect(view.list.isEmpty, "the leave must be applied after the join, not before it")
     }
+}
+
+/// Gossip on the way out.
+///
+/// The leave that matters most is the one nobody asked for: a socket goes
+/// away, its task is cancelled, and the untrack that follows runs in that
+/// cancelled context. A distributed adapter doing real I/O fails immediately
+/// there — and every other node keeps showing that person until the
+/// heartbeat expires, while the node they left looks perfectly correct.
+///
+/// Found watching a demo application's logs: "distributed broadcast failed;
+/// local delivery unaffected", once per closing tab.
+@Suite("Gossip survives a cancelled task", .timeLimit(.minutes(1)))
+struct CancelledGossipTests {
+
+    private let topic = "room:42"
+
+    @Test("an untrack from a cancelled task still gossips the leave")
+    func untrackWhileCancelled() async throws {
+        // A bus that fails on a cancelled task, which is what an adapter
+        // doing real I/O does — LocalPubSub does not, so a test against it
+        // passes whether or not the cancellation is handled.
+        let gossip = CancellationSensitiveBus()
+        let (tracker, _) = makeTracker(mode: .membership, gossipBus: gossip)
+        let heard = gossip
+        let socket = FakeSocket()
+
+        await tracker.track(topic: topic, key: "user:7", payload: [:], presenceSocket: socket)
+        try await eventually("join gossiped") { heard.count >= 1 }
+        let afterJoin = heard.count
+
+        // A task that is already cancelled, which is what a closing socket's
+        // teardown actually is.
+        let task = Task {
+            await withTaskCancellationHandler {
+                await tracker.untrack(topic: topic, key: "user:7", socketID: socket.id)
+            } onCancel: {}
+        }
+        task.cancel()
+        await task.value
+
+        try await eventually("leave gossiped despite cancellation") {
+            heard.count > afterJoin
+        }
+        #expect(heard.lost == 0, "\(heard.lost) gossip frame(s) lost to cancellation")
+        #expect(await tracker.list(topic: topic).isEmpty)
+    }
+
+    @Test("the ordinary path is unchanged")
+    func uncancelledStillGossips() async throws {
+        let gossip = CancellationSensitiveBus()
+        let (tracker, _) = makeTracker(mode: .membership, gossipBus: gossip)
+        let heard = gossip
+        let socket = FakeSocket()
+
+        await tracker.track(topic: topic, key: "user:7", payload: [:], presenceSocket: socket)
+        await tracker.untrack(topic: topic, key: "user:7", socketID: socket.id)
+
+        try await eventually("both gossiped") { heard.count >= 2 }
+    }
+}
+
+/// A PubSub that drops what it is asked to publish from a cancelled task.
+///
+/// Standing in for an adapter that does real I/O: a Valkey publish on a
+/// cancelled task fails immediately, which is exactly how a closing socket's
+/// leave went missing on every other node while looking fine on its own.
+/// `LocalPubSub` hands the message straight to its subscribers and never
+/// consults cancellation, so a test written against it cannot tell the
+/// difference.
+final class CancellationSensitiveBus: PubSub, Sendable {
+    private final class Storage: Sendable {
+        let delivered = Mutex(0)
+        let dropped = Mutex(0)
+    }
+
+    private let storage = Storage()
+    private let local = LocalPubSub()
+
+    func publish(_ message: Message) async {
+        guard !Task.isCancelled else {
+            storage.dropped.withLock { $0 += 1 }
+            return
+        }
+        storage.delivered.withLock { $0 += 1 }
+        await local.publish(message)
+    }
+
+    func subscribe(_ topic: String) -> AsyncStream<Message> {
+        local.subscribe(topic)
+    }
+
+    /// How many publishes actually went out.
+    var count: Int { storage.delivered.withLock { $0 } }
+    /// How many were lost to cancellation — zero is the point.
+    var lost: Int { storage.dropped.withLock { $0 } }
 }

@@ -584,7 +584,26 @@ public actor PresenceTracker: Presence {
             logger.error("presence gossip failed to encode — dropped")
             return
         }
-        await gossipBus.publish(Message(topic: PresenceGossip.topic, payload: data))
+        let frame = Message(topic: PresenceGossip.topic, payload: data)
+
+        // The leave that matters most is the one nobody asked for: a socket
+        // going away takes its task with it, and the untrack that follows
+        // runs already cancelled. A distributed adapter doing real I/O then
+        // fails immediately — "distributed broadcast failed" in the log —
+        // and every other node keeps showing that person until the heartbeat
+        // expires. The local half succeeds, so nothing looks broken on the
+        // node that lost them.
+        //
+        // So cleanup gets an uncancelled context, and is still awaited, which
+        // is what keeps gossip in the order it was computed. Same shape as
+        // Core's rollback path, for the same reason.
+        guard Task.isCancelled else {
+            await gossipBus.publish(frame)
+            return
+        }
+        await Task.detached(priority: Task.currentPriority) { [gossipBus] in
+            await gossipBus.publish(frame)
+        }.value
     }
 
     /// Enqueues a diff for delivery, in the order it was computed.
