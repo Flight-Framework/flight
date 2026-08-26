@@ -4,6 +4,36 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-26
+
+### Added
+
+- **`Response.file`** — a fourth body shape: a sized ``ByteSource`` plus the
+  byte range to send. The transport writes an exact `Content-Length` and
+  streams in constant memory; `.streaming` remains the chunked/SSE shape.
+- **`serveContent(for:_:)`** — conditional requests and byte ranges over any
+  `ByteSource`: `If-None-Match` (list, `*`, weak comparison),
+  `If-Modified-Since`, `If-Range` (strong validators only), suffix ranges,
+  EOF clamping, `416` with `Content-Range: bytes */size`, correct
+  `HEAD`+`Range`. Plus `ContentDescriptor`, `EntityTag`, and public
+  `HTTPDate` formatting/parsing.
+- **`FileByteSource`** — open-once/fstat-once file serving off the
+  cooperative pool, with deterministic descriptor cleanup and loud failure
+  when a file is truncated mid-serve. `DataByteSource` covers blobs and
+  tests.
+
+### Changed
+
+- **The upgrade seam is generalized for coming protocol kinds**
+  (WebTransport, `connect-udp`): `UpgradeResponse` is now an enum
+  (`case webSocket(WebSocketUpgrade)`) and `RouteRegistration.Kind.upgrade`
+  carries an `UpgradeKind`. A future kind is an additive case that every
+  transport must handle *at compile time*. `ConnectionUpgradeHandler` and
+  `UpgradedConnection` are now `WebSocketUpgradeHandler` and
+  `WebSocketConnection` — deprecated typealiases keep old spellings
+  compiling. Nothing above the seam changed: Channels and raw
+  `@WebSocketMapping` handlers are source-identical.
+
 ## [0.3.1] - 2026-08-26
 
 ### Fixed
