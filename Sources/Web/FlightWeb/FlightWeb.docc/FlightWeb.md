@@ -116,6 +116,8 @@ whole application without binding a port.
 - ``ResponseEncodable``
 - ``ContentType``
 - ``WebCoders``
+- ``MediaType``
+- ``FormDecoder``
 
 ### Static assets
 
@@ -138,6 +140,7 @@ whole application without binding a port.
 
 - ``HTTPError``
 - ``HTTPErrorRepresentable``
+- ``UnsupportedMediaTypeError``
 - ``ProblemDetails``
 - ``SimpleErrorBody``
 - ``BodyDecodingError``

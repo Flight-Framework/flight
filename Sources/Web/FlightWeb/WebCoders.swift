@@ -27,6 +27,10 @@ public struct WebCoders: Sendable {
     public var jsonEncoder: JSONEncoder
     /// Decodes `body:` handler parameters.
     public var jsonDecoder: JSONDecoder
+    /// Decodes `application/x-www-form-urlencoded` `body:` parameters —
+    /// what an HTML form (or an OAuth token request) posts. See
+    /// ``FormDecoder`` for the wire semantics.
+    public var formDecoder: FormDecoder
     /// Turns a status and a client-safe message into a response.
     ///
     /// A closure rather than a format enum, so an application whose clients
@@ -38,10 +42,12 @@ public struct WebCoders: Sendable {
     public init(
         jsonEncoder: JSONEncoder,
         jsonDecoder: JSONDecoder,
+        formDecoder: FormDecoder = FormDecoder(),
         renderError: @escaping @Sendable (HTTPResponse.Status, String) -> Response
     ) {
         self.jsonEncoder = jsonEncoder
         self.jsonDecoder = jsonDecoder
+        self.formDecoder = formDecoder
         self.renderError = renderError
     }
 
