@@ -23,6 +23,8 @@ public struct Authentication: Sendable {
     // (unparenthesized) parses as a lookup for a nested type named `self`
     // inside the TokenValidator protocol, not as that existential's
     // metatype.
+    // flight:hand-registered — the validator is registered by
+    // FlightSecurityModule (or the application's own module), never scanned.
     @Autowired var validator: (any TokenValidator)
 
     /// For manual wiring or tests, where `@Autowired` has nothing to
