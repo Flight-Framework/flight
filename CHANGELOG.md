@@ -4,6 +4,18 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-26
+
+### Fixed
+
+- **`@Middleware` and `@Settings` beans never appeared on the actuator
+  dashboard.** Adding the two stereotypes updated their labels but not the
+  separate, hardcoded section-order list the HTML renderer actually
+  iterates — a bean whose stereotype isn't in that list renders nowhere,
+  rather than falling back to a generic section. `Stereotype` is now
+  `CaseIterable`, and a test checks `allCases` against the section list
+  directly so a future stereotype can't repeat this.
+
 ## [0.3.0] - 2026-08-26
 
 ### Added
