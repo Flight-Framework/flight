@@ -32,9 +32,21 @@ import FlightCore
 ///
 /// Omitted (or `nil`) — the default — means no prefix, exactly as before;
 /// every existing `@Controller` type is unaffected.
+///
+/// `pipelines` names the middleware lanes every route in this controller
+/// runs through, in order — `container.pipeline("name") { }` declarations.
+/// Omitted means the default lane, exactly as before lanes existed. A
+/// controller that wants the default stack *plus* extras concatenates:
+/// `pipelines: [MiddlewareRegistration.defaultLane, "admin"]`; one that
+/// wants almost nothing (static assets, health probes) names a bare lane
+/// alone. Referencing an undeclared lane fails when dispatch is built — at
+/// bootstrap, naming the route and the lane.
 @attached(member, names: named(init), named(_flightRegister))
 @attached(extension, conformances: _FlightRegistrable)
-public macro Controller(_ path: String? = nil) =
+public macro Controller(
+    _ path: String? = nil,
+    pipelines: [String] = [MiddlewareRegistration.defaultLane]
+) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "ControllerMacro")
 
 /// Marks a type as a middleware layer. Expands like `@Component` — resolving

@@ -225,3 +225,131 @@ struct PipelineIntegrationTests {
         #expect(sharedTrace.entries.isEmpty, "a type absent from every pipeline { } must not run")
     }
 }
+
+// MARK: - Lanes
+
+/// Its own box: `.serialized` serializes tests within one suite, but the two
+/// pipeline suites run concurrently with each other — sharing one trace
+/// across them interleaves entries exactly often enough to flake.
+private let laneTrace = TraceBox()
+
+@Middleware
+struct DefaultLaneMarker: Sendable {
+    func handle(_ context: RequestContext, next: Next) async throws -> Response {
+        laneTrace.append("default-lane")
+        return try await next(context)
+    }
+}
+
+@Middleware
+struct BareLaneMarker: Sendable {
+    func handle(_ context: RequestContext, next: Next) async throws -> Response {
+        laneTrace.append("bare-lane")
+        return try await next(context)
+    }
+}
+
+@Middleware
+struct AdminLaneMarker: Sendable {
+    func handle(_ context: RequestContext, next: Next) async throws -> Response {
+        laneTrace.append("admin-lane")
+        return try await next(context)
+    }
+}
+
+/// A controller routed through a bare lane — the static-asset shape: the
+/// default stack (transactions, auth, logging) must never run for it.
+@Controller(pipelines: ["bare"])
+struct BareLaneController {
+    @GetMapping("/bare")
+    func bare(_ context: RequestContext) -> String { "bare" }
+}
+
+/// The default stack plus an extra lane, concatenated in that order.
+@Controller(pipelines: [MiddlewareRegistration.defaultLane, "admin"])
+struct AdminController {
+    @GetMapping("/admin")
+    func admin(_ context: RequestContext) -> String { "admin" }
+}
+
+private struct LanesModule: FlightModule {
+    func configure(_ container: Container) throws {
+        try DefaultLaneMarker._flightRegister(container)
+        try BareLaneMarker._flightRegister(container)
+        try AdminLaneMarker._flightRegister(container)
+        try BareLaneController._flightRegister(container)
+        try AdminController._flightRegister(container)
+        try PingController.register(container)
+        container.pipeline {
+            DefaultLaneMarker.self
+        }
+        container.pipeline("bare") {
+            BareLaneMarker.self
+        }
+        container.pipeline("admin") {
+            AdminLaneMarker.self
+        }
+    }
+}
+
+@Suite("pipeline lanes", .serialized)
+struct PipelineLaneTests {
+
+    @Test("a route in a bare lane never runs the default stack")
+    func bareLaneSkipsDefault() async throws {
+        // THE motivating case: a static-asset route must not lease a
+        // database connection or run auth just because the app's default
+        // pipeline does. If this fails, lanes are decoration.
+        laneTrace.reset()
+        let client = try TestClient(container: TestContainer.build { LanesModule() })
+        let response = await client.get("/bare")
+        #expect(response.status == .ok)
+        #expect(laneTrace.entries == ["bare-lane"])
+        #expect(!laneTrace.entries.contains("default-lane"))
+    }
+
+    @Test("default routes run only the default lane")
+    func defaultRoutesUnaffected() async throws {
+        laneTrace.reset()
+        let client = try TestClient(container: TestContainer.build { LanesModule() })
+        _ = await client.get("/ping")
+        #expect(laneTrace.entries == ["default-lane"])
+    }
+
+    @Test("a route can concatenate the default lane with an extra one, in order")
+    func defaultPlusExtra() async throws {
+        laneTrace.reset()
+        let client = try TestClient(container: TestContainer.build { LanesModule() })
+        let response = await client.get("/admin")
+        #expect(response.status == .ok)
+        #expect(laneTrace.entries == ["default-lane", "admin-lane"])
+    }
+
+    @Test("a 404 runs the default lane, so logging still sees every miss")
+    func notFoundRunsDefaultLane() async throws {
+        laneTrace.reset()
+        let client = try TestClient(container: TestContainer.build { LanesModule() })
+        let response = await client.get("/no-such-route")
+        #expect(response.status == .notFound)
+        #expect(laneTrace.entries == ["default-lane"])
+    }
+
+    @Test("referencing an undeclared lane fails at build, naming route and lane")
+    func undeclaredLaneFailsAtBootstrap() throws {
+        struct GhostModule: FlightModule {
+            func configure(_ container: Container) throws {
+                container.registerRoute(
+                    .get, "/ghost", source: "GhostModule", pipelines: ["nobody-declared-this"]
+                ) { _ in .noContent }
+            }
+        }
+        let container = try TestContainer.build { GhostModule() }
+        do {
+            _ = try TestClient(container: container)
+            Issue.record("expected dispatch build to refuse the undeclared lane")
+        } catch let error as DispatchBuilder.UndeclaredLaneError {
+            #expect(error.lane == "nobody-declared-this")
+            #expect(error.route.contains("/ghost"))
+        }
+    }
+}

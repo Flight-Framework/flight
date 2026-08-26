@@ -256,36 +256,60 @@ public struct Router: Sendable {
         return match.route.kind.isUpgrade
     }
 
+    // MARK: - Executing what matched
+
+    /// Runs one matched route: binds its path parameters, invokes the
+    /// handler, and renders a thrown error into a response — so every
+    /// middleware layer wrapping this sees a real response, never a
+    /// propagating handler error. A 500 is still a response, and access
+    /// logging that missed them would be worse than no access logging.
+    ///
+    /// This is the innermost terminal of a route's lane chain. Static
+    /// because it needs nothing from the table: the match already carries
+    /// everything.
+    public static func execute(_ match: RouteMatch, context: RequestContext) async -> Response {
+        var boundContext = context
+        boundContext.pathParameters = match.pathParameters
+        do {
+            let response = try await match.route.handler(boundContext)
+            boundContext.response = response
+            return response
+        } catch {
+            return errorResponse(for: error, context: boundContext)
+        }
+    }
+
+    /// Renders the two no-match outcomes. `.matched` is a programmer error
+    /// here — the caller routes first and executes matches through their own
+    /// lane chain.
+    public static func renderNoMatch(_ outcome: Outcome, context: RequestContext) -> Response {
+        switch outcome {
+        case .notFound:
+            return context.coders.renderError(.notFound, "Not Found")
+        case .methodNotAllowed(let allow):
+            let allowed = allow.map(\.rawValue).joined(separator: ", ")
+            return context.coders.renderError(.methodNotAllowed, "Method Not Allowed")
+                .settingHeader(.allow, allowed)
+        case .matched:
+            preconditionFailure("renderNoMatch called with a match — execute it instead")
+        }
+    }
+
     // MARK: - Routing as the innermost responder
 
-    /// Routing is the terminal of the pipeline, not a layer of it: it matches,
-    /// binds path parameters, runs the handler, and answers. Nothing wraps it
-    /// from the inside, so it takes no `next`.
-    ///
-    /// A handler error is rendered here rather than thrown onward, which is
-    /// what lets every enclosing layer see a real response — a 500 is still a
-    /// response, and access logging that missed them would be worse than no
-    /// access logging.
+    /// Match-and-execute in one closure — the whole router as a pipeline
+    /// terminal. Dispatch no longer uses this (it routes first, then runs
+    /// the matched route's own lane chain — that is what makes per-route
+    /// lanes possible at all); it remains for tests and for hand-assembled
+    /// single-chain setups where lanes are not in play.
     public var responder: Next {
         let router = self
         return { context in
             switch router.route(method: context.request.method, path: context.request.path) {
-            case .notFound:
-                return context.coders.renderError(.notFound, "Not Found")
-            case .methodNotAllowed(let allow):
-                let allowed = allow.map(\.rawValue).joined(separator: ", ")
-                return context.coders.renderError(.methodNotAllowed, "Method Not Allowed")
-                    .settingHeader(.allow, allowed)
             case .matched(let match):
-                var boundContext = context
-                boundContext.pathParameters = match.pathParameters
-                do {
-                    let response = try await match.route.handler(boundContext)
-                    boundContext.response = response
-                    return response
-                } catch {
-                    return errorResponse(for: error, context: boundContext)
-                }
+                return await Self.execute(match, context: context)
+            case let noMatch:
+                return Self.renderNoMatch(noMatch, context: context)
             }
         }
     }

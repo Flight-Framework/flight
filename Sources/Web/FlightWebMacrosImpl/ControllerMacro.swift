@@ -101,7 +101,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
             "}",
         ]
         for (route, path) in combinedRoutes {
-            thunkLines.append(contentsOf: routeRegistrationLines(for: route, path: path, controller: typeName))
+            thunkLines.append(contentsOf: routeRegistrationLines(for: route, path: path, controller: typeName, pipelines: parsePipelines(node)))
         }
         let thunkBody = thunkLines.map { "    \($0)" }.joined(separator: "\n")
         let thunk: DeclSyntax = """
@@ -118,7 +118,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// colliding patterns without tripping Core's duplicate-registration
     /// precondition — the Router reports the conflict as a proper startup
     /// error naming both sources instead.
-    private static func routeRegistrationLines(for route: ScannedRoute, path: String, controller: String) -> [String] {
+    private static func routeRegistrationLines(for route: ScannedRoute, path: String, controller: String, pipelines: String?) -> [String] {
         let kind = route.kind.isUpgrade ? ".upgrade(.webSocket)" : ".http"
 
         var call = "controller.\(route.methodName)(context"
@@ -145,7 +145,8 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         var lines: [String] = []
         lines.append("container.register(FlightWeb.RouteRegistration.self, qualifier: \"\(route.kind.httpMethod) \(path) @\" + String(reflecting: Self.self) + \".\(route.methodName)\", scope: .singleton) { c in")
         lines.append("    let controller = try c.resolve(Self.self)")
-        lines.append("    return FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\") { context in")
+        let pipelinesClause = pipelines.map { ", pipelines: \($0)" } ?? ""
+    lines.append("    return FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\"\(pipelinesClause)) { context in")
         for line in handlerLines {
             lines.append("        \(line)")
         }
@@ -211,6 +212,18 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
 
     /// `@Controller`'s own base-path argument (Spring-style combination —
     /// see the macro declaration's doc comment). Returns `""` for "no base
+    /// The `pipelines:` argument's source text, re-embedded verbatim into
+    /// every generated RouteRegistration — or nil for the default lane.
+    /// Verbatim like @Component's `scope:`: the expression is evaluated in
+    /// the expansion, so `[.defaultLane, "admin"]` and a constant both work.
+    private static func parsePipelines(_ node: AttributeSyntax) -> String? {
+        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self) else { return nil }
+        for argument in arguments where argument.label?.text == "pipelines" {
+            return argument.expression.trimmedDescription
+        }
+        return nil
+    }
+
     /// path" — omitted, explicit `nil`, empty string, or bare `"/"` are all
     /// the identity element for `RouteScanning.combinePaths`.
     private static func parseBasePath(

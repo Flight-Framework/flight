@@ -49,8 +49,29 @@ public struct Dispatch: Sendable {
 /// and a server span — around it. The transport never sees any of this.
 public enum DispatchBuilder {
 
+    /// A route names a middleware lane nobody declared. Bootstrap-time,
+    /// deliberately: the alternative is a route that 500s (or silently runs
+    /// with the wrong stack) on its first request.
+    public struct UndeclaredLaneError: Error, CustomStringConvertible {
+        public let lane: String
+        public let route: String
+        public var description: String {
+            "Route \(route) runs through pipeline lane '\(lane)', but no container.pipeline(\"\(lane)\") { } declared it. Declare the lane (an empty block is legal), or remove it from the route's pipelines."
+        }
+    }
+
     /// Post-freeze only: routes and middleware are components, and components exist to
     /// be read once the container is frozen (Flight Core §2.1).
+    ///
+    /// Dispatch routes **first**, then runs the matched route's own lane
+    /// chain — composed once per route, here, not per request. That
+    /// ordering, rather than one global chain wrapping the router, is what
+    /// makes per-route lanes possible: a static-asset route can run a
+    /// near-empty stack while its neighbor runs transactions and auth,
+    /// because by the time middleware runs the route is already known.
+    /// The no-match path (404/405) runs the **default** lane, so access
+    /// logging and friends still see every miss — the property the old
+    /// wrap-the-router shape had, kept on purpose.
     public static func build(
         container: Container,
         logger: Logger = Logger(label: "flight.web")
@@ -60,27 +81,93 @@ public enum DispatchBuilder {
             "DispatchBuilder.build requires a frozen container — routes are components, collected post-freeze."
         )
         let router = try Router(routes: container.collectRoutes())
-        let userMiddleware = try container.collectMiddleware()
 
+        // Lane validation: the default lane exists even when empty (an app
+        // with no middleware is legal); anything else must be declared.
+        let declaredLanes = try container.declaredMiddlewareLanes()
+        var chainsByLane: [String: [MiddlewareRegistration]] = [:]
+        for lane in declaredLanes {
+            chainsByLane[lane] = try container.collectMiddleware(lane: lane)
+        }
+        if chainsByLane[MiddlewareRegistration.defaultLane] == nil {
+            chainsByLane[MiddlewareRegistration.defaultLane] = []
+        }
+
+        // One composed responder per route, keyed by the same string that is
+        // already that route's unique component qualifier.
+        var respondersByRoute: [String: Next] = [:]
         for route in router.routes {
+            var chain: [MiddlewareRegistration] = []
+            for lane in route.pipelines {
+                guard let laneChain = chainsByLane[lane] else {
+                    throw UndeclaredLaneError(
+                        lane: lane, route: "\(route.method.rawValue) \(route.path) (\(route.source))")
+                }
+                chain += laneChain
+            }
+            let terminal: Next = { context in
+                // Re-match to bind path parameters: the routed outcome that
+                // selected this responder is not threaded through, and one
+                // extra table lookup per request is cheaper than widening
+                // every middleware signature to carry the match.
+                guard
+                    case .matched(let match) = router.route(
+                        method: context.request.method, path: context.request.path)
+                else {
+                    return context.coders.renderError(.notFound, "Not Found")
+                }
+                return await Router.execute(match, context: context)
+            }
+            respondersByRoute[routeKey(route)] = compose(chain, around: terminal)
+
             logger.debug("route registered", metadata: [
                 "method": "\(route.method.rawValue)",
                 "path": "\(route.path)",
                 "kind": route.kind.isUpgrade ? "upgrade" : "http",
+                "pipelines": .array(route.pipelines.map { .string($0) }),
                 "source": "\(route.source)",
             ])
         }
+
+        let defaultChain = chainsByLane[MiddlewareRegistration.defaultLane] ?? []
+        let noMatchResponder: Next = compose(
+            defaultChain,
+            around: { context in
+                Router.renderNoMatch(
+                    router.route(method: context.request.method, path: context.request.path),
+                    context: context)
+            })
+
         logger.info("flight web dispatch assembled", metadata: [
             "routes": .stringConvertible(router.routes.count),
-            "middleware": .array(userMiddleware.map { .string($0.name) }),
+            "lanes": .dictionary(
+                chainsByLane.mapValues { .array($0.map { .string($0.name) }) }),
         ])
 
+        let responders = respondersByRoute
+        let respond: Next = { context in
+            switch router.route(method: context.request.method, path: context.request.path) {
+            case .matched(let match):
+                if let responder = responders[routeKey(match.route)] {
+                    return try await responder(context)
+                }
+                // Unreachable: every route in the table got a responder
+                // above. The fallback keeps this total rather than trapping.
+                return await Router.execute(match, context: context)
+            case .notFound, .methodNotAllowed:
+                return try await noMatchResponder(context)
+            }
+        }
+
         return makeDispatch(
-            chain: userMiddleware,
-            responder: router.responder,
+            pipeline: respond,
             acceptsUpgrade: { router.acceptsUpgrade(method: $0.method, path: $0.path) },
             container: container,
             logger: logger)
+    }
+
+    private static func routeKey(_ route: RouteRegistration) -> String {
+        "\(route.method.rawValue) \(route.path) @\(route.source)"
     }
 
     /// The assembled per-request pipeline, exposed separately so test
@@ -97,7 +184,19 @@ public enum DispatchBuilder {
         container: Container,
         logger: Logger
     ) -> Dispatch {
-        let pipeline = compose(chain, around: responder)
+        makeDispatch(
+            pipeline: compose(chain, around: responder),
+            acceptsUpgrade: acceptsUpgrade, container: container, logger: logger)
+    }
+
+    /// The per-request envelope — request id, trace extraction, the server
+    /// span, one `Scope` — around an already-assembled pipeline.
+    public static func makeDispatch(
+        pipeline: @escaping Next,
+        acceptsUpgrade: @escaping @Sendable (Request) -> Bool = { _ in false },
+        container: Container,
+        logger: Logger
+    ) -> Dispatch {
         let respond: @Sendable (Request) async -> Response = { request in
             // Request identity: honor an inbound X-Request-ID, mint otherwise.
             let requestID = request.headers[.xRequestID] ?? UUID().uuidString

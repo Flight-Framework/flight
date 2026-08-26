@@ -36,6 +36,13 @@ public struct RouteRegistration: Sendable {
     /// Where this route was declared ("UserController.getUser") — carried
     /// for startup logs, conflict diagnostics, and introspection.
     public let source: String
+    /// Which middleware lanes wrap this route, in order — the names of
+    /// `container.pipeline("name") { }` declarations, concatenated. The
+    /// default is the unnamed default lane, so every route behaves exactly
+    /// as before lanes existed unless it says otherwise. Referencing a lane
+    /// nobody declared fails when dispatch is built — bootstrap, not the
+    /// first request.
+    public let pipelines: [String]
     /// The fully-encoded handler thunk: body decoding and return-value
     /// encoding already applied by the macro expansion.
     public let handler: @Sendable (RequestContext) async throws -> Response
@@ -45,12 +52,14 @@ public struct RouteRegistration: Sendable {
         path: String,
         kind: Kind = .http,
         source: String = "<direct>",
+        pipelines: [String] = [MiddlewareRegistration.defaultLane],
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
         self.method = method
         self.path = path
         self.kind = kind
         self.source = source
+        self.pipelines = pipelines
         self.handler = handler
     }
 }
@@ -72,16 +81,26 @@ public struct MiddlewareRegistration: Sendable {
         static func < (lhs: Generation, rhs: Generation) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
+    /// The lane every route runs through unless it names others — and the
+    /// one `container.pipeline { }` (no name) feeds. Its name is spellable
+    /// so a route can *combine* it with extras: `pipelines: [.defaultLane,
+    /// "admin"]` means "everything the app normally does, then the admin
+    /// stack".
+    public static let defaultLane = "default"
+
     public let name: String
+    /// Which named lane this layer belongs to.
+    public let lane: String
     public let order: Int
     let generation: Generation
     let handle: @Sendable (RequestContext, Next) async throws -> Response
 
     init(
-        name: String, order: Int, generation: Generation,
+        name: String, lane: String, order: Int, generation: Generation,
         handle: @escaping @Sendable (RequestContext, Next) async throws -> Response
     ) {
         self.name = name
+        self.lane = lane
         self.order = order
         self.generation = generation
         self.handle = handle
@@ -94,7 +113,8 @@ public struct MiddlewareRegistration: Sendable {
     /// shape, just built from a value already in hand.
     public init(_ middleware: any Middleware, name: String? = nil) {
         self.init(
-            name: name ?? String(reflecting: type(of: middleware)), order: 0, generation: .pipeline
+            name: name ?? String(reflecting: type(of: middleware)),
+            lane: Self.defaultLane, order: 0, generation: .pipeline
         ) { context, next in
             try await middleware.handle(context, next: next)
         }
@@ -120,10 +140,12 @@ extension Container {
         _ path: String,
         kind: RouteRegistration.Kind = .http,
         source: String = "<direct>",
+        pipelines: [String] = [MiddlewareRegistration.defaultLane],
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
         let registration = RouteRegistration(
-            method: method, path: path, kind: kind, source: source, handler: handler
+            method: method, path: path, kind: kind, source: source, pipelines: pipelines,
+            handler: handler
         )
         register(
             RouteRegistration.self,
@@ -169,12 +191,35 @@ extension Container {
     /// }
     /// ```
     public func pipeline(@MiddlewarePipelineBuilder _ build: () -> [any Middleware.Type]) {
+        pipeline(MiddlewareRegistration.defaultLane, build)
+    }
+
+    /// The named form: declares (or extends) lane `name`, which routes opt
+    /// into with `pipelines:` — on `@Controller`, on `registerRoute`, or on
+    /// an asset mount. A lane is the *whole* stack for the routes that name
+    /// it alone: `pipelines: ["assets"]` runs only the assets lane, which is
+    /// exactly how a static-asset route avoids paying for transaction
+    /// binding and authentication it can never use. Routes that want the
+    /// default behavior *plus* extras concatenate:
+    /// `pipelines: [MiddlewareRegistration.defaultLane, "admin"]`.
+    ///
+    /// Declaring a lane and never referencing it is legal (dead but
+    /// harmless, like an unlisted `@Middleware`); *referencing* a lane
+    /// nobody declared fails when dispatch is built — at bootstrap, naming
+    /// the route and the lane, never as a 500.
+    public func pipeline(
+        _ name: String, @MiddlewarePipelineBuilder _ build: () -> [any Middleware.Type]
+    ) {
         for type in build() {
-            let name = String(reflecting: type)
-            register(MiddlewareRegistration.self, qualifier: "pipeline.\(name)", scope: .singleton) {
-                container in
+            let typeName = String(reflecting: type)
+            register(
+                MiddlewareRegistration.self, qualifier: "pipeline.\(name).\(typeName)",
+                scope: .singleton
+            ) { container in
                 let instance = try container.resolve(type)
-                return MiddlewareRegistration(name: name, order: 0, generation: .pipeline) {
+                return MiddlewareRegistration(
+                    name: typeName, lane: name, order: 0, generation: .pipeline
+                ) {
                     context, next in try await instance.handle(context, next: next)
                 }
             }
@@ -198,7 +243,10 @@ extension Container {
         _ middleware: @escaping ClosureMiddleware
     ) {
         register(MiddlewareRegistration.self, qualifier: name, scope: .singleton) { _ in
-            MiddlewareRegistration(name: name, order: order, generation: .legacyClosure) {
+            MiddlewareRegistration(
+                name: name, lane: MiddlewareRegistration.defaultLane, order: order,
+                generation: .legacyClosure
+            ) {
                 context, next in
                 var mutableContext = context
                 // A legacy closure's `next` cannot see a thrown error — it
@@ -240,15 +288,32 @@ extension Container {
         try collect(RouteRegistration.self)
     }
 
-    /// All middleware entries: every `pipeline { }` entry first (in the
-    /// order declared there), then every deprecated `registerMiddleware`
-    /// closure sorted by `(order, registration sequence)` — see
-    /// `MiddlewareRegistration.Generation`.
+    /// The default lane's entries — see `collectMiddleware(lane:)`.
     public func collectMiddleware() throws -> [MiddlewareRegistration] {
+        try collectMiddleware(lane: MiddlewareRegistration.defaultLane)
+    }
+
+    /// One lane's middleware entries, in execution order: every
+    /// `pipeline { }` entry first (in the order declared there, across
+    /// however many calls declared into this lane), then — default lane
+    /// only, since the deprecated API predates lanes — every
+    /// `registerMiddleware` closure sorted by `(order, registration
+    /// sequence)`. See `MiddlewareRegistration.Generation`.
+    public func collectMiddleware(lane: String) throws -> [MiddlewareRegistration] {
         try collect(MiddlewareRegistration.self)
             .enumerated()
-            .sorted { ($0.element.generation, $0.element.order, $0.offset) < ($1.element.generation, $1.element.order, $1.offset) }
+            .filter { $0.element.lane == lane }
+            .sorted {
+                ($0.element.generation, $0.element.order, $0.offset)
+                    < ($1.element.generation, $1.element.order, $1.offset)
+            }
             .map(\.element)
+    }
+
+    /// Every lane that has at least one declared entry — what dispatch
+    /// validates route references against.
+    public func declaredMiddlewareLanes() throws -> Set<String> {
+        Set(try collect(MiddlewareRegistration.self).map(\.lane))
     }
 
     /// Resolves every component of `type` via introspection — Core's public

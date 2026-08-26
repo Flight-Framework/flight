@@ -26,6 +26,7 @@ extension RouteRegistration {
         path: String,
         kind: Kind = .http,
         source: String = "<direct>",
+        pipelines: [String] = [MiddlewareRegistration.defaultLane],
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
         self.init(
@@ -33,6 +34,7 @@ extension RouteRegistration {
             path: path,
             kind: kind,
             source: source,
+            pipelines: pipelines,
             handler: handler
         )
     }
