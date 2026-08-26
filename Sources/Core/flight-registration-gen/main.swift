@@ -75,12 +75,23 @@ struct ScannedComponent {
     let line: Int
 }
 
-/// One `@ConfigValue` site. `key` is nil when the key expression isn't a
-/// plain string literal (interpolation) — not statically checkable, so the
-/// the check skips it and the runtime throw remains the backstop.
+/// One required-key site — an explicit `@ConfigValue`, or a plain property
+/// inside `@Settings` whose key is derived from its name. `key` is nil when
+/// the expression isn't a plain string literal (interpolation) — not
+/// statically checkable, so the check skips it and the runtime throw remains
+/// the backstop.
 struct ScannedConfigValue {
+    enum Source {
+        /// An explicit `@ConfigValue("...")` attribute.
+        case explicitConfigValue
+        /// A plain property inside `@Settings`, whose attribute the message
+        /// must not claim was written — the whole point of `@Settings` is
+        /// that it wasn't.
+        case implicitSettingsField
+    }
     let key: String?
     let hasDefault: Bool
+    let source: Source
     let file: String
     let line: Int
 }
@@ -107,7 +118,7 @@ final class ComponentVisitor: SyntaxVisitor {
     /// test below pinning this list against the macros the framework
     /// actually declares.
     static let registrableAttributes: Set<String> = [
-        "Component", "Service", "Repository", "Controller", "Scheduler",
+        "Component", "Service", "Repository", "Controller", "Scheduler", "Settings",
     ]
 
     let module: String
@@ -173,6 +184,17 @@ final class ComponentVisitor: SyntaxVisitor {
         let isPublic = modifiers.contains {
             $0.name.tokenKind == .keyword(.public) || $0.name.tokenKind == .keyword(.open)
         }
+        // @Settings binds every plain property implicitly — there is no
+        // per-property @ConfigValue attribute to scan for the common case,
+        // only a property name and the type's own namespace argument. The
+        // key the macro will generate is derived the same way here as there
+        // (ConfigKeyNaming.kebabCase, shared rather than duplicated) so a
+        // required key with no default can get the same compile-time
+        // flight.yaml check @ConfigValue's explicit form already has.
+        let isSettingsType =
+            registrable.attributeName.as(IdentifierTypeSyntax.self)?.name.text == "Settings"
+        let settingsNamespace = isSettingsType ? literalKey(of: registrable) : nil
+
         var autowired: [String] = []
         var acknowledged: [String] = []
         var configValues: [ScannedConfigValue] = []
@@ -197,9 +219,32 @@ final class ComponentVisitor: SyntaxVisitor {
                     ScannedConfigValue(
                         key: literalKey(of: attribute),
                         hasDefault: hasLabeledArgument(attribute, label: "default"),
+                        source: .explicitConfigValue,
                         file: file,
                         line: propertyLocation.line
                     ))
+                continue
+            }
+
+            if let namespace = settingsNamespace,
+                !hasAttribute(variable.attributes, named: "Autowired")
+            {
+                for binding in variable.bindings {
+                    guard binding.accessorBlock == nil,
+                        binding.initializer == nil,
+                        let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
+                        let type = binding.typeAnnotation?.type,
+                        !type.is(OptionalTypeSyntax.self),
+                        type.as(IdentifierTypeSyntax.self)?.name.text != "Optional"
+                    else { continue }
+                    let propertyLocation = converter.location(for: variable.position)
+                    let key = "\(namespace).\(ConfigKeyNaming.kebabCase(pattern.identifier.text))"
+                    configValues.append(
+                        ScannedConfigValue(
+                            key: key, hasDefault: false, source: .implicitSettingsField,
+                            file: file, line: propertyLocation.line
+                        ))
+                }
             }
         }
         let location = converter.location(for: position)
@@ -586,13 +631,20 @@ func checkConfigKeys() {
     for component in components {
         for configValue in component.configValues {
             guard let key = configValue.key, !configValue.hasDefault else { continue }
-            if !baseKeys.contains(key) {
-                emit(
-                    "error",
-                    "@ConfigValue key '\(key)' in \(component.typeName) is missing from flight.yaml and has no default. Add the key to flight.yaml (the base layer — a ${VAR} placeholder is fine for env-supplied values), or provide default:.",
-                    file: configValue.file, line: configValue.line
-                )
+            guard !baseKeys.contains(key) else { continue }
+            let message: String
+            switch configValue.source {
+            case .explicitConfigValue:
+                message =
+                    "@ConfigValue key '\(key)' in \(component.typeName) is missing from flight.yaml and has no default. Add the key to flight.yaml (the base layer — a ${VAR} placeholder is fine for env-supplied values), or provide default:."
+            case .implicitSettingsField:
+                // No @ConfigValue was written here — @Settings derived this
+                // key from the property's own name — so the message must not
+                // claim an attribute that isn't there.
+                message =
+                    "'\(key)' in \(component.typeName) is missing from flight.yaml and the property has no default. Add the key to flight.yaml (the base layer — a ${VAR} placeholder is fine for env-supplied values), or give the property a default value."
             }
+            emit("error", message, file: configValue.file, line: configValue.line)
         }
     }
 }

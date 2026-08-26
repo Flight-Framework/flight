@@ -79,6 +79,70 @@ public macro ConfigValue(_ key: String) =
 public macro ConfigValue<T: ConfigDecodable>(_ key: String, default: T) =
     #externalMacro(module: "FlightCoreMacrosImpl", type: "ConfigValueMacro")
 
+/// A typed slice of configuration, bound once at bootstrap.
+///
+/// Every stored property becomes a binding under
+/// `namespace.<kebab-cased-property-name>` — `signingKey` under `@Settings("auth")`
+/// resolves `auth.signing-key`. A property with its own default value is
+/// optional (the default applies when the key is absent from every
+/// configuration source); a property with none is required, and — same rule
+/// as the no-default form of `@ConfigValue` — the build plugin checks it
+/// against `flight.yaml`'s base layer at compile time, so a missing required
+/// key is a build error naming the site, not a bootstrap-time surprise.
+///
+/// ```swift
+/// @Settings("auth")
+/// struct AuthSettings {
+///     var issuer: String = "myapp"
+///     var audience: String = "myapp-web"
+///     @Secret var signingKey: String              // required — no default
+///     var tokenLifetime: Duration = .hours(12)     // "12h", "500ms", ...
+///
+///     func validate() throws {
+///         guard signingKey.count >= 32 else { throw AuthConfigurationError.signingKeyTooShort }
+///     }
+/// }
+/// ```
+///
+/// The type is registered as an ordinary `.singleton` component — resolve it
+/// with `@Autowired var settings: AuthSettings` anywhere, exactly like any
+/// other dependency. A `validate()` method with no parameters, if the type
+/// declares one, runs once, right after construction, at bootstrap: the
+/// place a bad value should fail, not the first request that reads it.
+///
+/// A property may not be `Optional` — `@Settings` binds a value once, and a
+/// key that may or may not exist has no single answer for "what did we
+/// configure"; give it a concrete default instead. A property with its own
+/// default must be `var`, since the generated initializer overrides that
+/// default when configuration supplies a value — Swift does not allow a
+/// custom initializer to reassign a `let` that already has one.
+///
+/// This binds the *value*, not the lookup — flight.yaml, the per-environment
+/// overlay file, and environment variables remain exactly what they are
+/// today; `@Settings` only replaces the hand-written `init(configuration:)`
+/// that used to turn them into a typed object.
+///
+/// The exact expansion is pinned by Tests/Core/FlightCoreMacroTests.
+@attached(member, names: named(init), named(_flightRegister), named(description))
+@attached(extension, conformances: _FlightRegistrable, CustomStringConvertible)
+public macro Settings(_ namespace: String) =
+    #externalMacro(module: "FlightCoreMacrosImpl", type: "SettingsMacro")
+
+/// Marks a `@Settings` property whose value must not leak into logs or
+/// diagnostics. When at least one property carries `@Secret`, `@Settings`
+/// generates a `description` that redacts those fields to `<REDACTED>` —
+/// so printing or logging the settings object by accident (a stray
+/// `context.logger.info("\(settings)")`, a crash report) does not leak it.
+///
+/// This governs only the settings object's own textual representation. It
+/// does not mark the underlying configuration key secret in Flight Config's
+/// own diagnostic dump (`Configuration.debugDescription`) — that redaction
+/// is a property of the *provider* the value came from
+/// (`Configuration.load(secrets:)`), a separate and already-existing
+/// mechanism.
+@attached(peer)
+public macro Secret() = #externalMacro(module: "FlightCoreMacrosImpl", type: "SecretMacro")
+
 /// Wraps a method body in begin/commit/rollback against the task-local
 /// `FlightTransactions.coordinator`. A flat compile-time expansion —
 /// no runtime proxy, fully inspectable. Requires a `throws` method (rollback

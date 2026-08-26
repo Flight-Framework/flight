@@ -83,3 +83,56 @@ extension String {
         trimmingCharacters(in: .whitespaces)
     }
 }
+
+extension Duration: ConfigDecodable {
+    /// A number and a unit, no space required between them: `500ms`, `30s`,
+    /// `5m`, `12h`, `1.5d`. Units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`.
+    ///
+    /// A unit is mandatory — there is no bare-number default. A bare `30`
+    /// reads as thirty of *something*, and every framework that guesses
+    /// (seconds, most commonly) has produced the same class of incident: a
+    /// timeout meant to be `30s` configured as `30` and silently applied as
+    /// thirty milliseconds, or vice versa. Naming the unit is one keystroke
+    /// and removes the ambiguity entirely, which is the same trade the `Bool`
+    /// conformance above already makes for `"enabled"`.
+    ///
+    /// Negative durations are rejected: every real use of a `Duration`
+    /// setting in Flight is a timeout, a TTL, or a lifetime, and none of
+    /// those has a sensible negative value.
+    public init?(configValue: String) {
+        let trimmed = configValue.configTrimmed
+        guard !trimmed.isEmpty else { return nil }
+
+        var numberEnd = trimmed.startIndex
+        var sawDecimalPoint = false
+        while numberEnd < trimmed.endIndex {
+            let character = trimmed[numberEnd]
+            if character.isNumber {
+                numberEnd = trimmed.index(after: numberEnd)
+            } else if character == "." && !sawDecimalPoint {
+                sawDecimalPoint = true
+                numberEnd = trimmed.index(after: numberEnd)
+            } else {
+                break
+            }
+        }
+        guard numberEnd > trimmed.startIndex,
+            let magnitude = Double(trimmed[trimmed.startIndex..<numberEnd]),
+            magnitude.isFinite, magnitude >= 0
+        else { return nil }
+
+        // `configTrimmed` is defined on `String`, not `StringProtocol`; the
+        // slice here is a `Substring`, so it needs converting first.
+        let unit = String(trimmed[numberEnd...]).configTrimmed.lowercased()
+        switch unit {
+        case "ns": self = .nanoseconds(magnitude)
+        case "us": self = .microseconds(magnitude)
+        case "ms": self = .milliseconds(magnitude)
+        case "s": self = .seconds(magnitude)
+        case "m": self = .seconds(magnitude * 60)
+        case "h": self = .seconds(magnitude * 3_600)
+        case "d": self = .seconds(magnitude * 86_400)
+        default: return nil
+        }
+    }
+}

@@ -64,10 +64,16 @@ struct GeneratorTests {
 
     /// Writes `sources` to a temporary target, runs the generator over them,
     /// and returns what it produced.
+    /// `flightYAML`, when given, is written as `flight.yaml` in the same
+    /// workspace the sources land in (not added to `modules[0].files` — it
+    /// is not Swift), and the workspace itself becomes `packageDirectory`
+    /// unless the caller overrides it — the layout a real package actually
+    /// has, source files and `flight.yaml` side by side.
     func generate(
         _ sources: [String: String],
         targetModule: String = "AppModule",
-        packageDirectory: String? = nil
+        packageDirectory: String? = nil,
+        flightYAML: String? = nil
     ) throws -> Result {
         let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("flightgen-\(UUID().uuidString)")
@@ -80,6 +86,11 @@ struct GeneratorTests {
             try contents.write(to: path, atomically: true, encoding: .utf8)
             paths.append(path.path)
         }
+        if let flightYAML {
+            try flightYAML.write(
+                to: workspace.appendingPathComponent("flight.yaml"), atomically: true,
+                encoding: .utf8)
+        }
 
         let output = workspace.appendingPathComponent("FlightRegistrations.swift")
         var manifest: [String: Any] = [
@@ -87,7 +98,7 @@ struct GeneratorTests {
             "modules": [["name": targetModule, "files": paths]],
             "output": output.path,
         ]
-        if let packageDirectory { manifest["packageDirectory"] = packageDirectory }
+        manifest["packageDirectory"] = packageDirectory ?? workspace.path
 
         let manifestPath = workspace.appendingPathComponent("manifest.json")
         try JSONSerialization.data(withJSONObject: manifest, options: [])
@@ -191,6 +202,129 @@ struct GeneratorTests {
         ])
         #expect(result.exitCode == 0)
         #expect(!result.generated.contains("NotAComponent"))
+    }
+
+    // MARK: - Required-key checks against flight.yaml
+    //
+    // A @ConfigValue with no default:, or a @Settings property with no
+    // default value, must exist in flight.yaml's base layer — checked here
+    // at build time rather than left to surface as a bootstrap-time throw.
+    // No prior test drove this executable end to end; these do.
+
+    @Test("a required @ConfigValue key missing from flight.yaml is a build error")
+    func requiredConfigValueKeyMissingIsAnError() throws {
+        let result = try generate(
+            [
+                "Server.swift": """
+                import FlightCore
+                @Component final class ServerConfig: Sendable {
+                    @ConfigValue("server.port") let port: Int
+                }
+                """
+            ],
+            flightYAML: "other:\n  key: value\n"
+        )
+        #expect(result.exitCode != 0)
+        #expect(result.diagnostics.contains("server.port"))
+        #expect(result.diagnostics.contains("@ConfigValue"))
+    }
+
+    @Test("a required @ConfigValue key present in flight.yaml succeeds")
+    func requiredConfigValueKeyPresentSucceeds() throws {
+        let result = try generate(
+            [
+                "Server.swift": """
+                import FlightCore
+                @Component final class ServerConfig: Sendable {
+                    @ConfigValue("server.port") let port: Int
+                }
+                """
+            ],
+            flightYAML: "server:\n  port: 8080\n"
+        )
+        #expect(result.exitCode == 0)
+        #expect(result.diagnostics.isEmpty)
+    }
+
+    @Test("a required @Settings property missing from flight.yaml is a build error, without claiming @ConfigValue was written")
+    func requiredSettingsKeyMissingIsAnError() throws {
+        let result = try generate(
+            [
+                "AuthSettings.swift": """
+                import FlightCore
+                @Settings("auth")
+                struct AuthSettings: Sendable {
+                    var signingKey: String
+                }
+                """
+            ],
+            flightYAML: "other:\n  key: value\n"
+        )
+        #expect(result.exitCode != 0)
+        #expect(result.diagnostics.contains("auth.signing-key"))
+        // The property has no @ConfigValue attribute at all — the message
+        // must not claim one, or it would send someone looking for a line
+        // of code that was never written.
+        #expect(!result.diagnostics.contains("@ConfigValue"))
+    }
+
+    @Test("a required @Settings property present in flight.yaml succeeds")
+    func requiredSettingsKeyPresentSucceeds() throws {
+        let result = try generate(
+            [
+                "AuthSettings.swift": """
+                import FlightCore
+                @Settings("auth")
+                struct AuthSettings: Sendable {
+                    var signingKey: String
+                }
+                """
+            ],
+            flightYAML: "auth:\n  signing-key: a-real-signing-key\n"
+        )
+        #expect(result.exitCode == 0)
+        #expect(result.diagnostics.isEmpty)
+    }
+
+    @Test("a @Settings property with its own default needs no flight.yaml entry at all")
+    func optionalSettingsKeyNeedsNoEntry() throws {
+        let result = try generate(
+            [
+                "AuthSettings.swift": """
+                import FlightCore
+                @Settings("auth")
+                struct AuthSettings: Sendable {
+                    var issuer: String = "myapp"
+                }
+                """
+            ]
+            // No flightYAML at all — packageDirectory still gets set (the
+            // workspace itself), so this also proves a missing flight.yaml
+            // file is "skip the check", not "every required-looking key
+            // fails".
+        )
+        #expect(result.exitCode == 0)
+        #expect(result.diagnostics.isEmpty)
+    }
+
+    @Test("a @Settings property overridden with an explicit @ConfigValue key is checked under that key")
+    func settingsExplicitKeyOverrideIsChecked() throws {
+        let result = try generate(
+            [
+                "AuthSettings.swift": """
+                import FlightCore
+                @Settings("auth")
+                struct AuthSettings: Sendable {
+                    @ConfigValue("legacy.audience") let audience: String
+                }
+                """
+            ],
+            flightYAML: "auth:\n  audience: not-the-right-key\n"
+        )
+        #expect(result.exitCode != 0)
+        #expect(result.diagnostics.contains("legacy.audience"))
+        // The derived key must not also be checked — only the explicit one.
+        #expect(!result.diagnostics.contains("auth.audience"))
     }
 
     // MARK: - Existential bridge synthesis

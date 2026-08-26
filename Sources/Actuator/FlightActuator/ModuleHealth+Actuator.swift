@@ -48,13 +48,14 @@ extension Lifetime {
 }
 
 extension Stereotype {
-    /// "component" | "service" | "repository" | "controller".
+    /// "component" | "service" | "repository" | "controller" | "settings".
     public var actuatorLabel: String {
         switch self {
         case .component: return "component"
         case .service: return "service"
         case .repository: return "repository"
         case .controller: return "controller"
+        case .settings: return "settings"
         }
     }
 
@@ -66,6 +67,7 @@ extension Stereotype {
         case .service: return "Services"
         case .repository: return "Repositories"
         case .controller: return "Controllers"
+        case .settings: return "Settings"
         }
     }
 

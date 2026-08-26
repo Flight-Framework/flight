@@ -62,6 +62,60 @@ struct ConfigDecodableTests {
         // Stricter validity requirements belong to the consumer of the value.
     }
 
+    @Test("Duration requires a unit and rejects bare numbers")
+    func durationRequiresUnit() {
+        // A bare "30" reads as thirty of *something*; every framework that
+        // guesses (usually seconds) has produced the incident where a
+        // timeout meant to be 30s was configured as 30 and silently applied
+        // as thirty milliseconds. One keystroke removes the ambiguity.
+        #expect(Duration(configValue: "30") == nil)
+        #expect(Duration(configValue: "") == nil)
+        #expect(Duration(configValue: "abc") == nil)
+    }
+
+    @Test("Duration parses every supported unit")
+    func durationUnits() {
+        #expect(Duration(configValue: "500ns") == .nanoseconds(500))
+        #expect(Duration(configValue: "500us") == .microseconds(500))
+        #expect(Duration(configValue: "500ms") == .milliseconds(500))
+        #expect(Duration(configValue: "30s") == .seconds(30))
+        #expect(Duration(configValue: "5m") == .seconds(300))
+        #expect(Duration(configValue: "12h") == .seconds(12 * 3_600))
+        #expect(Duration(configValue: "2d") == .seconds(2 * 86_400))
+    }
+
+    @Test("Duration accepts fractional magnitudes")
+    func durationFractional() {
+        #expect(Duration(configValue: "1.5s") == .seconds(1.5))
+        #expect(Duration(configValue: "0.5d") == .seconds(43_200))
+    }
+
+    @Test("Duration is case-insensitive on the unit and tolerates whitespace")
+    func durationCaseAndWhitespace() {
+        #expect(Duration(configValue: "5S") == .seconds(5))
+        #expect(Duration(configValue: "5MS") == .milliseconds(5))
+        #expect(Duration(configValue: " 5s ") == .seconds(5))
+        #expect(Duration(configValue: "5 s") == .seconds(5))
+    }
+
+    @Test("Duration rejects negative magnitudes and unknown units")
+    func durationRejectsNonsense() {
+        #expect(Duration(configValue: "-5s") == nil)
+        #expect(Duration(configValue: "5x") == nil)
+        #expect(Duration(configValue: "5") == nil)
+        #expect(Duration(configValue: "s5") == nil)
+        #expect(Duration(configValue: "5.5.5s") == nil)
+    }
+
+    @Test("Duration plugs into Configuration.get like any other ConfigDecodable")
+    func durationThroughConfiguration() throws {
+        let config = Configuration(values: ["job.timeout": "30s", "job.bad": "thirty seconds"])
+        #expect(try config.get("job.timeout", as: Duration.self) == .seconds(30))
+        #expect(throws: ConfigError.self) {
+            try config.get("job.bad", as: Duration.self)
+        }
+    }
+
     @Test("custom conformances plug into Configuration.get")
     func customConformance() throws {
         enum LogLevel: String, ConfigDecodable {

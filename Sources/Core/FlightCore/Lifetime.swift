@@ -63,6 +63,12 @@ public enum Stereotype: Sendable, Equatable {
     /// carries route metadata meaningless outside HTTP dispatch); the case
     /// lives here so the introspection vocabulary stays Web-free.
     case controller
+    /// A `@Settings` type — configuration bound to a typed value at
+    /// bootstrap, once, validated. Actuator lists these separately from
+    /// ordinary components: "what is this app's configuration, as resolved"
+    /// is a different question from "what is this app made of", and deserves
+    /// its own answer.
+    case settings
 }
 
 /// Introspection metadata. Captured explicitly at registration time —

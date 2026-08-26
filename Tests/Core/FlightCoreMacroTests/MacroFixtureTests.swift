@@ -43,6 +43,10 @@ private let testMacros: [String: MacroSpec] = [
     "Autowired": MacroSpec(type: AutowiredMacro.self),
     "ConfigValue": MacroSpec(type: ConfigValueMacro.self),
     "Transactional": MacroSpec(type: TransactionalMacro.self),
+    "Settings": MacroSpec(
+        type: SettingsMacro.self,
+        conformances: ["FlightCore._FlightRegistrable", "CustomStringConvertible"]),
+    "Secret": MacroSpec(type: SecretMacro.self),
 ]
 
 @Suite("macro fixture tests")
