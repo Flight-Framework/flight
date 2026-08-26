@@ -124,6 +124,15 @@ whole application without binding a port.
 - ``AssetMountOptions``
 - ``AssetMountRegistration``
 
+### Request bodies
+
+- ``RequestBodyStream``
+- ``BodyStreamLimitError``
+- ``MultipartReader``
+- ``MultipartPart``
+- ``MultipartLimits``
+- ``MultipartError``
+
 ### Serving sized content
 
 - ``serveContent(for:_:)``

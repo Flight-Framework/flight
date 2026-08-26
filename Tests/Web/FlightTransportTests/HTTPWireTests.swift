@@ -155,6 +155,71 @@ struct HTTPWireTests {
         }
     }
 
+    @Test func streamingRouteBeatsTheGlobalCap() async throws {
+        // Global cap 64 bytes; the streaming route's own cap is 100k. A
+        // 5000-byte body must flow — the per-route override is the entire
+        // point — while the buffered /echo route stays capped at 64.
+        try await withRunningServer(maxRequestBodyBytes: 64) { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                let body = String(repeating: "x", count: 5_000)
+                try await session.send(
+                    "POST /upload-stream HTTP/1.1\r\nHost: localhost\r\n"
+                        + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
+                        + body)
+                let response = try await session.readToEnd()
+                #expect(response.hasPrefix("HTTP/1.1 200 OK\r\n"))
+                #expect(response.contains("received:5000"))
+            }
+            try await RawSocketClient.withConnection(port: port) { session in
+                let body = String(repeating: "x", count: 200)
+                try await session.send(
+                    "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"
+                        + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
+                        + body)
+                let response = try await session.readToEnd()
+                #expect(
+                    response.hasPrefix("HTTP/1.1 413 "),
+                    "the buffered route must still honor the global cap")
+            }
+        }
+    }
+
+    @Test func streamingBodyOverItsOwnCapIs413() async throws {
+        try await withRunningServer(maxRequestBodyBytes: 64) { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                // 200k against the route's 100k cap.
+                let body = String(repeating: "y", count: 200_000)
+                try await session.send(
+                    "POST /upload-stream HTTP/1.1\r\nHost: localhost\r\n"
+                        + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
+                        + body)
+                let response = try await session.readToEnd()
+                #expect(response.hasPrefix("HTTP/1.1 413 "))
+            }
+        }
+    }
+
+    @Test func impatientStreamingHandlerKeepsTheConnectionServiceable() async throws {
+        try await withRunningServer { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                let body = String(repeating: "z", count: 2_000)
+                try await session.send(
+                    "POST /upload-impatient HTTP/1.1\r\nHost: localhost\r\n"
+                        + "Content-Length: \(body.utf8.count)\r\n\r\n"
+                        + body)
+                let first = try await session.readUntil("impatient")
+                #expect(first.contains("HTTP/1.1 200 OK"))
+
+                // Same connection: the unread body remainder must not
+                // poison the next request.
+                try await session.send(
+                    "GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                let second = try await session.readToEnd()
+                #expect(second.contains("hello"))
+            }
+        }
+    }
+
     @Test func sseStreamsChunkedEvents() async throws {
         try await withRunningServer { port in
             try await RawSocketClient.withConnection(port: port) { session in

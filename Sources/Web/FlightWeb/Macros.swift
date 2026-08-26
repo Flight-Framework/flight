@@ -96,25 +96,31 @@ public macro Middleware() =
 //
 // The path must be a string literal — the route table is compile-time
 // information (§4); a computed path is a build error at the site.
+//
+// `maxBodyBytes` overrides the transport's global request-body cap for
+// this one route — the knob that lets an upload route accept gigabytes
+// without arguing for a gigabyte global cap. On a route whose handler
+// takes `body: RequestBodyStream` it caps the cumulative stream instead,
+// enforced as bytes arrive.
 
 @attached(peer)
-public macro GetMapping(_ path: String) =
+public macro GetMapping(_ path: String, maxBodyBytes: Int? = nil) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
 
 @attached(peer)
-public macro PostMapping(_ path: String) =
+public macro PostMapping(_ path: String, maxBodyBytes: Int? = nil) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
 
 @attached(peer)
-public macro PutMapping(_ path: String) =
+public macro PutMapping(_ path: String, maxBodyBytes: Int? = nil) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
 
 @attached(peer)
-public macro PatchMapping(_ path: String) =
+public macro PatchMapping(_ path: String, maxBodyBytes: Int? = nil) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
 
 @attached(peer)
-public macro DeleteMapping(_ path: String) =
+public macro DeleteMapping(_ path: String, maxBodyBytes: Int? = nil) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
 
 /// A WebSocket upgrade route (§6.1). The method must return a

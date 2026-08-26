@@ -28,12 +28,22 @@ public struct Dispatch: Sendable {
     /// unauthenticated client can trigger by attaching upgrade headers.
     public let acceptsUpgrade: @Sendable (Request) -> Bool
 
+    /// How the matched route wants its body delivered — the transport asks
+    /// before reading any of it, the same shape as `acceptsUpgrade`. A
+    /// route the table does not know answers `.buffered(maxBytes: nil)`;
+    /// its 404 needs no body at all.
+    public let bodyMode: @Sendable (Request) -> RouteRegistration.BodyMode
+
     public init(
         respond: @escaping @Sendable (Request) async -> Response,
-        acceptsUpgrade: @escaping @Sendable (Request) -> Bool
+        acceptsUpgrade: @escaping @Sendable (Request) -> Bool,
+        bodyMode: @escaping @Sendable (Request) -> RouteRegistration.BodyMode = { _ in
+            .buffered(maxBytes: nil)
+        }
     ) {
         self.respond = respond
         self.acceptsUpgrade = acceptsUpgrade
+        self.bodyMode = bodyMode
     }
 
     /// Keeps `await dispatch(request)` reading as a call.
@@ -206,6 +216,13 @@ public enum DispatchBuilder {
         return makeDispatch(
             pipeline: respond,
             acceptsUpgrade: { router.acceptsUpgrade(method: $0.method, path: $0.path) },
+            bodyMode: { request in
+                guard
+                    case .matched(let match) = router.route(
+                        method: request.method, path: request.path)
+                else { return .buffered(maxBytes: nil) }
+                return match.route.bodyMode
+            },
             container: container,
             logger: logger)
     }
@@ -238,6 +255,9 @@ public enum DispatchBuilder {
     public static func makeDispatch(
         pipeline: @escaping Next,
         acceptsUpgrade: @escaping @Sendable (Request) -> Bool = { _ in false },
+        bodyMode: @escaping @Sendable (Request) -> RouteRegistration.BodyMode = { _ in
+            .buffered(maxBytes: nil)
+        },
         container: Container,
         logger: Logger
     ) -> Dispatch {
@@ -295,7 +315,7 @@ public enum DispatchBuilder {
                 return response.settingHeader(.xRequestID, requestID)
             }
         }
-        return Dispatch(respond: respond, acceptsUpgrade: acceptsUpgrade)
+        return Dispatch(respond: respond, acceptsUpgrade: acceptsUpgrade, bodyMode: bodyMode)
     }
 }
 

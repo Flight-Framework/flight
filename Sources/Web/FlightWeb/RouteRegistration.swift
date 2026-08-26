@@ -43,6 +43,21 @@ public struct RouteRegistration: Sendable {
     /// nobody declared fails when dispatch is built — bootstrap, not the
     /// first request.
     public let pipelines: [String]
+
+    /// How the transport delivers this route's body — asked from the route
+    /// table before any bytes are read, exactly like `acceptsUpgrade`.
+    public enum BodyMode: Sendable, Equatable {
+        /// Collected whole before dispatch (the default). `maxBytes` nil
+        /// means the transport's global cap.
+        case buffered(maxBytes: Int?)
+        /// Delivered live via ``RequestBodyStream`` — what a handler with a
+        /// `body: RequestBodyStream` parameter gets, recorded here by the
+        /// macro. `maxBytes` caps the cumulative stream (nil: the global
+        /// cap), enforced by the transport as bytes arrive.
+        case streaming(maxBytes: Int?)
+    }
+    public let bodyMode: BodyMode
+
     /// The fully-encoded handler thunk: body decoding and return-value
     /// encoding already applied by the macro expansion.
     public let handler: @Sendable (RequestContext) async throws -> Response
@@ -53,6 +68,7 @@ public struct RouteRegistration: Sendable {
         kind: Kind = .http,
         source: String = "<direct>",
         pipelines: [String] = [MiddlewareRegistration.defaultLane],
+        bodyMode: BodyMode = .buffered(maxBytes: nil),
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
         self.method = method
@@ -60,6 +76,7 @@ public struct RouteRegistration: Sendable {
         self.kind = kind
         self.source = source
         self.pipelines = pipelines
+        self.bodyMode = bodyMode
         self.handler = handler
     }
 }
@@ -141,11 +158,12 @@ extension Container {
         kind: RouteRegistration.Kind = .http,
         source: String = "<direct>",
         pipelines: [String] = [MiddlewareRegistration.defaultLane],
+        bodyMode: RouteRegistration.BodyMode = .buffered(maxBytes: nil),
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
         let registration = RouteRegistration(
             method: method, path: path, kind: kind, source: source, pipelines: pipelines,
-            handler: handler
+            bodyMode: bodyMode, handler: handler
         )
         register(
             RouteRegistration.self,

@@ -52,6 +52,25 @@ struct WireController {
             ))
     }
 
+    /// Streaming-bodied: the transport must hand chunks through live, and
+    /// this route's cap (far above the wire tests' tiny global cap) must be
+    /// the one that governs.
+    @PostMapping("/upload-stream", maxBodyBytes: 100_000)
+    func uploadStream(_ context: RequestContext, body: RequestBodyStream) async throws -> String {
+        var total = 0
+        for try await chunk in body.chunks { total += chunk.count }
+        return "received:\(total)"
+    }
+
+    /// Reads one chunk and returns — the transport must still keep the
+    /// connection serviceable for the next request.
+    @PostMapping("/upload-impatient", maxBodyBytes: 100_000)
+    func uploadImpatient(_ context: RequestContext, body: RequestBodyStream) async throws -> String {
+        var iterator = body.chunks.makeAsyncIterator()
+        _ = try await iterator.next()
+        return "impatient"
+    }
+
     @WebSocketMapping("/ws/:room")
     func socket(_ context: RequestContext) -> any WebSocketUpgradeHandler {
         WireEchoHandler(room: context.pathParam("room") ?? "?")

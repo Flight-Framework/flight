@@ -5,14 +5,17 @@ import HTTPTypes
 /// HTTPTypes plus a fully buffered body. Transports produce these at the
 /// byte boundary; nothing downstream re-parses raw HTTP.
 ///
-/// The body is buffered, not streamed — request-body streaming is a
-/// deliberate v1 non-feature (the transport enforces a size cap and rejects
-/// oversized bodies with 413 before dispatch ever runs).
+/// The body is buffered by default (the transport enforces a size cap and
+/// rejects oversized bodies with 413 before dispatch ever runs); a route
+/// that takes `body: RequestBodyStream` opts into streaming delivery, and
+/// its bytes arrive via ``bodyStream`` instead.
 public struct Request: Sendable {
     /// Method, target, and header fields — HTTPTypes' representation (§5).
     public var head: HTTPRequest
-    /// The complete request body. Empty for bodyless requests.
+    /// The complete request body. Empty for bodyless requests — and empty
+    /// for streaming-bodied routes, whose bytes arrive via ``bodyStream``.
     public var body: Data
+    var _bodyStream: BodyStreamBox?
 
     public init(head: HTTPRequest, body: Data = Data()) {
         self.head = head

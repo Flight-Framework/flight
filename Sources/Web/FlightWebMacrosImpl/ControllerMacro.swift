@@ -146,7 +146,15 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         lines.append("container.register(FlightWeb.RouteRegistration.self, qualifier: \"\(route.kind.httpMethod) \(path) @\" + String(reflecting: Self.self) + \".\(route.methodName)\", scope: .singleton) { c in")
         lines.append("    let controller = try c.resolve(Self.self)")
         let pipelinesClause = pipelines.map { ", pipelines: \($0)" } ?? ""
-    lines.append("    return FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\"\(pipelinesClause)) { context in")
+    let bodyModeClause: String
+    if route.isStreamingBody {
+        bodyModeClause = ", bodyMode: .streaming(maxBytes: \(route.maxBodyBytesText ?? "nil"))"
+    } else if let maxBytes = route.maxBodyBytesText {
+        bodyModeClause = ", bodyMode: .buffered(maxBytes: \(maxBytes))"
+    } else {
+        bodyModeClause = ""
+    }
+    lines.append("    return FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\"\(pipelinesClause)\(bodyModeClause)) { context in")
         for line in handlerLines {
             lines.append("        \(line)")
         }

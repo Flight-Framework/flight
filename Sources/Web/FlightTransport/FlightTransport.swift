@@ -156,8 +156,19 @@ public struct FlightTransport: ServerTransport {
         }
 
         let response: FlightWeb.Response
+        // The route table decides how this body is delivered — asked before
+        // any of it is read, the same shape as the upgrade check.
+        switch dispatch.bodyMode(Request(head: request.head)) {
+        case .streaming(let routeCap):
+            response = await Self.dispatchStreaming(
+                request: request,
+                dispatch: dispatch,
+                byteCap: routeCap ?? configuration.maxRequestBodyBytes)
+            break
+        case .buffered(let routeCap):
         do {
-            var collected = try await request.body.collect(upTo: configuration.maxRequestBodyBytes)
+            var collected = try await request.body.collect(
+                upTo: routeCap ?? configuration.maxRequestBodyBytes)
             let body = collected.readData(length: collected.readableBytes) ?? Data()
             response = await dispatch(Request(head: request.head, body: body))
         } catch is NIOTooManyBytesError {
@@ -175,6 +186,7 @@ public struct FlightTransport: ServerTransport {
                 body: .init(byteBuffer: ByteBuffer(bytes: problem.bodyData ?? Data()))
             )
             return
+        }
         }
 
         switch response {
@@ -274,6 +286,52 @@ public struct FlightTransport: ServerTransport {
     /// protocol work — masking, fragmentation reassembly, ping auto-reply,
     /// UTF-8 validation, the close handshake — is HummingbirdCore's (§6.1:
     /// "leaving frame-level protocol handling to the transport").
+    /// Streams the request body through to the handler as it arrives —
+    /// nothing buffered, the cumulative cap enforced per chunk. The
+    /// handler's `for try await` over the stream throws
+    /// `BodyStreamLimitError` (→413) on an over-cap body and the client's
+    /// disconnect error on an aborted one; either way the promise the
+    /// buffered path makes — a partial body never looks complete — holds.
+    static func dispatchStreaming(
+        request: HummingbirdCore.Request,
+        dispatch: Dispatch,
+        byteCap: Int
+    ) async -> FlightWeb.Response {
+        let contentLength = request.headers[.contentLength].flatMap { Int64($0) }
+        let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+        var streamed = FlightWeb.Request(head: request.head)
+        streamed.bodyStream = RequestBodyStream(expectedBytes: contentLength, chunks: stream)
+
+        let feeder = Task {
+            var deliveredBytes = 0
+            do {
+                for try await buffer in request.body {
+                    var buffer = buffer
+                    let data = buffer.readData(length: buffer.readableBytes) ?? Data()
+                    deliveredBytes += data.count
+                    guard deliveredBytes <= byteCap else {
+                        throw BodyStreamLimitError(limit: byteCap)
+                    }
+                    if case .terminated = continuation.yield(data) {
+                        // The handler stopped listening (returned early);
+                        // stop reading — HummingbirdCore discards what the
+                        // responder leaves unread before the next request.
+                        return
+                    }
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        let response = await dispatch(streamed)
+        // Handler done: unblock the feeder if it is still mid-yield, and
+        // wait it out so the channel is quiet before the response writes.
+        continuation.finish()
+        await feeder.value
+        return response
+    }
+
     static func runUpgradedConnection(
         _ upgrade: WebSocketUpgrade,
         inbound: WebSocketInboundStream,

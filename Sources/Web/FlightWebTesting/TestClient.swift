@@ -115,6 +115,26 @@ public struct TestClient: Sendable {
 
 // MARK: - Response test accessors
 
+extension TestClient {
+    /// Executes a POST whose body arrives as a live chunk stream — the
+    /// in-process way to drive a `body: RequestBodyStream` route. Chunks
+    /// are delivered exactly as given, one yield each.
+    public func post(
+        _ path: String, headers: HTTPFields = [:], bodyChunks: [Data]
+    ) async -> Response {
+        var request = Request(method: .post, path: path, headers: headers)
+        let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+        for chunk in bodyChunks {
+            continuation.yield(chunk)
+        }
+        continuation.finish()
+        request.bodyStream = RequestBodyStream(
+            expectedBytes: Int64(bodyChunks.reduce(0) { $0 + $1.count }),
+            chunks: stream)
+        return await execute(request)
+    }
+}
+
 extension Response {
     /// Decodes a `.fixed` JSON body.
     public func decodeJSON<T: Decodable>(_ type: T.Type = T.self) throws -> T {

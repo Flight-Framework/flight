@@ -32,6 +32,14 @@ struct ScannedRoute {
     let methodName: String
     /// Has a second, `body:`-labeled parameter of this type.
     let bodyTypeText: String?
+    /// The `maxBodyBytes:` argument's source text, verbatim — nil means
+    /// the transport default.
+    let maxBodyBytesText: String?
+    /// A `body: RequestBodyStream` parameter — the route is
+    /// streaming-bodied and the transport must not buffer it.
+    var isStreamingBody: Bool {
+        bodyTypeText == "RequestBodyStream" || bodyTypeText == "FlightWeb.RequestBodyStream"
+    }
     let isAsync: Bool
     let isThrows: Bool
     /// nil ⇔ no return value (handler answers 204).
@@ -47,8 +55,8 @@ enum RouteScanning {
     static func mappingAttributes(
         of function: FunctionDeclSyntax,
         in context: some MacroExpansionContext
-    ) -> [(kind: MappingKind, path: String, attribute: AttributeSyntax)] {
-        var found: [(MappingKind, String, AttributeSyntax)] = []
+    ) -> [(kind: MappingKind, path: String, maxBodyBytes: String?, attribute: AttributeSyntax)] {
+        var found: [(MappingKind, String, String?, AttributeSyntax)] = []
         for element in function.attributes {
             guard let attribute = element.as(AttributeSyntax.self),
                   let name = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text,
@@ -62,9 +70,24 @@ enum RouteScanning {
                 )
                 continue
             }
-            found.append((kind, path, attribute))
+            found.append((kind, path, labeledArgumentText(of: attribute, named: "maxBodyBytes"), attribute))
         }
         return found
+    }
+
+    /// A labeled argument's source text, verbatim — re-embedded into the
+    /// generated registration the way `@Controller(pipelines:)` is, so
+    /// constants and expressions both work.
+    private static func labeledArgumentText(
+        of attribute: AttributeSyntax, named label: String
+    ) -> String? {
+        guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self) else {
+            return nil
+        }
+        for argument in arguments where argument.label?.text == label {
+            return argument.expression.trimmedDescription
+        }
+        return nil
     }
 
     /// The path argument's literal content, or nil for anything that is not
@@ -147,12 +170,13 @@ enum RouteScanning {
         let returnTypeText = function.signature.returnClause?.type.trimmedDescription
         let returnType = returnTypeText.flatMap { $0 == "Void" || $0 == "()" ? nil : $0 }
 
-        return mappings.map { kind, path, _ in
+        return mappings.map { kind, path, maxBodyBytes, _ in
             ScannedRoute(
                 kind: kind,
                 path: path,
                 methodName: name,
                 bodyTypeText: bodyTypeText,
+                maxBodyBytesText: maxBodyBytes,
                 isAsync: effects?.asyncSpecifier != nil,
                 isThrows: effects?.throwsClause != nil,
                 returnTypeText: returnType,
