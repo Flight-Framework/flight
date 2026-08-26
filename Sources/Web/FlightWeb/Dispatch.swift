@@ -66,7 +66,7 @@ public enum DispatchBuilder {
             logger.debug("route registered", metadata: [
                 "method": "\(route.method.rawValue)",
                 "path": "\(route.path)",
-                "kind": route.kind == .upgrade ? "upgrade" : "http",
+                "kind": route.kind.isUpgrade ? "upgrade" : "http",
                 "source": "\(route.source)",
             ])
         }

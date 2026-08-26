@@ -210,32 +210,59 @@ left has no consumer-facing API to document.
   bare row count.
 
 ### flight-web
-- **No HTTP/2 or HTTP/3.** I looked into this properly on 2026-08-25 and the
-  original entry — "HummingbirdCore supports HTTP/2 and the transport seam
-  would take it" — is **too optimistic**, so it is now a decision rather than
-  a task.
+- **No HTTP/2 or HTTP/3.** Re-investigated 2026-08-26, and the 08-25 entry
+  below needed a correction: it implied the constraint ran deeper than it
+  does. What is true on hummingbird 2.26.0 / hummingbird-websocket 2.7.0:
+  **HTTP/2 and WebSockets are mutually exclusive on one listener** —
+  `HTTPServerBuilder.http2Upgrade` has no WebSocket hook and
+  hummingbird-websocket has no RFC 8441 extended CONNECT. Channels are
+  WebSockets, so Flight ships HTTP/1.1.
 
-  The seam does take it: `ServerTransport` does not care. The problem is one
-  layer down. `FlightTransport` builds its server with
-  `HTTPServerBuilder.http1WebSocketUpgrade`, and Hummingbird's HTTP/2 entry
-  point is `HTTPServerBuilder.http2Upgrade(tlsConfiguration:configuration:)`,
-  which constructs a whole `HTTP2UpgradeChannel` from a responder. It takes
-  an `HTTP2ChannelConfiguration` and has **no WebSocket upgrade hook**, and
-  hummingbird-websocket 2.7.0 has no HTTP/2 integration at all — no RFC 8441
-  extended CONNECT.
+  The correction: **this is Hummingbird's wiring, not the protocol layer's
+  capability.** apple/swift-nio-http2 has had RFC 8441 since 1.33.0
+  (July 2024, PR #441) — `SETTINGS_ENABLE_CONNECT_PROTOCOL`, the 1→0
+  transition rule, `:protocol` pseudo-header validation with the RFC quoted
+  inline — and swift-nio-extras converts `:protocol` to swift-http-types'
+  `extendedConnectProtocol`. Its issue #92 ("Support extended CONNECT") is
+  open only because nobody closed it. Zero Swift server frameworks consume
+  the support; the parts are on the shelf, unassembled. Hummingbird's own
+  issue (hummingbird-websocket #99, 2025-03) is a maintainer "not possible
+  at the moment... I haven't looked into it in any detail", untouched since.
 
-  So on hummingbird 2.26.0 / hummingbird-websocket 2.7.0, **HTTP/2 and
-  WebSockets are mutually exclusive on one listener.** Channels — arguably
-  the framework's most distinctive feature — are WebSockets.
+  The landscape moved in mid-2026 and changes the calculus:
+  - The Swift **Networking Workgroup** (announced 2026-06) now has Apple,
+    Vapor, and Hummingbird converging on `swift-server/swift-http-server`
+    (0.1.0, 2026-07): one server with HTTP/1.1 + HTTP/2 + HTTP/3 behind a
+    `supportedHTTPVersions` config and an `HTTP3` package trait. Vapor has
+    publicly committed to it for H3. Its WebSocket story is in design
+    (issue #100) — extended CONNECT is being generalized from
+    CONNECT-UDP/datagrams first, WebSockets named as the follow-on.
+  - Apple shipped a **pure-Swift QUIC + HTTP/3 stack for Linux**
+    (swift-nio-quic / swift-nio-http3, 0.2.x). Not usable yet: prerelease,
+    all-SPI ("no support guarantees"), requires a beta swift-crypto env var,
+    no mTLS or keylog, and absent from the QUIC Interop Runner — four
+    independent not-ready signals. Terminate HTTP/3 at a proxy (Caddy/nginx)
+    until those clear; revisit in two quarters.
 
-  The options, none of which I should pick unattended:
-  1. HTTP/2 as an opt-in that disables WebSockets on that listener. Honest,
-     documented, and a footgun for anyone who enables it without reading.
-  2. Two listeners: HTTP/2 on one port, HTTP/1.1 + WebSockets on another.
-     Works today, complicates deployment and the actuator's self-report.
-  3. Wait for RFC 8441 support upstream, and ship HTTP/1.1 only until then.
+  The plan, decided 2026-08-26:
+  1. **0.4.0 generalized the upgrade seam** (`UpgradeResponse` is a
+     discriminated enum, `RouteRegistration.Kind.upgrade(UpgradeKind)`), so
+     an HTTP/2 transport serves every existing WebSocket handler unmodified
+     — RFC 6455 vs RFC 8441 differ only below `WebSocketConnection` — and
+     WebTransport lands later as an additive case, not an API break.
+  2. When transport work starts, it is a **second** transport behind
+     `ServerTransport` (the seam exists for exactly this), either adopting
+     swift-http-server early — the leaning, since that is where the
+     ecosystem is converging and Flight has the concrete WebSocket need to
+     push its design — or ~1,000 lines of direct NIO wiring over
+     NIOHTTP1/NIOHTTP2/NIOWebSocket, which would make Flight the first
+     Swift framework serving WebSockets over HTTP/2.
+  3. Prerequisite before investing: verify RFC 8441 *client* support in
+     practice (Safari and common intermediaries especially). If browsers
+     mostly fall back to HTTP/1.1, this drops in priority regardless.
 
-  *Medium once the choice is made; the choice is the hard part.*
+  *The seam work is done; the transport is a bounded project awaiting the
+  client-support check and the swift-http-server WebSocket design.*
 - No templating or SSR. *Deliberate; out of scope.*
 - No runtime route-registration API beyond the bootstrap escape hatch.
   *Deliberate.*

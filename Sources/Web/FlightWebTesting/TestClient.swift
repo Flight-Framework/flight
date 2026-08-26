@@ -94,14 +94,14 @@ public struct TestClient: Sendable {
         upgradeHeaders[.secWebSocketVersion] = "13"
 
         let response = await execute(Request(method: .get, path: path, headers: upgradeHeaders))
-        guard case .upgrade(let upgradeResponse) = response else {
+        guard case .upgrade(.webSocket(let upgrade)) = response else {
             throw TestClientError.notAnUpgrade(response.status)
         }
 
         let (serverEnd, client) = InMemoryWebSocket.makeConnectedPair()
         let serverTask = Task {
             do {
-                try await upgradeResponse.run(serverEnd)
+                try await upgrade.run(serverEnd)
             } catch {
                 // Handler failure closes the session; the test observes the
                 // stream ending rather than a server-side crash.

@@ -77,10 +77,15 @@ public struct FlightTransport: ServerTransport {
                 // The upgrade decision needs the *routed* answer, middleware
                 // included, so the pipeline runs for genuine upgrade routes.
                 switch await dispatch(request) {
-                case .upgrade(let upgradeResponse):
+                // This transport negotiated an RFC 6455 handshake, so only
+                // the WebSocket kind is servable here. When UpgradeResponse
+                // grows a case (WebTransport), this switch stops compiling —
+                // which is the seam working: the transport must decide, not
+                // silently mishandle a protocol it never heard of.
+                case .upgrade(.webSocket(let webSocketUpgrade)):
                     return .upgrade([:]) { inbound, outbound, _ in
                         try await Self.runUpgradedConnection(
-                            upgradeResponse,
+                            webSocketUpgrade,
                             inbound: inbound,
                             outbound: outbound,
                             maxMessageBytes: configuration.maxWebSocketFrameBytes
@@ -240,14 +245,14 @@ public struct FlightTransport: ServerTransport {
     /// UTF-8 validation, the close handshake — is HummingbirdCore's (§6.1:
     /// "leaving frame-level protocol handling to the transport").
     static func runUpgradedConnection(
-        _ upgradeResponse: UpgradeResponse,
+        _ upgrade: WebSocketUpgrade,
         inbound: WebSocketInboundStream,
         outbound: WebSocketOutboundWriter,
         maxMessageBytes: Int
     ) async throws {
         let (frames, continuation) = AsyncStream<FlightWeb.WebSocketFrame>.makeStream()
 
-        let connection = UpgradedConnection(
+        let connection = WebSocketConnection(
             frames: frames,
             send: { frame in
                 do {
@@ -300,7 +305,7 @@ public struct FlightTransport: ServerTransport {
             // Handler: owns the connection for its lifetime (§6.1). When it
             // returns, HummingbirdCore performs the close handshake.
             group.addTask {
-                try? await upgradeResponse.run(connection)
+                try? await upgrade.run(connection)
             }
 
             // Either side finishing ends the session: a returned handler has

@@ -8,7 +8,7 @@ modeled on Phoenix Channels, wire protocol Flight's own.
 
 It sits exactly between two things that already exist:
 
-- **Below:** Flight Web's `ConnectionUpgradeHandler` owns the raw WebSocket.
+- **Below:** Flight Web's `WebSocketUpgradeHandler` owns the raw WebSocket.
   Channels is one.
 - **Beside:** Flight PubSub does the fan-out. Channels routes and frames;
   PubSub delivers — on one node or twenty, invisibly.

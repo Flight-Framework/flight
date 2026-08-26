@@ -253,7 +253,7 @@ public struct Router: Sendable {
         guard case .matched(let match) = route(method: method, path: path) else {
             return false
         }
-        return match.route.kind == .upgrade
+        return match.route.kind.isUpgrade
     }
 
     // MARK: - Routing as the innermost responder

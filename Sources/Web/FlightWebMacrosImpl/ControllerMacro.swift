@@ -119,7 +119,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// precondition — the Router reports the conflict as a proper startup
     /// error naming both sources instead.
     private static func routeRegistrationLines(for route: ScannedRoute, path: String, controller: String) -> [String] {
-        let kind = route.kind.isUpgrade ? ".upgrade" : ".http"
+        let kind = route.kind.isUpgrade ? ".upgrade(.webSocket)" : ".http"
 
         var call = "controller.\(route.methodName)(context"
         if route.bodyTypeText != nil { call += ", body: body" }

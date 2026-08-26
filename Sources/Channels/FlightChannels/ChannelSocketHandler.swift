@@ -4,7 +4,7 @@ import FlightPubSub
 import FlightWeb
 import Logging
 
-/// Channels' `ConnectionUpgradeHandler`: owns one upgraded WebSocket
+/// Channels' `WebSocketUpgradeHandler`: owns one upgraded WebSocket
 /// for its lifetime — decoding frames, routing them through a
 /// `SocketSession` to per-topic `Channel`s, writing everything outbound
 /// through one serialized writer, and enforcing heartbeat liveness.
@@ -13,7 +13,7 @@ import Logging
 /// upgrade request, which is where per-connection identity (the principal,
 ///) enters. Constructed for you by `Container.registerChannelSocket`, or
 /// directly from a `@WebSocketMapping` method via `init(context:principal:)`.
-public struct ChannelSocketHandler: ConnectionUpgradeHandler {
+public struct ChannelSocketHandler: WebSocketUpgradeHandler {
     private let router: ChannelRouter
     private let pubsub: any PubSub
     private let configuration: ChannelsConfiguration
@@ -35,7 +35,7 @@ public struct ChannelSocketHandler: ConnectionUpgradeHandler {
     /// convenience for a hand-written `@WebSocketMapping` method:
     ///
     ///     @WebSocketMapping("/socket")
-    ///     func socket(_ context: RequestContext) throws -> any ConnectionUpgradeHandler {
+    ///     func socket(_ context: RequestContext) throws -> any WebSocketUpgradeHandler {
     ///         try ChannelSocketHandler(context: context, principal: myPrincipal(context))
     ///     }
     public init(context: RequestContext, principal: (any ChannelPrincipal)? = nil) throws {
@@ -47,7 +47,7 @@ public struct ChannelSocketHandler: ConnectionUpgradeHandler {
         )
     }
 
-    public func handle(upgraded connection: UpgradedConnection, context: RequestContext) async throws {
+    public func handle(upgraded connection: WebSocketConnection, context: RequestContext) async throws {
         // Bounded: an unbounded queue lets one client that stopped reading
         // grow without limit until the server runs out of memory.
         let (outbound, outboundContinuation) = AsyncStream<Envelope>.makeStream(

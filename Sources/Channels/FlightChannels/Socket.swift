@@ -5,7 +5,7 @@ import Synchronization
 
 /// One client's WebSocket connection: connection-level identity plus
 /// the write side of that connection. A socket may hold many channels; its
-/// lifetime is one `ConnectionUpgradeHandler` invocation, i.e. one request
+/// lifetime is one `WebSocketUpgradeHandler` invocation, i.e. one request
 /// `Scope` (Web, Core).
 ///
 /// All writes funnel through one per-socket outbound queue drained by a

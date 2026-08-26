@@ -105,8 +105,8 @@ public macro PatchMapping(_ path: String) =
 public macro DeleteMapping(_ path: String) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
 
-/// A connection-upgrade route (§6.1). The method must return a
-/// `ConnectionUpgradeHandler` (or `any ConnectionUpgradeHandler`); the build
+/// A WebSocket upgrade route (§6.1). The method must return a
+/// `WebSocketUpgradeHandler` (or `any WebSocketUpgradeHandler`); the build
 /// plugin emits a route-table entry exactly like any other, just tagged as
 /// an upgrade route. At dispatch time a matched upgrade route produces
 /// `Response.upgrade`; the active transport performs the HTTP 101 handshake

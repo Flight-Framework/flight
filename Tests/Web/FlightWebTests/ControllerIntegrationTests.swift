@@ -125,15 +125,15 @@ struct UserController {
 @Controller
 struct EchoSocketController {
     @WebSocketMapping("/echo/:room")
-    func echo(_ context: RequestContext) throws -> any ConnectionUpgradeHandler {
+    func echo(_ context: RequestContext) throws -> any WebSocketUpgradeHandler {
         EchoHandler(room: context.pathParam("room") ?? "?")
     }
 }
 
-struct EchoHandler: ConnectionUpgradeHandler {
+struct EchoHandler: WebSocketUpgradeHandler {
     let room: String
 
-    func handle(upgraded connection: UpgradedConnection, context: RequestContext) async throws {
+    func handle(upgraded connection: WebSocketConnection, context: RequestContext) async throws {
         try await connection.send("welcome to \(room)")
         for await frame in connection.frames {
             switch frame {

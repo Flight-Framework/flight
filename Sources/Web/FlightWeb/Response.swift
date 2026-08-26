@@ -121,14 +121,16 @@ extension Response {
 
     /// Built by the routing layer for `@WebSocketMapping` handlers; also
     /// callable directly from a plain handler that constructed its own
-    /// `ConnectionUpgradeHandler`.
+    /// `WebSocketUpgradeHandler`.
     public static func upgrade(
-        handler: any ConnectionUpgradeHandler,
+        handler: any WebSocketUpgradeHandler,
         context: RequestContext
     ) -> Response {
-        .upgrade(UpgradeResponse(handler: handler) { connection in
-            try await handler.handle(upgraded: connection, context: context)
-        })
+        .upgrade(
+            .webSocket(
+                WebSocketUpgrade(handler: handler) { connection in
+                    try await handler.handle(upgraded: connection, context: context)
+                }))
     }
 
     // MARK: - Accessors
@@ -175,18 +177,32 @@ extension Response {
     }
 }
 
-/// The `.upgrade` payload (§6.1). `run` is the router-built closure that
+/// The `.upgrade` payload (§6.1), discriminated by protocol kind.
+///
+/// An enum, deliberately, and the cases will grow: RFC 8441 makes "upgrade"
+/// a family (`websocket` today; WebTransport and `connect-udp` are the known
+/// next members), and the kinds do not share a connection shape a transport
+/// could serve generically — each needs its own wire handling. A new kind is
+/// a new case, and every transport *fails to compile* until it decides what
+/// to do with it. That is the point: a transport silently 500ing a protocol
+/// it never heard of would hide exactly the capability gap that should be a
+/// build error.
+public enum UpgradeResponse: Sendable {
+    case webSocket(WebSocketUpgrade)
+}
+
+/// The WebSocket kind's payload. `run` is the router-built closure that
 /// invokes the handler with the originating request's context; transports
 /// call it after the protocol switch and never see the context themselves.
-public struct UpgradeResponse: Sendable {
+public struct WebSocketUpgrade: Sendable {
     /// The handler, exposed for introspection and in-process test drivers.
-    public let handler: any ConnectionUpgradeHandler
+    public let handler: any WebSocketUpgradeHandler
     /// Takes ownership of the upgraded connection for its lifetime.
-    public let run: @Sendable (UpgradedConnection) async throws -> Void
+    public let run: @Sendable (WebSocketConnection) async throws -> Void
 
     public init(
-        handler: any ConnectionUpgradeHandler,
-        run: @escaping @Sendable (UpgradedConnection) async throws -> Void
+        handler: any WebSocketUpgradeHandler,
+        run: @escaping @Sendable (WebSocketConnection) async throws -> Void
     ) {
         self.handler = handler
         self.run = run

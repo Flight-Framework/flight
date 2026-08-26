@@ -2,7 +2,7 @@ import struct Foundation.URL
 
 /// The client-side transport seam: everything `ChannelClient` needs from a
 /// WebSocket, and nothing it doesn't. Mirrors the server's
-/// `UpgradedConnection` shape — closure-backed, so any transport (a NIO
+/// `WebSocketConnection` shape — closure-backed, so any transport (a NIO
 /// client, `URLSessionWebSocketTask`, an in-memory test pair) constructs one
 /// without this package knowing its internals.
 ///

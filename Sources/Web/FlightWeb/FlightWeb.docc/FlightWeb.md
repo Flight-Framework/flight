@@ -80,8 +80,8 @@ registerMiddleware(order: 10) { request, next in
 
 ## WebSockets and streaming
 
-``WebSocketMapping(_:)`` upgrades a route; the handler receives an
-``UpgradedConnection`` and owns it for the connection's lifetime.
+``WebSocketMapping(_:)`` upgrades a route; the handler receives a
+``WebSocketConnection`` and owns it for the connection's lifetime.
 ``ServerSentEvent`` and ``ServerSentEventWriter`` cover the one-directional
 case, which is usually what a dashboard actually needs.
 
@@ -148,9 +148,11 @@ whole application without binding a port.
 
 - ``ServerSentEvent``
 - ``ServerSentEventWriter``
-- ``UpgradedConnection``
+- ``WebSocketConnection``
 - ``UpgradeResponse``
-- ``ConnectionUpgradeHandler``
+- ``WebSocketUpgrade``
+- ``UpgradeKind``
+- ``WebSocketUpgradeHandler``
 - ``WebSocketFrame``
 - ``WebSocketCloseCode``
 - ``WebSocketError``

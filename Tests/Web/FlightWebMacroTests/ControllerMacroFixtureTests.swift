@@ -161,7 +161,7 @@ struct ControllerMacroFixtureTests {
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /chat/:roomId @" + String(reflecting: Self.self) + ".chat", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/chat/:roomId", kind: .upgrade, source: String(reflecting: Self.self) + ".chat") { context in
+                        return FlightWeb.RouteRegistration(method: "GET", path: "/chat/:roomId", kind: .upgrade(.webSocket), source: String(reflecting: Self.self) + ".chat") { context in
                             let upgradeHandler = try await controller.chat(context)
                             return FlightWeb.Response.upgrade(handler: upgradeHandler, context: context)
                         }

@@ -13,8 +13,20 @@ public struct RouteRegistration: Sendable {
         /// An ordinary request/response route.
         case http
         /// A connection-upgrade route (§6.1) — the handler must produce
-        /// `Response.upgrade`.
-        case upgrade
+        /// `Response.upgrade`. Carries *which* protocol the connection is
+        /// handed to, so the route table knows it statically — this is what
+        /// will let bootstrap refuse a route the active transport cannot
+        /// serve (a WebTransport route on an HTTP/1.1-only listener) at
+        /// freeze rather than as a runtime error on first use.
+        case upgrade(UpgradeKind)
+
+        /// Whether this is any upgrade kind — the question the router and
+        /// dispatch logging actually ask, which does not care about the
+        /// specific protocol.
+        public var isUpgrade: Bool {
+            if case .upgrade = self { return true }
+            return false
+        }
     }
 
     public let method: HTTPRequest.Method

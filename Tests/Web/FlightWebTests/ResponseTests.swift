@@ -92,8 +92,8 @@ struct ResponseTests {
     }
 
     @Test func upgradeStatusIs101() {
-        struct NoopHandler: ConnectionUpgradeHandler {
-            func handle(upgraded connection: UpgradedConnection, context: RequestContext) async throws {}
+        struct NoopHandler: WebSocketUpgradeHandler {
+            func handle(upgraded connection: WebSocketConnection, context: RequestContext) async throws {}
         }
         let response = Response.upgrade(handler: NoopHandler(), context: .mock())
         #expect(response.status == .switchingProtocols)

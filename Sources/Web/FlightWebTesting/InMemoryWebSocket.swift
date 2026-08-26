@@ -26,13 +26,13 @@ public final class InMemoryWebSocket: Sendable {
         self.fromServer = fromServer
     }
 
-    /// Builds a connected pair: the `UpgradedConnection` to hand to a
-    /// server-side `ConnectionUpgradeHandler`, and the client end.
-    public static func makeConnectedPair() -> (server: UpgradedConnection, client: InMemoryWebSocket) {
+    /// Builds a connected pair: the `WebSocketConnection` to hand to a
+    /// server-side `WebSocketUpgradeHandler`, and the client end.
+    public static func makeConnectedPair() -> (server: WebSocketConnection, client: InMemoryWebSocket) {
         let (clientInbound, fromServer) = AsyncStream<WebSocketFrame>.makeStream()
         let (serverInbound, toServer) = AsyncStream<WebSocketFrame>.makeStream()
 
-        let server = UpgradedConnection(
+        let server = WebSocketConnection(
             frames: serverInbound,
             send: { frame in
                 fromServer.yield(frame)

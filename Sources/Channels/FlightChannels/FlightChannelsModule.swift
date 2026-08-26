@@ -72,7 +72,7 @@ extension Container {
         source: String = "FlightChannels",
         authenticate: (@Sendable (RequestContext) async throws -> (any ChannelPrincipal)?)? = nil
     ) {
-        registerRoute(.get, path, kind: .upgrade, source: source) { context in
+        registerRoute(.get, path, kind: .upgrade(.webSocket), source: source) { context in
             let principal = try await authenticate?(context)
             let handler = try ChannelSocketHandler(context: context, principal: principal)
             return .upgrade(handler: handler, context: context)

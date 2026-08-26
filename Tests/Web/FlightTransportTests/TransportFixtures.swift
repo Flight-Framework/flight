@@ -38,7 +38,7 @@ struct WireController {
     }
 
     @WebSocketMapping("/ws/:room")
-    func socket(_ context: RequestContext) -> any ConnectionUpgradeHandler {
+    func socket(_ context: RequestContext) -> any WebSocketUpgradeHandler {
         WireEchoHandler(room: context.pathParam("room") ?? "?")
     }
 }
@@ -47,10 +47,10 @@ struct EchoBody: Codable, Equatable, ResponseEncodable {
     let name: String
 }
 
-struct WireEchoHandler: ConnectionUpgradeHandler {
+struct WireEchoHandler: WebSocketUpgradeHandler {
     let room: String
 
-    func handle(upgraded connection: UpgradedConnection, context: RequestContext) async throws {
+    func handle(upgraded connection: WebSocketConnection, context: RequestContext) async throws {
         try await connection.send("joined \(room)")
         for await frame in connection.frames {
             switch frame {

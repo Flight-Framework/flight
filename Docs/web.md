@@ -23,7 +23,7 @@ plugin path nothing in the test suite covers.
 
 | Product | Contents |
 |---|---|
-| `FlightWeb` | `RequestContext`, `Request`/`Response`, middleware pipeline, `Router`, `@Controller`/`@GetMapping`/…/`@WebSocketMapping` macros, `ResponseEncodable`, SSE helpers, `ConnectionUpgradeHandler`/`UpgradedConnection`, `ServerTransport` protocol, `FlightWebModule` |
+| `FlightWeb` | `RequestContext`, `Request`/`Response`, middleware pipeline, `Router`, `@Controller`/`@GetMapping`/…/`@WebSocketMapping` macros, `ResponseEncodable`, SSE helpers, `WebSocketUpgradeHandler`/`WebSocketConnection`, `ServerTransport` protocol, `FlightWebModule` |
 | `FlightTransport` | The default transport (§5.2): wraps **HummingbirdCore** — a mature, versioned low-level HTTP transport — for HTTP/1.1 (keep-alive, pipelining, 100-continue), streaming bodies, and WebSocket protocol handling. The only target in all of Flight that knows what it wraps (§5.6) |
 | `FlightWebTesting` | `TestContainer`, `RequestContext.mock`, `TestClient` (in-process dispatch + in-process WebSocket), `InMemoryTransport` (§5.4's socket-free transport) |
 
@@ -52,7 +52,7 @@ struct UserController {
     }
 
     @WebSocketMapping("/chat/:roomId")               // §6.1 — same route table
-    func chat(_ context: RequestContext) throws -> any ConnectionUpgradeHandler {
+    func chat(_ context: RequestContext) throws -> any WebSocketUpgradeHandler {
         ChatRoomHandler(roomId: context.pathParam("roomId")!)
     }
 
@@ -274,7 +274,7 @@ Recorded here the way Core records its spec deviations in SPIKE-FINDINGS:
 7. **WebSocket ping/pong frames are transport-internal on the default
    transport.** HummingbirdCore auto-answers pings and does not surface
    them, so `WebSocketFrame.ping`/`.pong` are never *delivered* through
-   `UpgradedConnection.frames` there (sending them works). A synthesized
+   `WebSocketConnection.frames` there (sending them works). A synthesized
    `.close` frame precedes the stream finishing, so handlers behave
    identically on the in-memory transport and the wire.
 8. **A refused WebSocket handshake answers 400 + connection close on the
