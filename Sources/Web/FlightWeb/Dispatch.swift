@@ -143,6 +143,17 @@ public enum DispatchBuilder {
             }
             mountResponders.append(
                 (mount, compose(chain, around: { context in await mount.respond(to: context) })))
+            // A mount whose root does not exist serves nothing but 404s —
+            // legal (the interface may not be built yet), but the person
+            // staring at those 404s deserves one line saying why.
+            var isDirectory: ObjCBool = false
+            if !FileManager.default.fileExists(atPath: mount.root, isDirectory: &isDirectory)
+                || !isDirectory.boolValue
+            {
+                logger.warning(
+                    "asset mount root does not exist — every request under \(mount.prefix) will 404 until it does",
+                    metadata: ["root": "\(mount.root)"])
+            }
             logger.debug("asset mount registered", metadata: [
                 "prefix": "\(mount.prefix)",
                 "root": "\(mount.root)",
