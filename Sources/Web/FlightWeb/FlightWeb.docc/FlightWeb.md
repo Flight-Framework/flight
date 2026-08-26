@@ -124,6 +124,14 @@ whole application without binding a port.
 - ``AssetMountOptions``
 - ``AssetMountRegistration``
 
+### Resumable uploads
+
+- ``UploadStore``
+- ``UploadInfo``
+- ``DiskUploadStore``
+- ``UploadMountOptions``
+- ``ResumableUploadError``
+
 ### Request bodies
 
 - ``RequestBodyStream``

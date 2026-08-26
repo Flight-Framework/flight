@@ -286,50 +286,28 @@ public struct FlightTransport: ServerTransport {
     /// protocol work — masking, fragmentation reassembly, ping auto-reply,
     /// UTF-8 validation, the close handshake — is HummingbirdCore's (§6.1:
     /// "leaving frame-level protocol handling to the transport").
-    /// Streams the request body through to the handler as it arrives —
-    /// nothing buffered, the cumulative cap enforced per chunk. The
-    /// handler's `for try await` over the stream throws
-    /// `BodyStreamLimitError` (→413) on an over-cap body and the client's
-    /// disconnect error on an aborted one; either way the promise the
-    /// buffered path makes — a partial body never looks complete — holds.
+    /// Streams the request body through to the handler as it arrives.
+    ///
+    /// **Pull-based on purpose.** The obvious shape — a task feeding an
+    /// `AsyncThrowingStream` — is wrong here, because that stream's buffer
+    /// is *unbounded*: the feeder would race ahead reading a multi-gigabyte
+    /// upload entirely into memory while the API claimed to stream it,
+    /// which is precisely the property streaming exists to provide. Pulling
+    /// one chunk per consumer demand instead makes backpressure flow from
+    /// the handler through to the socket, so a slow handler slows the
+    /// client rather than filling the server's RAM.
     static func dispatchStreaming(
         request: HummingbirdCore.Request,
         dispatch: Dispatch,
         byteCap: Int
     ) async -> FlightWeb.Response {
         let contentLength = request.headers[.contentLength].flatMap { Int64($0) }
-        let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+        let puller = BodyPuller(request.body, byteCap: byteCap)
         var streamed = FlightWeb.Request(head: request.head)
-        streamed.bodyStream = RequestBodyStream(expectedBytes: contentLength, chunks: stream)
-
-        let feeder = Task {
-            var deliveredBytes = 0
-            do {
-                for try await buffer in request.body {
-                    var buffer = buffer
-                    let data = buffer.readData(length: buffer.readableBytes) ?? Data()
-                    deliveredBytes += data.count
-                    guard deliveredBytes <= byteCap else {
-                        throw BodyStreamLimitError(limit: byteCap)
-                    }
-                    if case .terminated = continuation.yield(data) {
-                        // The handler stopped listening (returned early);
-                        // stop reading — HummingbirdCore discards what the
-                        // responder leaves unread before the next request.
-                        return
-                    }
-                }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-        }
-        let response = await dispatch(streamed)
-        // Handler done: unblock the feeder if it is still mid-yield, and
-        // wait it out so the channel is quiet before the response writes.
-        continuation.finish()
-        await feeder.value
-        return response
+        streamed.bodyStream = RequestBodyStream(
+            expectedBytes: contentLength,
+            chunks: AsyncThrowingStream { try await puller.next() })
+        return await dispatch(streamed)
     }
 
     static func runUpgradedConnection(
@@ -404,4 +382,31 @@ public struct FlightTransport: ServerTransport {
         }
     }
 
+}
+
+
+/// One chunk of the request body per consumer demand, with the route's
+/// cumulative cap enforced as bytes pass. Holds the transport's body
+/// iterator outside any actor because `next()` is mutating and async;
+/// access is serialized by ``RequestBodyStream``'s single-consumer
+/// contract, which is what the `@unchecked` attests.
+final class BodyPuller: @unchecked Sendable {
+    private var iterator: HummingbirdCore.RequestBody.AsyncIterator
+    private let byteCap: Int
+    private var delivered = 0
+
+    init(_ body: HummingbirdCore.RequestBody, byteCap: Int) {
+        self.iterator = body.makeAsyncIterator()
+        self.byteCap = byteCap
+    }
+
+    func next() async throws -> Data? {
+        guard var buffer = try await iterator.next() else { return nil }
+        let data = buffer.readData(length: buffer.readableBytes) ?? Data()
+        delivered += data.count
+        guard delivered <= byteCap else {
+            throw BodyStreamLimitError(limit: byteCap)
+        }
+        return data
+    }
 }

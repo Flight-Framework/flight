@@ -210,6 +210,22 @@ left has no consumer-facing API to document.
   bare row count.
 
 ### flight-web
+- **No connection idle/read timeout — a half-open connection is held
+  indefinitely.** Found on 2026-08-26 while building the resumable-upload
+  acceptance test: a client that sends request headers with a large
+  `Content-Length` and then stops (or vanishes without a FIN) keeps its
+  connection and its server-side request alive for **~4 minutes** in
+  testing, and `HummingbirdCore.ServerConfiguration` exposes no knob for
+  it at all — its initializer takes only address, serverName, backlog,
+  reuseAddress, and an availableConnectionsDelegate. That is
+  slowloris-adjacent: cheap for a client, expensive for the server, and
+  currently unconfigurable from Flight. It also means a resumable upload
+  interrupted *mid-request* (rather than between chunk requests) holds its
+  per-upload lock until that timeout expires, so a client resuming sooner
+  gets 423 rather than a fresh offset — correct, but slower to recover
+  than it should be. Another concrete argument for the second transport
+  discussed above; a NIO-native or swift-http-server transport would make
+  this a configuration line.
 - **No HTTP/2 or HTTP/3.** Re-investigated 2026-08-26, and the 08-25 entry
   below needed a correction: it implied the constraint ran deeper than it
   does. What is true on hummingbird 2.26.0 / hummingbird-websocket 2.7.0:

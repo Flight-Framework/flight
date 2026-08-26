@@ -26,6 +26,11 @@ final class RawSocketClient {
             try await outbound.write(ByteBuffer(string: text))
         }
 
+        /// Raw bytes — request bodies that are not text.
+        func sendBytes(_ data: Data) async throws {
+            try await outbound.write(ByteBuffer(bytes: data))
+        }
+
         /// Accumulates inbound bytes until `marker` appears (returning
         /// everything read so far) or the connection closes.
         @discardableResult

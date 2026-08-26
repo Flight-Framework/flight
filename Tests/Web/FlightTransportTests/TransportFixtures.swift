@@ -109,8 +109,17 @@ enum WireSideEffect {
 }
 
 struct WireModule: FlightModule {
+    /// The uploads mount's store, when a test wants one over the wire.
+    /// Set before the server boots; nil leaves the mount unregistered.
+    static let uploadStore = Mutex<DiskUploadStore?>(nil)
+
     func configure(_ container: Container) throws {
         try WireController._flightRegister(container)
+        if let store = Self.uploadStore.withLock({ $0 }) {
+            container.uploads(at: "/uploads", store: store) { options in
+                options.maxSize = 64 << 20
+            }
+        }
     }
 }
 
