@@ -132,6 +132,10 @@ whole application without binding a port.
 - ``UploadMountOptions``
 - ``ResumableUploadError``
 
+### Cookies
+
+- ``Cookie``
+
 ### Request bodies
 
 - ``RequestBodyStream``
