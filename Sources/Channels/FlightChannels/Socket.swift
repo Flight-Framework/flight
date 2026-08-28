@@ -26,7 +26,7 @@ public final class Socket: Sendable, Identifiable {
     /// Web's dispatch).
     public let logger: Logger
 
-    private let outbound: AsyncStream<Envelope>.Continuation
+    private let outbound: AsyncStream<String>.Continuation
     private let droppedEnvelopes = Atomic<Int64>(0)
 
     /// Topic-membership observation state (the framework seam below). All
@@ -44,7 +44,7 @@ public final class Socket: Sendable, Identifiable {
     internal init(
         principal: (any ChannelPrincipal)?,
         logger: Logger,
-        outbound: AsyncStream<Envelope>.Continuation
+        outbound: AsyncStream<String>.Continuation
     ) {
         self.id = UUID().uuidString
         self.principal = principal
@@ -148,7 +148,12 @@ public final class Socket: Sendable, Identifiable {
         enqueue(envelope)
     }
 
-    /// Every outbound envelope goes through here.
+    /// Every outbound envelope goes through here, encoded exactly once
+    /// (this is a single-target send — `push`/`sendReply`/`sendError` never
+    /// had a redundant-encode problem the way topic fan-out did; see
+    /// `SocketSession.pump` for where that redundancy actually lived and
+    /// why the outbound queue carries pre-encoded text rather than
+    /// `Envelope` values).
     ///
     /// The queue is bounded, so a client that stopped reading drops its
     /// oldest messages rather than growing without limit. `yield` says when
@@ -156,7 +161,13 @@ public final class Socket: Sendable, Identifiable {
     /// which meant a socket silently losing messages looked exactly like one
     /// that was fine.
     private func enqueue(_ envelope: Envelope) {
-        switch outbound.yield(envelope) {
+        guard let text = try? envelope.encodedText() else {
+            logger.error("outbound envelope failed to encode", metadata: [
+                "topic": "\(envelope.topic)", "event": "\(envelope.event)",
+            ])
+            return
+        }
+        switch outbound.yield(text) {
         case .enqueued, .terminated:
             break
         case .dropped:

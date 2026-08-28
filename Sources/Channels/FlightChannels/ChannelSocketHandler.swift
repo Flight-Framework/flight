@@ -50,7 +50,13 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
     public func handle(upgraded connection: WebSocketConnection, context: RequestContext) async throws {
         // Bounded: an unbounded queue lets one client that stopped reading
         // grow without limit until the server runs out of memory.
-        let (outbound, outboundContinuation) = AsyncStream<Envelope>.makeStream(
+        //
+        // Carries pre-encoded text, not `Envelope` values: `Socket.enqueue`
+        // encodes single-target sends, and `SocketSession.pump` forwards
+        // `ChannelBroadcaster`'s precomputed frame directly — so encoding
+        // has already happened by the time anything reaches this queue, and
+        // the writer below is pure I/O.
+        let (outbound, outboundContinuation) = AsyncStream<String>.makeStream(
             bufferingPolicy: .bufferingNewest(configuration.outboundBufferSize))
         let socket = Socket(
             principal: principal,
@@ -92,11 +98,7 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
         let (finished, finishedContinuation) = AsyncStream<Void>.makeStream()
 
         let writer = Task {
-            for await envelope in outbound {
-                guard let text = try? envelope.encodedText() else {
-                    assertionFailure("outbound envelope failed to encode")
-                    continue
-                }
+            for await text in outbound {
                 do {
                     try await connection.send(text)
                 } catch {

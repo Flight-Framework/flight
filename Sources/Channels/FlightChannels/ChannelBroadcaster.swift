@@ -51,6 +51,24 @@ public struct ChannelBroadcaster: Sendable {
     /// keys; application metadata must not use it.
     public static let originMetadataKey = "flight.channels.origin"
 
+    /// Metadata key carrying the fully-encoded wire frame for this
+    /// broadcast — internal, deliberately not `public`.
+    ///
+    /// Every joined socket's final `Envelope` for a given broadcast is
+    /// byte-identical (same topic, same event, same payload, `ref: nil`).
+    /// `SocketSession.pump` used to rebuild and re-encode that Envelope once
+    /// per *subscriber*; at 200 subscribers that is 200 redundant decodes of
+    /// the same bytes plus 200 redundant re-encodes of the same result. This
+    /// key lets `publish` do that work exactly once, here, and hand every
+    /// pump the same `String` by reference.
+    ///
+    /// Purely additive: `data` below is still the real `BroadcastFrame`
+    /// payload, unchanged, so a publisher that isn't `ChannelBroadcaster`
+    /// (Presence hand-builds one directly) produces a `Message` with no such
+    /// key, and `pump` falls back to decoding it exactly as before. Nothing
+    /// depends on this key being present.
+    internal static let precomputedFrameMetadataKey = "flight.channels.frame"
+
     private let pubsub: any PubSub
     private let logger: Logger
 
@@ -98,6 +116,16 @@ public struct ChannelBroadcaster: Sendable {
         // A two-field Codable struct of JSON-representable values cannot
         // fail to encode.
         guard let data = try? JSONEncoder().encode(frame) else { return }
+
+        // Precompute the one wire frame every local (and, once serialized
+        // for a clustered adapter, every remote) subscriber will send
+        // byte-for-byte identical — `ref` is always nil on a broadcast, and
+        // `topic` is this call's topic for every subscriber of it. One
+        // encode here replaces N decodes + N re-encodes at delivery.
+        var metadata = metadata
+        if let text = try? Envelope(ref: nil, topic: topic, event: event, payload: payload).encodedText() {
+            metadata[Self.precomputedFrameMetadataKey] = text
+        }
         await pubsub.publish(Message(topic: topic, payload: data, metadata: metadata))
     }
 }

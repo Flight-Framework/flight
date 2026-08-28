@@ -28,7 +28,7 @@ internal actor SocketSession {
     private let router: ChannelRouter
     private let pubsub: any PubSub
     private let socket: Socket
-    private let outbound: AsyncStream<Envelope>.Continuation
+    private let outbound: AsyncStream<String>.Continuation
     private let logger: Logger
 
     private var joined: [String: JoinedChannel] = [:]
@@ -39,7 +39,7 @@ internal actor SocketSession {
         router: ChannelRouter,
         pubsub: any PubSub,
         socket: Socket,
-        outbound: AsyncStream<Envelope>.Continuation,
+        outbound: AsyncStream<String>.Continuation,
         logger: Logger
     ) {
         self.router = router
@@ -154,19 +154,32 @@ internal actor SocketSession {
         }
     }
 
-    /// One channel's fan-in: iterate the PubSub stream, decode
-    /// each broadcast frame, and enqueue it for this socket. `nonisolated`
-    /// so per-message delivery never hops through the session actor.
+    /// One channel's fan-in: iterate the PubSub stream and enqueue each
+    /// broadcast for this socket. `nonisolated` so per-message delivery
+    /// never hops through the session actor.
+    ///
+    /// The common case (a `ChannelBroadcaster` publish) carries its final
+    /// wire text precomputed in metadata — every subscriber's `Envelope` for
+    /// one broadcast is byte-identical, so `publish` builds it once and
+    /// every pump here just forwards the same `String` by reference: no
+    /// decode, no per-subscriber re-encode. A message with no such key (a
+    /// hand-built `BroadcastFrame`, e.g. Presence) falls back to decoding
+    /// and encoding it directly — slower, but correct, and unchanged from
+    /// before this fast path existed.
     private nonisolated static func pump(
         subscription: AsyncStream<Message>,
         topic: String,
         socketID: String,
-        outbound: AsyncStream<Envelope>.Continuation,
+        outbound: AsyncStream<String>.Continuation,
         logger: Logger
     ) async {
         for await message in subscription {
             if message.metadata[ChannelBroadcaster.originMetadataKey] == socketID {
                 continue // broadcast(..., excluding:) — this socket is the origin
+            }
+            if let precomputed = message.metadata[ChannelBroadcaster.precomputedFrameMetadataKey] {
+                outbound.yield(precomputed)
+                continue
             }
             guard let frame = BroadcastFrame(message: message) else {
                 logger.warning("dropping non-broadcast payload on channel topic", metadata: [
@@ -174,7 +187,14 @@ internal actor SocketSession {
                 ])
                 continue
             }
-            outbound.yield(Envelope(ref: nil, topic: topic, event: frame.event, payload: frame.payload))
+            guard
+                let text = try? Envelope(ref: nil, topic: topic, event: frame.event, payload: frame.payload)
+                    .encodedText()
+            else {
+                logger.warning("broadcast envelope failed to encode", metadata: ["topic": "\(topic)"])
+                continue
+            }
+            outbound.yield(text)
         }
     }
 
