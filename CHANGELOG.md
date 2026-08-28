@@ -4,6 +4,51 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-28
+
+### Added
+
+- **Cookies** — `FlightWeb` had no cookie handling at all: no parsing, no
+  `Set-Cookie`, no redirect helper. `Cookie` renders `Set-Cookie` with
+  safe defaults (`HttpOnly` and `SameSite=Lax` on unless turned off);
+  `request.cookies` / `request.cookie(_:)` parse the request's `Cookie`
+  header (splitting on the first `=` so JWT/base64 values survive,
+  keeping the first of duplicate names); `response.settingCookie(_:)`
+  appends rather than replaces, since several cookies means several
+  headers; `Cookie.expiring(_:path:domain:)` for deletion; and
+  `Response.seeOther(_:)`, the 303 a form-post login wants. 10 tests,
+  including two sabotage checks (replace-instead-of-append silently
+  drops a cookie; splitting on the last `=` corrupts values containing
+  one).
+
+### Changed
+
+- **Channel broadcast fan-out encodes each frame once, not once per
+  subscriber.** Every joined socket's wire frame for one broadcast is
+  byte-identical (same topic/event/payload, `ref: nil`), but
+  `SocketSession.pump` was decoding and re-encoding it separately for
+  every subscriber — at 200 subscribers, 200 redundant decodes plus 200
+  redundant re-encodes of the same bytes. `ChannelBroadcaster.publish`
+  now encodes the frame once and carries it in message metadata; `pump`
+  forwards that precomputed text directly, falling back to the old
+  decode/encode path for a publisher that isn't `ChannelBroadcaster`
+  (Presence hand-builds its own `Message`). The outbound socket queue now
+  carries pre-encoded `String`s rather than `Envelope` values throughout
+  (`Socket`, `ChannelSocketHandler`, `SocketSession`), so single-target
+  sends (`push`/`sendReply`/`sendError`) also encode exactly once, at
+  enqueue time, rather than at write time.
+
+### Fixed
+
+- **`DiskUploadStore.create(_:)` ignored `createFile`'s result.** A
+  failure creating the upload's data file (disk full, permission denied)
+  would still let the separate sidecar write succeed, leaving an upload
+  that records offsets against a `.bin` file that was never created; now
+  throws.
+- **`FileByteSource.realPath(_:)` used the deprecated `[CChar]`-based
+  `String(cString:)`.** Replaced with an explicit null-terminator
+  truncation and `String(decoding:as:)`.
+
 ## [0.8.0] - 2026-08-26
 
 ### Added
