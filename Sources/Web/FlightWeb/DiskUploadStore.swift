@@ -60,7 +60,13 @@ public actor DiskUploadStore: UploadStore {
         guard Self.isSafeID(info.id) else {
             throw ResumableUploadError.malformed("unsafe upload id")
         }
-        FileManager.default.createFile(atPath: dataURL(info.id).path, contents: nil)
+        // The sidecar lives at a separate path from the data file — a
+        // silently-ignored failure here (disk full, permission denied)
+        // would still let `writeSidecar` succeed, leaving an upload that
+        // records offsets against a `.bin` file that was never created.
+        guard FileManager.default.createFile(atPath: dataURL(info.id).path, contents: nil) else {
+            throw ResumableUploadError.malformed("cannot create upload file")
+        }
         try writeSidecar(info)
     }
 

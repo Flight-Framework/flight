@@ -225,7 +225,9 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
             guard realpath(path, &buffer) != nil else {
                 return .failure(ByteSourceError.io(operation: "realpath(\(path))", code: errno))
             }
-            return .success(String(cString: buffer))
+            let nullIndex = buffer.firstIndex(of: 0) ?? buffer.count
+            let bytes = buffer[..<nullIndex].map { UInt8(bitPattern: $0) }
+            return .success(String(decoding: bytes, as: UTF8.self))
         }
     }
 
