@@ -27,7 +27,7 @@ public struct BroadcastFrame: Sendable, Equatable, Codable {
     /// broadcast frame (foreign publisher on a shared topic — dropped, with
     /// a log line, by the subscription pump).
     public init?(message: Message) {
-        guard let frame = try? JSONDecoder().decode(BroadcastFrame.self, from: message.payload) else {
+        guard let frame = try? WireCoders.decoder.decode(BroadcastFrame.self, from: message.payload) else {
             return nil
         }
         self = frame
@@ -115,7 +115,7 @@ public struct ChannelBroadcaster: Sendable {
         let frame = BroadcastFrame(event: event, payload: payload)
         // A two-field Codable struct of JSON-representable values cannot
         // fail to encode.
-        guard let data = try? JSONEncoder().encode(frame) else { return }
+        guard let data = try? WireCoders.encoder.encode(frame) else { return }
 
         // Precompute the one wire frame every local (and, once serialized
         // for a clustered adapter, every remote) subscriber will send

@@ -25,7 +25,8 @@ public struct ChannelMessage: Sendable, Equatable {
 /// The Swift reference client: the envelope protocol, ref/reply
 /// correlation as `async` calls, incoming pushes as `AsyncStream`s, the
 /// heartbeat, and automatic reconnect-with-backoff-and-rejoin. Protocol
-/// plumbing, not a framework — transport injected, no dependencies.
+/// plumbing, not a framework — transport injected, and nothing but
+/// `FlightChannelsProtocol` and swift-log behind it.
 ///
 ///     let client = ChannelClient(url: url, transport: transport)
 ///     try await client.connect()
@@ -84,13 +85,28 @@ public actor ChannelClient {
         reconnectTask?.cancel()
         reconnectTask = nil
         setState(.connecting)
+        let connection: ClientTransportConnection
         do {
-            let connection = try await transport.connect(to: url)
-            beginSession(connection)
+            connection = try await transport.connect(to: url)
         } catch {
             setState(.closed)
             throw error
         }
+        // The dial suspended, and `disconnect()` may have run while it did.
+        // Without this the attempt completed anyway and resurrected a
+        // terminally closed client: state went .closed → .connected, the
+        // heartbeat restarted, and the "terminal" close was undone.
+        guard state == .connecting else {
+            await connection.close()
+            return
+        }
+        beginSession(connection)
+        // `disconnect()` promises "channel membership intent survives — a
+        // later connect() rejoins everything that was joined", and rejoinAll
+        // was called from the reconnect loop and nowhere else, so after a
+        // manual disconnect→connect the desired topics stayed unjoined until
+        // the app re-joined each one by hand.
+        await rejoinAll()
     }
 
     /// Graceful teardown: best-effort `flight:close`, transport
@@ -124,7 +140,8 @@ public actor ChannelClient {
     /// state as of the call, then every transition.
     public func states() -> AsyncStream<ConnectionState> {
         let id = UUID()
-        let (stream, continuation) = AsyncStream<ConnectionState>.makeStream()
+        let (stream, continuation) = AsyncStream<ConnectionState>.makeStream(
+            bufferingPolicy: .bufferingNewest(configuration.subscriberBufferSize))
         continuation.yield(state)
         stateSubscribers[id] = continuation
         continuation.onTermination = { _ in
@@ -154,10 +171,20 @@ public actor ChannelClient {
             channels[topic]?.joined = true
             return reply
         } catch let error as ChannelClientError {
-            if case .channelError = error {
+            if case .channelError(let reason) = error {
                 // The server said no. Retrying on reconnect would spin
-                // on a closed gate.
-                channels[topic]?.desired = false
+                // on a closed gate — *except* for `already_joined`, which
+                // is not a closed gate at all: the membership is live, this
+                // call was simply the second one. Treating it as a refusal
+                // kept the membership and silently dropped its rejoin
+                // intent, so the topic's stream just went quiet after the
+                // next disconnect. An app that calls join() twice, or that
+                // races the automatic rejoinAll after a reconnect, hits it.
+                if reason == ChannelErrorReason.alreadyJoined {
+                    channels[topic]?.joined = true
+                } else {
+                    channels[topic]?.desired = false
+                }
             }
             throw error
         }
@@ -166,6 +193,7 @@ public actor ChannelClient {
     internal func leave(topic: String, timeout: Duration?) async throws {
         channels[topic]?.desired = false
         channels[topic]?.joined = false
+        defer { pruneChannelIfUnused(topic) }
         _ = try await request(
             topic: topic,
             event: ReservedEvent.leave.rawValue,
@@ -199,7 +227,8 @@ public actor ChannelClient {
 
     internal func messages(topic: String) -> AsyncStream<ChannelMessage> {
         let id = UUID()
-        let (stream, continuation) = AsyncStream<ChannelMessage>.makeStream()
+        let (stream, continuation) = AsyncStream<ChannelMessage>.makeStream(
+            bufferingPolicy: .bufferingNewest(configuration.subscriberBufferSize))
         channels[topic, default: ChannelRecord()].subscribers[id] = continuation
         continuation.onTermination = { _ in
             Task { await self.removeSubscriber(id, topic: topic) }
@@ -392,6 +421,13 @@ public actor ChannelClient {
             setState(.connecting)
             do {
                 let connection = try await transport.connect(to: url)
+                // Same race as `connect()`: `disconnect()` may have run while
+                // this dial was suspended, and completing it anyway brings a
+                // closed client back to life.
+                guard state == .connecting, !Task.isCancelled else {
+                    await connection.close()
+                    return
+                }
                 beginSession(connection)
                 await rejoinAll()
                 return
@@ -462,6 +498,21 @@ public actor ChannelClient {
 
     private func removeSubscriber(_ id: UUID, topic: String) {
         channels[topic]?.subscribers[id] = nil
+        pruneChannelIfUnused(topic)
+    }
+
+    /// Forgets a topic nothing wants any more.
+    ///
+    /// `leave` only flipped the flags, so a client cycling through topics —
+    /// a chat app opening and closing rooms, a dashboard following a
+    /// selection — grew the dictionary forever. A record is worth keeping
+    /// only while something still refers to it: membership intent, live
+    /// membership, or a subscriber stream.
+    private func pruneChannelIfUnused(_ topic: String) {
+        guard let record = channels[topic] else { return }
+        if !record.desired && !record.joined && record.subscribers.isEmpty {
+            channels[topic] = nil
+        }
     }
 
     private func removeStateSubscriber(_ id: UUID) {

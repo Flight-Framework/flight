@@ -45,14 +45,27 @@ public struct ChannelClientConfiguration: Sendable {
 
     public var reconnect: ReconnectPolicy
 
+    /// How many messages one `messages()` or `states()` stream may hold for a
+    /// subscriber that has stopped consuming, before the oldest are dropped.
+    ///
+    /// These streams were unbounded, which is the same defect the server side
+    /// bounded in `ChannelsConfiguration.outboundBufferSize` — a subscriber
+    /// that stops reading grows without ceiling — pointing the other way. The
+    /// oldest go first for the same reason: an app that falls behind on a
+    /// realtime feed wants the current state, not a backlog it can never
+    /// catch up on.
+    public var subscriberBufferSize: Int
+
     public init(
         heartbeatInterval: Duration = .seconds(25),
         pushTimeout: Duration = .seconds(10),
-        reconnect: ReconnectPolicy = .exponentialBackoff()
+        reconnect: ReconnectPolicy = .exponentialBackoff(),
+        subscriberBufferSize: Int = 256
     ) {
         self.heartbeatInterval = heartbeatInterval
         self.pushTimeout = pushTimeout
         self.reconnect = reconnect
+        self.subscriberBufferSize = subscriberBufferSize
     }
 }
 

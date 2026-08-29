@@ -72,22 +72,39 @@ public struct EnvelopeDecodingError: Error, Sendable, CustomStringConvertible {
     public var description: String { "Malformed envelope: \(detail)" }
 }
 
+/// The two coders every frame goes through.
+///
+/// One each, not one per frame. `JSONEncoder`/`JSONDecoder` are classes with
+/// real setup cost, and a fresh pair was allocated for every frame decoded,
+/// every frame encoded, and twice more per broadcast — on the hottest path
+/// in the product. Both are stateless in use and safe to share; the encoder's
+/// configuration is fixed here so it cannot drift between call sites, which
+/// matters because the wire form is a pinned contract.
+public enum WireCoders {
+    /// Sorted keys so the wire form is deterministic — protocol tests (Swift
+    /// and JS both) assert on exact frames, and support debugging shouldn't
+    /// fight key order.
+    public static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }()
+
+    public static let decoder = JSONDecoder()
+}
+
 extension Envelope {
     /// Decodes one text frame.
     public init(text: String) throws {
         do {
-            self = try JSONDecoder().decode(Envelope.self, from: Data(text.utf8))
+            self = try WireCoders.decoder.decode(Envelope.self, from: Data(text.utf8))
         } catch {
             throw EnvelopeDecodingError(String(describing: error))
         }
     }
 
-    /// Encodes to one text frame. Sorted keys so the wire form is
-    /// deterministic — protocol tests (Swift and JS both) assert on exact
-    /// frames, and support debugging shouldn't fight key order.
+    /// Encodes to one text frame.
     public func encodedText() throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return String(decoding: try encoder.encode(self), as: UTF8.self)
+        String(decoding: try WireCoders.encoder.encode(self), as: UTF8.self)
     }
 }

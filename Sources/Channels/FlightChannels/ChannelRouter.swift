@@ -88,5 +88,4 @@ public struct ChannelRouter: Sendable {
         registrations.first { $0.pattern.matches(topic) }
     }
 
-    public var isEmpty: Bool { registrations.isEmpty }
 }

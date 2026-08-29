@@ -3,8 +3,8 @@
 The stateful protocol layer between a raw WebSocket and topic-based
 messaging: clients join named topics, exchange messages bidirectionally with
 per-topic server handler logic, and receive fan-out from anything that
-publishes to those topics. Scope
-modeled on Phoenix Channels, wire protocol Flight's own.
+publishes to those topics. Scope modeled on Phoenix Channels, wire protocol
+Flight's own.
 
 It sits exactly between two things that already exist:
 
@@ -22,7 +22,7 @@ join/leave, routing to handlers, replies, heartbeats, reconnection.
 |---|---|---|
 | `FlightChannels` | Server: `Channel`, `Socket`, `ChannelRouter`, `ChannelBroadcaster`, `ChannelSocketHandler`, `FlightChannelsModule` | Core, PubSub, Web |
 | `FlightChannelsProtocol` | The wire protocol alone: `Envelope`, `JSONValue`, reserved events, error reasons, close codes | nothing |
-| `FlightChannelsClient` | Swift reference client: `ChannelClient`, `ChannelHandle`, transport seam, reconnect-with-backoff-and-rejoin | Protocol only |
+| `FlightChannelsClient` | Swift reference client: `ChannelClient`, `ChannelHandle`, transport seam, reconnect-with-backoff-and-rejoin | Protocol, swift-log |
 | `FlightChannelsTesting` | `InMemoryChannelTransport` (client ↔ in-process server, no socket), `ChannelWireClient` (raw-envelope driver) | the above + WebTesting |
 
 The JS/TS reference client is
@@ -119,11 +119,11 @@ let client = ChannelClient(url: url, transport: myTransport) // transport seam, 
 try await client.connect()
 
 let room = client.channel("room:42")
-let initialState = try await room.join()               //: the gate
-let reply = try await room.push("new_msg", payload: ["body": "hi"])  //: awaits flight:reply
+let initialState = try await room.join()               // the join gate answers
+let reply = try await room.push("new_msg", payload: ["body": "hi"])  // awaits flight:reply
 try await room.send("typing", payload: ["on": true])   // fire-and-forget, ref: null
 
-for await message in await room.messages() {            // step 5: pushes as a stream
+for await message in await room.messages() {            // server pushes, as a stream
     if message.isRejoin { /* fresh state after auto-reconnect */ }
 }
 ```
@@ -157,7 +157,7 @@ One envelope, both directions, JSON text frames in v1:
   (join rejected, handler error) is `flight:error` with the ref.
 - Close codes beyond RFC 6455's set: `4000` heartbeat timeout, `4400`
   protocol violation (undecodable envelope); binary frames close with
-  `1003` (the binary codec is a later, negotiated addition —).
+  `1003` (the binary codec is a later, negotiated addition).
 - Server-produced error reasons: `unauthenticated`, `forbidden`,
   `unmatched_topic`, `already_joined`, `not_joined`, `reserved_topic`,
   `handler_error`, `invalid_event`.
@@ -208,7 +208,8 @@ wire-level assertions. Multi-node behavior is testable with
    The conformance is empty because `Principal` already has both members.
    Its validator then feeds `registerChannelSocket`'s `authenticate`
    closure, with no Channels change — which is what the seam was for. Same
-   "seam, not engine" posture as
+   "seam, not engine" posture the package takes with transports and PubSub
+   adapters.
 2. **`JoinResult`/`HandleResult` are structs with static constructors**,
    not enums — the design's call sites (`.ok`, `.ok(initialState:)`) need
    an overload an enum case can't provide; the shapes are otherwise the

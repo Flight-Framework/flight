@@ -122,6 +122,15 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                     // Teardown finishes the outbound queue → the writer
                     // drains and announces its exit → the handler unwinds.
                     await session.teardown()
+                    // Awaited, like every graceful path: closing straight
+                    // after teardown left queued frames racing the close
+                    // frame, and ran `send` and `close` concurrently on a
+                    // transport that does not promise that is safe. Harmless
+                    // in practice — a peer this silent is not reading — but
+                    // the deterministic-drain claim did not hold on this one
+                    // path, which is the sort of exception that is true until
+                    // the day it is not.
+                    _ = await writer.value
                     try? await connection.close(
                         code: WebSocketCloseCode(ChannelCloseCode.heartbeatTimeout),
                         reason: "heartbeat timeout"

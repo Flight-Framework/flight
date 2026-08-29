@@ -149,14 +149,14 @@ extension JSONValue {
     /// Re-encodes this value and decodes it as `T` — how a handler lifts an
     /// opaque payload into its own typed message struct.
     public func decode<T: Decodable>(_ type: T.Type = T.self) throws -> T {
-        let data = try JSONEncoder().encode(self)
-        return try JSONDecoder().decode(type, from: data)
+        let data = try WireCoders.encoder.encode(self)
+        return try WireCoders.decoder.decode(type, from: data)
     }
 
     /// Encodes any `Encodable` into a `JSONValue` — how typed application
     /// messages become payloads.
     public init(encoding value: some Encodable) throws {
-        let data = try JSONEncoder().encode(value)
-        self = try JSONDecoder().decode(JSONValue.self, from: data)
+        let data = try WireCoders.encoder.encode(value)
+        self = try WireCoders.decoder.decode(JSONValue.self, from: data)
     }
 }

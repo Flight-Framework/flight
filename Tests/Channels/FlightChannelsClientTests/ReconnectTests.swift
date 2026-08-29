@@ -208,4 +208,135 @@ struct ReconnectTests {
         #expect(policy.delay(7) == nil) // exhausted
         #expect(ReconnectPolicy.never.delay(1) == nil)
     }
+
+    @Test("a duplicate join keeps its rejoin intent")
+    func duplicateJoinKeepsRejoinIntent() async throws {
+        // The server answers a second join with `already_joined`, and the
+        // client treated any channelError as a closed gate and cleared
+        // `desired`. So an app that called join() twice — or that raced the
+        // automatic rejoinAll after a reconnect — kept a live membership and
+        // silently lost rejoin-on-next-drop: the topic's stream just went
+        // quiet after the following disconnect, with nothing said anywhere.
+        var severable: SeverableTransport!
+        let harness = try ClientHarness { transport in
+            severable = SeverableTransport(wrapping: transport)
+            return severable
+        }
+        let client = harness.makeClient(configuration: fastReconnect())
+        try await client.connect()
+        let counter = client.channel("counter:7")
+        try await counter.join()
+        let messages = await counter.messages()
+
+        // The second join is refused — correctly, it is already joined.
+        await #expect(throws: ChannelClientError.self) { try await counter.join() }
+        #expect(await client.isJoined("counter:7"), "the live membership survived")
+
+        // The membership must still come back after a drop.
+        severable.severAll()
+        var iterator = messages.makeAsyncIterator()
+        let rejoin = await iterator.next()
+        #expect(rejoin?.isRejoin == true, "the duplicate join cost the topic its rejoin")
+        #expect(await client.isJoined("counter:7"))
+        await client.disconnect()
+    }
+
+    @Test("connect() after disconnect() rejoins, as its doc promises")
+    func reconnectingByHandRejoins() async throws {
+        // `disconnect()` documents "channel membership intent survives — a
+        // later connect() rejoins everything that was joined", and
+        // rejoinAll was called from the reconnect loop and nowhere else. So
+        // after a manual disconnect→connect the desired topics stayed
+        // unjoined until the app re-joined each one by hand.
+        let harness = try ClientHarness()
+        let client = harness.makeClient(configuration: fastReconnect())
+        try await client.connect()
+        let counter = client.channel("counter:7")
+        try await counter.join()
+        #expect(await client.isJoined("counter:7"))
+
+        await client.disconnect()
+        #expect(!(await client.isJoined("counter:7")))
+
+        try await client.connect()
+        // Give the rejoin its round trip.
+        for _ in 0..<200 where !(await client.isJoined("counter:7")) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await client.isJoined("counter:7"), "connect() did not rejoin")
+
+        // And the rejoined channel actually works.
+        #expect(try await counter.push("echo", payload: ["a": 1]) == ["a": 1])
+        await client.disconnect()
+    }
+
+    @Test("a disconnect racing an in-flight dial does not resurrect the client")
+    func disconnectDuringDialWins() async throws {
+        // With no state re-check after the `transport.connect` await, a
+        // disconnect() landing while the dial was suspended completed anyway
+        // and called beginSession unconditionally: state went .closed →
+        // .connected, the heartbeat restarted, and the terminal close was
+        // undone.
+        let gate = DialGate()
+        let harness = try ClientHarness { transport in
+            GatedTransport(wrapping: transport, gate: gate)
+        }
+        let client = harness.makeClient(configuration: fastReconnect())
+
+        let dialing = Task { try await client.connect() }
+        await gate.waitUntilDialing()
+        await client.disconnect()
+        await gate.release()
+        _ = try? await dialing.value
+
+        #expect(await client.connectionState == .closed, "a closed client came back to life")
+    }
+}
+
+/// Holds a dial open until the test lets it through.
+actor DialGate {
+    private var isDialing = false
+    private var released = false
+    private var dialWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func noteDialing() {
+        isDialing = true
+        for waiter in dialWaiters { waiter.resume() }
+        dialWaiters = []
+    }
+
+    func waitUntilDialing() async {
+        if isDialing { return }
+        await withCheckedContinuation { dialWaiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        for waiter in releaseWaiters { waiter.resume() }
+        releaseWaiters = []
+    }
+
+    func waitForRelease() async {
+        if released { return }
+        await withCheckedContinuation { releaseWaiters.append($0) }
+    }
+}
+
+/// A transport whose dial parks in the gate — the suspension point the
+/// resurrection race needs.
+struct GatedTransport: ChannelClientTransport {
+    let wrapped: any ChannelClientTransport
+    let gate: DialGate
+
+    init(wrapping wrapped: any ChannelClientTransport, gate: DialGate) {
+        self.wrapped = wrapped
+        self.gate = gate
+    }
+
+    func connect(to url: URL) async throws -> ClientTransportConnection {
+        await gate.noteDialing()
+        await gate.waitForRelease()
+        return try await wrapped.connect(to: url)
+    }
 }
