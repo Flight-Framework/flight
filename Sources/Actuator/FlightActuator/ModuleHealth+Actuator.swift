@@ -30,6 +30,15 @@ extension ModuleHealth {
     }
 
     /// The failure's description for `.failed`, nil otherwise.
+    ///
+    /// Served verbatim on the dashboard, which is why it is worth saying out
+    /// loud what that means: connection failures routinely interpolate the
+    /// URL they failed on, and a URL can carry credentials. Reachable only
+    /// under ``ActuatorExposure/full``, which is unauthenticated by design —
+    /// so anywhere `full` is on, treat these strings as disclosed. Credential
+    /// scrubbing is not attempted here: guessing at which substrings are
+    /// secret in an arbitrary error is the kind of half-measure that reads as
+    /// a guarantee.
     public var failureDescription: String? {
         if case .failed(let error) = self { return String(describing: error) }
         return nil

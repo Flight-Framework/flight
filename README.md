@@ -20,7 +20,7 @@ and `FlightPresence`; a service behind an existing identity provider adds
 | `FlightPubSub` | Topic-based publish/subscribe with a `DistributedPubSubAdapter` seam for cluster fan-out. |
 | `FlightChannels` | Per-connection lifecycle over PubSub and Web: join, leave, push, broadcast. |
 | `FlightPresence` | CRDT-merged "who is here", correct across a cluster without central coordination. |
-| `FlightActuator` | Health, info, and metrics endpoints, off by default outside development. |
+| `FlightActuator` | Health probes always on; a topology dashboard only where a development environment is declared. |
 | `FlightSecurityCore` | A resource server: validates tokens your identity provider issued. Bring your own auth. |
 | `FlightScheduler` / `FlightCronCore` | Cron and interval jobs as annotated methods, with the schedule checked at build time. `FlightCronCore` is the dependency-free engine the macro validates with. |
 | `*Testing` | Test support for Web, PubSub, Channels, and the Scheduler — in-memory transports, mock contexts, cluster harnesses, a clock that does not sleep. |

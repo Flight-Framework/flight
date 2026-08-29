@@ -45,8 +45,17 @@ public enum ActuatorExposure: String, Sendable, CaseIterable {
     /// An unrecognized value throws rather than falling back: a typo in the
     /// setting that controls disclosure should stop the app, not quietly
     /// choose for it.
+    /// - Parameters:
+    ///   - environment: The resolved environment.
+    ///   - isEnvironmentDeclared: Whether that environment was *stated* —
+    ///     `FLIGHT_ENV` set, or an embedder naming it in code — as opposed to
+    ///     defaulted. See the discussion below; a default is not a
+    ///     declaration.
+    ///   - processEnvironment: Where the `FLIGHT_ACTUATOR_EXPOSURE` override
+    ///     is read from.
     public static func resolve(
         environment: FlightEnvironment,
+        isEnvironmentDeclared: Bool = true,
         processEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> ActuatorExposure {
         if let raw = processEnvironment["FLIGHT_ACTUATOR_EXPOSURE"], !raw.isEmpty {
@@ -56,6 +65,18 @@ public enum ActuatorExposure: String, Sendable, CaseIterable {
             }
             return exposure
         }
+        // An unset `FLIGHT_ENV` resolves to `dev`, and `dev` is in the
+        // allowlist — so a production deployment that simply never set the
+        // variable served the full unauthenticated dashboard. That is
+        // byte-for-byte the fail-open half of the gate this allowlist
+        // replaced: the allowlist closed the misspelled-name half and left
+        // this one open, while the docs claimed getting the environment name
+        // wrong "costs you a dashboard instead of leaking one".
+        //
+        // A default is not a declaration. Saying nothing gets the safe
+        // answer, and a development machine that wants the dashboard says so
+        // — `FLIGHT_ENV=dev`, or the override.
+        guard isEnvironmentDeclared else { return .healthOnly }
         return developmentEnvironments.contains(environment.rawValue.lowercased())
             ? .full : .healthOnly
     }

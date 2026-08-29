@@ -89,7 +89,9 @@ The JSON rendering is a public contract for hand-rolled front-ends. Shape
 - `health`: `"notStarted" | "running" | "failed"` (`error` present only for
   `"failed"`)
 - `scope`: `"singleton" | "transient" | "scoped"`
-- `stereotype`: `"component" | "service" | "repository" | "controller"`
+- `stereotype`: `"component" | "service" | "repository" | "controller" |
+  "settings" | "middleware"` — all six of Core's `Stereotype` cases; a
+  front-end validating against this contract should accept the lot
 
 The encoding is hand-written rather than retroactive `Codable` on Core's
 types, so Core can evolve its introspection structs without silently
@@ -179,12 +181,42 @@ unauthenticated, on a deployment whose operator believed otherwise.
 Getting the environment name wrong now costs you a dashboard instead of
 leaking one.
 
-`/actuator/health` is published wherever the actuator is enabled at all,
-because an orchestrator needs a probe in production and the old
-all-or-nothing gate left production with none. It answers `200`/`UP` when
-every module is running and `503`/`DOWN` otherwise, with counts and nothing
-else — no component list, no type names, no failure text. It is safe to
-publish unauthenticated precisely because of what it leaves out.
+The allowlist closed the misspelled-name half of that and, for a while,
+left the other half exactly as it was: an unset `FLIGHT_ENV` still resolved
+to `dev`, `dev` was still on the allowlist, and a production deployment that
+never set the variable still served the whole dashboard. **A default is not
+a declaration.** Saying nothing now gets `health_only`; a development machine
+that wants the dashboard says so, with `FLIGHT_ENV=dev` or the override
+below.
+
+### The health probes
+
+Three routes, published wherever the actuator is enabled at all, because an
+orchestrator needs probes in production and the old all-or-nothing gate left
+production with none:
+
+| | |
+|---|---|
+| `GET /actuator/health` | The strict aggregate: `UP` only when every module is running. |
+| `GET /actuator/health/live` | Is the process wedged? A module that has not started yet does **not** count — a slow-starting pod answering `DOWN` here gets killed and restarted into the same slow start, forever. Only a module whose service threw counts, because that is what a restart can clear. |
+| `GET /actuator/health/ready` | Can it serve traffic? Strict: still starting, or failed, means no. |
+
+Each answers `200`/`UP` or `503`/`DOWN` with counts and nothing else — no
+component list, no type names, no failure text. They are safe to publish
+unauthenticated precisely because of what they leave out.
+
+Health inputs are Core's module lifecycle by default: a module is `running`
+once it configures and `failed` if its `Service.run()` throws. A module that
+is up but cannot reach its database says so by calling
+
+```swift
+container.reportHealth(.failed(error), forModule: "DataModule")
+```
+
+on whatever cadence suits it — a background check, a connection-pool
+callback. Nothing here polls, and no check runs on the request path, which is
+what removes the hung-check-and-timeout class of bug entirely: a probe is a
+lock-protected read of state something else already established.
 
 To opt a non-development environment into the dashboard:
 
@@ -202,8 +234,18 @@ value stops startup rather than quietly choosing for you.
 by anyone else needs `requireAuthentication` (Flight Security Core) ordered
 ahead of the route. This package does not authenticate anything itself.
 
+One thing worth knowing before you turn it on anywhere real: a failed
+module's error text is served verbatim, and connection errors routinely
+interpolate the URL they failed on — which can carry credentials. No
+scrubbing is attempted, because guessing at which substrings of an arbitrary
+error are secret is the kind of half-measure that reads as a guarantee.
+Wherever `full` is on, treat those strings as disclosed.
+
 ## Non-goals
 
 No live-updating dashboard, no historical/metrics data, and no per-bean
-instance inspection.
+instance inspection. No metrics endpoint of any kind: metrics want a
+dedicated library with its own cardinality and retention story, and half of
+one here would be worse than none. The README used to advertise them anyway;
+it no longer does.
 

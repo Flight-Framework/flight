@@ -99,14 +99,55 @@ struct GatingTests {
         }
     }
 
+    @Test("a deployment that declared nothing does not get the dashboard")
+    func undeclaredEnvironmentGetsHealthOnly() async throws {
+        // The allowlist closed the misspelled-name half of the old fail-open
+        // gate and left the other half byte-for-byte intact: an unset
+        // FLIGHT_ENV resolves to `dev`, `dev` is on the allowlist, so a
+        // production deployment that never set the variable served the whole
+        // unauthenticated topology dashboard — while Docs/actuator.md claimed
+        // getting the environment wrong "costs you a dashboard instead of
+        // leaking one".
+        let container = try TestContainer.build { ActuatorModule(processEnvironment: [:]) }
+        let client = try TestClient(container: container)
+        #expect(await client.get("/actuator").status == .notFound)
+        #expect(await client.get("/actuator/health").status == .ok)
+    }
+
+    @Test("declaring dev explicitly still gets the dashboard")
+    func declaredDevGetsDashboard() async throws {
+        let container = try TestContainer.build {
+            ActuatorModule(processEnvironment: ["FLIGHT_ENV": "dev"])
+        }
+        let client = try TestClient(container: container)
+        #expect(await client.get("/actuator").status == .ok)
+    }
+
+    @Test("an undeclared environment can still opt in explicitly")
+    func undeclaredCanOptIn() throws {
+        #expect(
+            try ActuatorExposure.resolve(
+                environment: .dev, isEnvironmentDeclared: false,
+                processEnvironment: ["FLIGHT_ACTUATOR_EXPOSURE": "full"]) == .full)
+    }
+
     @Test("the route table entry is visible through Core introspection")
     func routeVisibleInIntrospection() throws {
         let container = try TestContainer.build { ActuatorModule(environment: .dev) }
         let routes = container.allRegistrations().filter {
             $0.typeName == "FlightWeb.RouteRegistration"
         }
-        // Two now: the dashboard and the health probe.
-        #expect(routes.count == 2)
+        // The dashboard, plus the three health probes: the aggregate, and the
+        // liveness/readiness pair that answer the two different questions an
+        // orchestrator asks.
+        #expect(routes.count == 4)
+        #expect(
+            Set(routes.compactMap(\.qualifier)) == [
+                "GET /actuator @FlightActuator",
+                "GET /actuator/health @FlightActuator",
+                "GET /actuator/health/live @FlightActuator",
+                "GET /actuator/health/ready @FlightActuator",
+            ])
         #expect(routes[0].qualifier?.hasPrefix("GET /actuator") == true)
         #expect(routes[0].sourceModule == "<direct>")  // TestContainer stamps nothing
     }

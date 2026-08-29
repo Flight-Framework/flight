@@ -48,7 +48,8 @@ let package = Package(
         .library(name: "FlightPresenceProtocol", targets: ["FlightPresenceProtocol"]),
         .library(name: "FlightPresenceClient", targets: ["FlightPresenceClient"]),
 
-        // Operational endpoints: health, info, metrics.
+        // Operational endpoints: health probes and a topology dashboard.
+        // Not metrics — that is a decision, recorded in Docs/actuator.md.
         .library(name: "FlightActuator", targets: ["FlightActuator"]),
 
         // MARK: Scheduler

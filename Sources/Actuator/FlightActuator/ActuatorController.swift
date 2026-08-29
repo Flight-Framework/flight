@@ -29,21 +29,60 @@ struct ActuatorController {
     let environment: FlightEnvironment
     let format: ActuatorFormat
 
-    /// Liveness and readiness, with nothing in it worth hiding.
+    /// Overall health, with nothing in it worth hiding.
     ///
-    /// Deliberately minimal: an overall status and a per-module up/down, with
-    /// no component list, no type names, and no failure text. This is the one
-    /// actuator route safe to publish unauthenticated in production, and it
+    /// Deliberately minimal: an overall status and per-module counts, with no
+    /// component list, no type names, and no failure text. This is the one
+    /// actuator surface safe to publish unauthenticated in production, and it
     /// is only safe because of what it leaves out — a probe needs to know
-    /// whether to restart the pod, not what the pod is made of.
+    /// whether to act, not what the pod is made of.
     ///
-    /// `200` when every module is running, `503` otherwise, so an orchestrator
-    /// can read the status code alone.
+    /// `200` when every module is running, `503` otherwise, so an
+    /// orchestrator can read the status code alone. This is the strict
+    /// reading, which is the readiness question; see ``liveness(_:)`` for the
+    /// one an orchestrator should restart on.
     func health(_ context: RequestContext) async throws -> Response {
-        let snapshot = ActuatorSnapshot(container: container, environment: environment)
-        let failed = snapshot.modules.filter(\.health.isFailed).count
-        let notStarted = snapshot.modules.filter(\.health.isNotStarted).count
-        let up = failed == 0 && notStarted == 0
+        try respond(to: .readiness)
+    }
+
+    /// Is this process wedged — should the orchestrator restart it?
+    ///
+    /// A module that has not started yet does **not** count against liveness:
+    /// a slow-starting pod answering `DOWN` here gets killed and restarted
+    /// into the same slow start, forever. Only a module whose service threw
+    /// counts, because that is the state a restart can actually clear.
+    func liveness(_ context: RequestContext) async throws -> Response {
+        try respond(to: .liveness)
+    }
+
+    /// Can this process serve traffic yet?
+    ///
+    /// Strict: a module still starting, or failed, means no. Identical to
+    /// ``health(_:)``, and named so a deployment does not have to know that.
+    func readiness(_ context: RequestContext) async throws -> Response {
+        try respond(to: .readiness)
+    }
+
+    /// Which question a probe is asking. One endpoint answered both, and the
+    /// two want opposite things from a module that has not started yet.
+    private enum Probe {
+        case liveness
+        case readiness
+    }
+
+    private func respond(to probe: Probe) throws -> Response {
+        // `moduleStatuses()` rather than a full `ActuatorSnapshot`: the
+        // snapshot also copies the entire bean registration table, and this
+        // path used every bit of it to compute three integers — on the one
+        // route an orchestrator polls every few seconds.
+        let modules = container.moduleStatuses()
+        let failed = modules.filter(\.health.isFailed).count
+        let notStarted = modules.filter(\.health.isNotStarted).count
+        let up =
+            switch probe {
+            case .liveness: failed == 0
+            case .readiness: failed == 0 && notStarted == 0
+            }
 
         struct Health: Encodable {
             let status: String
@@ -56,7 +95,7 @@ struct ActuatorController {
         let body = try encoder.encode(
             Health(
                 status: up ? "UP" : "DOWN",
-                modules: snapshot.modules.count,
+                modules: modules.count,
                 failed: failed,
                 notStarted: notStarted))
         return .data(

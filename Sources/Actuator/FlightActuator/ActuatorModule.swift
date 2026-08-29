@@ -1,5 +1,6 @@
 import FlightCore
 import FlightWeb
+import class Foundation.ProcessInfo
 
 /// Flight Actuator's one entry point — a `FlightModule`, nothing more.
 /// Registered like everything else:
@@ -11,11 +12,20 @@ import FlightWeb
 ///
 /// ## Access gating
 ///
-/// In `.prod` the routes are simply **not registered** — `configure` returns
-/// before anything touches the container, so `/actuator` does not exist in
-/// the route table at all. There is nothing to probe or misconfigure: this is
-/// a non-choice, not a runtime auth check with a failure mode. Prod access is
-/// a seam reserved for Flight Security and deliberately not built.
+/// What gets registered is decided by ``ActuatorExposure``, resolved at
+/// configuration time and never re-checked per request:
+///
+/// - ``ActuatorExposure/disabled`` — `configure` returns before touching the
+///   container, so nothing exists in the route table to probe.
+/// - ``ActuatorExposure/healthOnly`` — the default anywhere that has not
+///   declared itself a development environment, including a deployment that
+///   set nothing at all. The health routes are registered and the dashboard
+///   is not.
+/// - ``ActuatorExposure/full`` — health plus the `/actuator` dashboard,
+///   which discloses the module list, every registered component's
+///   fully-qualified type name, and failure messages. Unauthenticated
+///   wherever it is on; putting authentication in front of it is the
+///   deployment's job, and the module does not pretend otherwise.
 public struct ActuatorModule: FlightModule {
     public static var dependencies: [any FlightModule.Type] { [] }
 
@@ -32,7 +42,20 @@ public struct ActuatorModule: FlightModule {
     /// legitimately needs the raw environment to decide whether it is
     /// allowed to exist at all.
     public init() {
-        self.init(environment: .current())
+        self.init(processEnvironment: ProcessInfo.processInfo.environment)
+    }
+
+    /// The same path with the process environment injected — how a test asks
+    /// "what would an unset `FLIGHT_ENV` do" without mutating the real one.
+    public init(processEnvironment: [String: String]) {
+        self.environment = .current(from: processEnvironment)
+        self.exposureOverride = nil
+        // An unset FLIGHT_ENV resolves to `dev`, which is in the dashboard
+        // allowlist — so a production deployment that never set it used to
+        // serve the full unauthenticated dashboard. Whether the environment
+        // was *stated* is a different question from what it resolved to, and
+        // it is the one the gate needs.
+        self.isEnvironmentDeclared = processEnvironment["FLIGHT_ENV"].map { !$0.isEmpty } ?? false
     }
 
     /// Explicit-environment initializer — the test seam (`TestContainer.build`
@@ -41,6 +64,9 @@ public struct ActuatorModule: FlightModule {
     public init(environment: FlightEnvironment) {
         self.environment = environment
         self.exposureOverride = nil
+        // Naming the environment in code is a declaration, the same as
+        // setting FLIGHT_ENV.
+        self.isEnvironmentDeclared = true
     }
 
     /// Explicit exposure, bypassing both the environment allowlist and
@@ -49,16 +75,21 @@ public struct ActuatorModule: FlightModule {
     public init(environment: FlightEnvironment, exposure: ActuatorExposure) {
         self.environment = environment
         self.exposureOverride = exposure
+        self.isEnvironmentDeclared = true
     }
 
     private let exposureOverride: ActuatorExposure?
+    private let isEnvironmentDeclared: Bool
 
     public func configure(_ container: Container) throws {
         // Whether a route is registered at all has to be decided here, and
         // registration-phase code cannot resolve `Configuration` — so the
         // override arrives the same way `FLIGHT_ENV` does.
-        let exposure = try exposureOverride ?? ActuatorExposure.resolve(environment: environment)
-        guard exposure != .disabled else { return }
+        let exposure =
+            try exposureOverride
+            ?? ActuatorExposure.resolve(
+                environment: environment, isEnvironmentDeclared: isEnvironmentDeclared)
+        guard exposure.publishesHealth else { return }
 
         // The environment the gate ran against, for the dashboard to report.
         container.register(
@@ -96,6 +127,19 @@ public struct ActuatorModule: FlightModule {
         // gate is why production had none.
         container.registerRoute(.get, "/actuator/health", source: "FlightActuator") { context in
             try await context.resolve(ActuatorController.self).health(context)
+        }
+        // Liveness and readiness are different questions, and one endpoint
+        // answering both got one of them wrong whichever way it was wired: a
+        // module that has not started yet must not count against liveness (a
+        // slow pod restarts into the same slow start, forever) and must count
+        // against readiness.
+        container.registerRoute(.get, "/actuator/health/live", source: "FlightActuator") {
+            context in
+            try await context.resolve(ActuatorController.self).liveness(context)
+        }
+        container.registerRoute(.get, "/actuator/health/ready", source: "FlightActuator") {
+            context in
+            try await context.resolve(ActuatorController.self).readiness(context)
         }
 
         // The dashboard discloses the module list, every registered
