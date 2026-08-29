@@ -352,4 +352,30 @@ struct PipelineLaneTests {
             #expect(error.route.contains("/ghost"))
         }
     }
+
+    @Test("an empty pipeline { } still declares the lane, and runs nothing")
+    func emptyLaneIsDeclared() async throws {
+        struct EmptyLaneModule: FlightModule {
+            func configure(_ container: Container) throws {
+                // The motivating case: a static-asset lane deliberately
+                // carrying no auth and no transaction binding. The
+                // undeclared-lane error has always said an empty block is
+                // legal; before this, it registered nothing and the lane
+                // did not exist.
+                container.pipeline("assets") {}
+                container.registerRoute(
+                    .get, "/asset", source: "EmptyLaneModule", pipelines: ["assets"]
+                ) { _ in .text("served") }
+            }
+        }
+        let container = try TestContainer.build { EmptyLaneModule() }
+        let client = try TestClient(container: container)
+
+        let response = await client.get("/asset")
+
+        #expect(response.status == .ok)
+        #expect(response.bodyText == "served")
+        // The marker is bookkeeping, not a layer: nothing extra runs.
+        #expect(try container.collectMiddleware(lane: "assets").isEmpty)
+    }
 }

@@ -1,4 +1,5 @@
 import FlightCore
+import Foundation
 import HTTPTypes
 
 /// The "different kind of entry" the shared registration pipeline emits for
@@ -110,16 +111,25 @@ public struct MiddlewareRegistration: Sendable {
     public let lane: String
     public let order: Int
     let generation: Generation
+    /// A placeholder recording that a lane was declared, carrying no
+    /// behavior. `pipeline(_:_:)` registers one per named lane so that a
+    /// lane with no middleware in it still *exists* — the empty
+    /// static-asset lane is the motivating case, and the undeclared-lane
+    /// error already promised it was legal. Filtered out of
+    /// `collectMiddleware(lane:)`, so it costs a request nothing.
+    let isLaneMarker: Bool
     let handle: @Sendable (RequestContext, Next) async throws -> Response
 
     init(
         name: String, lane: String, order: Int, generation: Generation,
+        isLaneMarker: Bool = false,
         handle: @escaping @Sendable (RequestContext, Next) async throws -> Response
     ) {
         self.name = name
         self.lane = lane
         self.order = order
         self.generation = generation
+        self.isLaneMarker = isLaneMarker
         self.handle = handle
     }
 
@@ -228,6 +238,25 @@ extension Container {
     public func pipeline(
         _ name: String, @MiddlewarePipelineBuilder _ build: () -> [any Middleware.Type]
     ) {
+        // Declared before the loop, so a lane with an empty block is still
+        // a lane. Without this the block registers nothing, the lane leaves
+        // no trace, and any route naming it fails validation at bootstrap
+        // with an error that says an empty block is legal.
+        // The qualifier carries a per-call token: two modules may both
+        // declare into one lane (the concatenation case), and a fixed
+        // qualifier would make the second call a duplicate registration.
+        // Extra markers are harmless — they never reach a chain, and the
+        // lane set they feed is a Set.
+        register(
+            MiddlewareRegistration.self,
+            qualifier: "pipeline.\(name).__lane.\(UUID().uuidString)",
+            scope: .singleton
+        ) { _ in
+            MiddlewareRegistration(
+                name: "__lane", lane: name, order: 0, generation: .pipeline,
+                isLaneMarker: true
+            ) { context, next in try await next(context) }
+        }
         for type in build() {
             let typeName = String(reflecting: type)
             register(
@@ -320,7 +349,7 @@ extension Container {
     public func collectMiddleware(lane: String) throws -> [MiddlewareRegistration] {
         try collect(MiddlewareRegistration.self)
             .enumerated()
-            .filter { $0.element.lane == lane }
+            .filter { $0.element.lane == lane && !$0.element.isLaneMarker }
             .sorted {
                 ($0.element.generation, $0.element.order, $0.offset)
                     < ($1.element.generation, $1.element.order, $1.offset)
