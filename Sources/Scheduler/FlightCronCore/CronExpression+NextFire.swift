@@ -28,6 +28,9 @@ extension CronExpression {
     ///   the next search starts strictly after the first and the second
     ///   01:30 is no longer "after" in absolute terms once an hour has
     ///   elapsed. The job runs once, which is what "daily at 01:30" promised.
+    ///   Asked from *inside* the repeated hour — a process that booted at
+    ///   01:20 on the second pass — the first occurrence is already gone, so
+    ///   the second one is the answer and the job still runs once that day.
     public func nextFireDate(after date: Date, in timeZone: TimeZone) -> Date? {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
@@ -106,8 +109,56 @@ extension CronExpression {
                 components = advanceDay(components, calendar: calendar)
                 continue
             }
-            return resolved > date ? resolved : resolved.addingTimeInterval(1)
+            if resolved > date { return resolved }
+
+            // `resolved` is not after `date`, so the wall-clock time matched
+            // is one the fall-back hour repeats and Foundation resolved it to
+            // the first pass, which has already gone by. This happens when
+            // the query itself lands inside the second pass: a process
+            // booting at 01:20 EST with a daily 01:30 job, or a run that
+            // straddled the fold.
+            //
+            // Adding a second here — which is what this used to do — leaves
+            // the answer an hour in the past, and the runner then sleeps for
+            // no time at all, fires, recomputes the same past instant and
+            // spins until real time leaves the fold.
+            if let second = secondPass(matching: components, firstPass: resolved, in: calendar),
+                second > date
+            {
+                return second
+            }
+            // Both passes are behind us. Keep walking rather than answering
+            // with either.
+            components = advanceSecond(components, calendar: calendar)
         }
+    }
+
+    /// The second occurrence of a wall-clock time the clocks repeat.
+    ///
+    /// `Calendar.date(from:)` always resolves an ambiguous time to the first
+    /// pass, and offers no way to ask for the other one. So step forward by
+    /// the transition's own shift and *check* that the components come back
+    /// unchanged — the check is what makes this safe when the components were
+    /// never ambiguous at all, or when the next transition is months away.
+    ///
+    /// Returns nil for a spring-forward transition, where nothing repeats.
+    private func secondPass(
+        matching components: DateComponents, firstPass: Date, in calendar: Calendar
+    ) -> Date? {
+        let zone = calendar.timeZone
+        guard let transition = zone.nextDaylightSavingTimeTransition(after: firstPass)
+        else { return nil }
+        let shift = zone.secondsFromGMT(for: firstPass) - zone.secondsFromGMT(for: transition)
+        guard shift > 0 else { return nil }
+
+        let candidate = firstPass.addingTimeInterval(Double(shift))
+        let round = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: candidate)
+        guard round.year == components.year, round.month == components.month,
+            round.day == components.day, round.hour == components.hour,
+            round.minute == components.minute, round.second == components.second
+        else { return nil }
+        return candidate
     }
 
     /// Cron's day rule: when both day fields are narrowed they are OR'd, not
@@ -121,6 +172,12 @@ extension CronExpression {
             return daysOfMonth.contains(dayOfMonth) || daysOfWeek.contains(dayOfWeek)
         }
         return daysOfMonth.contains(dayOfMonth) && daysOfWeek.contains(dayOfWeek)
+    }
+
+    private func advanceSecond(_ c: DateComponents, calendar: Calendar) -> DateComponents {
+        var next = c
+        next.second = (c.second ?? 0) + 1
+        return normalize(next, calendar: calendar)
     }
 
     private func advanceMinute(_ c: DateComponents, calendar: Calendar) -> DateComponents {

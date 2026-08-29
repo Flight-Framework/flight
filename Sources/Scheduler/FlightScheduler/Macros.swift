@@ -45,9 +45,12 @@ public macro Scheduler() =
 ///   - cron: The schedule. Must be a string literal — that is what makes
 ///     build-time checking possible. For a schedule known only at runtime,
 ///     use `container.registerScheduledJob(_:cron:)`.
-///   - timeZone: An IANA identifier. Defaults to UTC rather than the
-///     machine's zone, so the same deployment behaves the same everywhere
-///     and nobody discovers the difference during a daylight-saving change.
+///   - timeZone: An IANA identifier, checked at build time against the same
+///     database the scheduler reads — a missing underscore is a compile
+///     error, not a job that quietly runs in GMT. Defaults to UTC rather
+///     than the machine's zone, so the same deployment behaves the same
+///     everywhere and nobody discovers the difference during a
+///     daylight-saving change.
 ///   - onEveryNode: `false` — the default — means the job runs **once** per
 ///     firing, however many servers are running. On a single server that is
 ///     simply what happens; on several it needs a `JobCoordinator`, and the
@@ -57,6 +60,8 @@ public macro Scheduler() =
 ///   - onOverlap: What to do when a firing arrives while the previous run is
 ///     still going. Defaults to skipping, because piling a second copy onto
 ///     a job that has grown slow is how a slow job becomes an outage.
+///     `.queue` holds the firing and runs it when the job finishes — one
+///     firing at most, never two copies at once.
 @attached(peer)
 public macro Scheduled(
     _ cron: String,
@@ -76,7 +81,11 @@ public macro Scheduled(
 /// From the *end* of the previous run, not the start: a job that takes
 /// longer than its period would otherwise be perpetually late and eventually
 /// overlapping, and "every five minutes" almost always means "with five
-/// minutes of quiet in between".
+/// minutes of quiet in between". That is also why `onOverlap` means nothing
+/// here — an interval firing cannot arrive while the job is running — and
+/// why `onEveryNode: false` cannot be enforced across a cluster: each node
+/// measures from its own last run, so no two ever contend for one firing.
+/// The scheduler says so at startup if a coordinator is registered.
 ///
 /// Use a cron expression instead when the schedule is a wall-clock time —
 /// intervals drift relative to the clock and know nothing about time zones.

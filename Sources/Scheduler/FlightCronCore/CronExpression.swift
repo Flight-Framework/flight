@@ -44,7 +44,11 @@ public struct CronExpression: Sendable, Equatable, CustomStringConvertible {
     /// True when both day fields are restricted. Cron's oldest wart: when
     /// day-of-month and day-of-week are *both* narrowed, they combine with OR,
     /// not AND — `0 0 0 1 * MON` means "the 1st, and also every Monday".
-    /// Every mainstream implementation agrees, and it surprises everyone.
+    /// It surprises everyone, and implementations agree about it for every
+    /// spelling except one: whether `*/n` counts as narrowed. Vixie says no
+    /// (it reads the leading `*`), others say yes, and the two readings give
+    /// different days. ``init(_:)`` refuses that shape rather than picking a
+    /// side quietly.
     let bothDayFieldsRestricted: Bool
 
     public var description: String { text }
@@ -78,6 +82,20 @@ public struct CronExpression: Sendable, Equatable, CustomStringConvertible {
             normalized[5], range: 0...6, field: "day-of-week", in: text, names: Self.dayNames,
             normalize: { $0 == 7 ? 0 : $0 })  // both 0 and 7 mean Sunday
         self.bothDayFieldsRestricted = !daysOfMonth.isWildcard && !daysOfWeek.isWildcard
+        if bothDayFieldsRestricted,
+            daysOfMonth.hasSteppedWildcard || daysOfWeek.hasSteppedWildcard
+        {
+            throw CronParseError(
+                text: text,
+                reason: """
+                    day-of-month and day-of-week are both narrowed and one of them is a \
+                    "*/n" step. Implementations disagree about whether that counts as \
+                    narrowed, so the same expression means different days depending on who \
+                    reads it: either "every nth day, and also every named weekday" or "every \
+                    named weekday that also falls on an nth day". Say which you mean — leave \
+                    one field as "*", or write the step out as an explicit list.
+                    """)
+        }
     }
 
     static let monthNames = [
@@ -101,8 +119,6 @@ public struct CronParseError: Error, Equatable, CustomStringConvertible {
     public var description: String { "invalid cron expression \"\(text)\": \(reason)" }
 }
 
-#if canImport(Foundation)
 extension CronParseError: LocalizedError {
     public var errorDescription: String? { description }
 }
-#endif

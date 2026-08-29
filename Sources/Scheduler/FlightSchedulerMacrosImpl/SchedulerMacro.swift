@@ -98,7 +98,8 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
             trigger =
                 "FlightScheduler.JobTrigger.cron("
                 + "try! FlightScheduler.CronExpression(\"\(text)\"), "
-                + "timeZone: Foundation.TimeZone(identifier: \(timeZone)) ?? .gmt)"
+                + "timeZone: try FlightScheduler._flightTimeZone("
+                + "\(timeZone), job: String(reflecting: Self.self) + \".\(job.methodName)\"))"
         case .interval(let every, let initialDelay):
             let delay = initialDelay ?? ".seconds(0)"
             trigger =

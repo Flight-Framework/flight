@@ -1,5 +1,3 @@
-import Foundation
-
 /// One cron field, as the set of values it matches.
 ///
 /// A bitmask rather than a `Set<Int>`: every field is bounded (0–59 at
@@ -8,6 +6,14 @@ import Foundation
 struct FieldSet: Sendable, Equatable {
     private let mask: UInt64
     let isWildcard: Bool
+    /// True for a `*/n` term — a wildcard narrowed by a step.
+    ///
+    /// Not the same as `isWildcard`, and the difference matters only for
+    /// cron's day rule, where implementations genuinely disagree about
+    /// whether `*/2` counts as "restricted". Recorded here so
+    /// ``CronExpression`` can refuse the one shape it makes ambiguous
+    /// rather than pick a side silently.
+    let hasSteppedWildcard: Bool
 
     func contains(_ value: Int) -> Bool {
         guard value >= 0, value < 64 else { return false }
@@ -52,6 +58,7 @@ struct FieldSet: Sendable, Equatable {
 
         var bits: UInt64 = 0
         var wildcard = false
+        var steppedWildcard = false
 
         for term in text.split(separator: ",", omittingEmptySubsequences: false).map(String.init) {
             guard !term.isEmpty else { throw fail("empty term in \"\(text)\"") }
@@ -73,14 +80,42 @@ struct FieldSet: Sendable, Equatable {
             if base == "*" {
                 low = range.lowerBound
                 high = range.upperBound
-                if stepParts.count == 1 { wildcard = true }
+                if stepParts.count == 1 { wildcard = true } else { steppedWildcard = true }
             } else if base.contains("-") {
                 let ends = base.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
                 guard ends.count == 2 else { throw fail("\"\(base)\" is not a range") }
                 low = try value(ends[0])
                 high = try value(ends[1])
+                // Sunday is spelled both 0 and 7. Normalizing 7 to 0 before
+                // the range check turned `5-7` — Friday through Sunday, which
+                // Vixie accepts — into a backwards range, diagnosed with a
+                // message about wrapping the author never wrote. Read a
+                // literal 7 at the top of a range as the end of the week and
+                // walk the raw values, normalizing each.
+                if high < low, Int(ends[1]) == range.upperBound + 1 {
+                    var v = low
+                    while v <= range.upperBound + 1 {
+                        bits |= (1 << UInt64(normalize(v)))
+                        v += step
+                    }
+                    continue
+                }
                 guard low <= high else {
-                    throw fail("range \"\(base)\" runs backwards; wrapping ranges are not supported")
+                    // Spelled back in the author's own alphabet: a suggestion
+                    // that answers "FRI-TUE" with "FRI-6,0-TUE" is a second
+                    // puzzle, not a fix.
+                    let usedNames = Int(ends[0]) == nil
+                    func spell(_ v: Int) -> String {
+                        guard usedNames, let name = names.first(where: { $0.value == v })?.key
+                        else { return "\(v)" }
+                        return name
+                    }
+                    throw fail(
+                        """
+                        range "\(base)" runs backwards; wrapping ranges are not supported — \
+                        write it as two terms, \
+                        "\(ends[0])-\(spell(range.upperBound)),\(spell(range.lowerBound))-\(ends[1])"
+                        """)
                 }
             } else {
                 low = try value(base)
@@ -99,5 +134,6 @@ struct FieldSet: Sendable, Equatable {
         guard bits != 0 else { throw fail("matches nothing") }
         self.mask = bits
         self.isWildcard = wildcard
+        self.hasSteppedWildcard = steppedWildcard
     }
 }

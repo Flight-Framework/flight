@@ -90,4 +90,51 @@ struct CronDSTTests {
             }
         }
     }
+
+    @Test("a query from inside the repeated hour never answers with a past instant")
+    func insideTheFold() throws {
+        // The case the other DST tests never reach: every one of them asks
+        // "what is next" from *before* the transition. Ask from inside the
+        // second pass — a process booting at 01:20 EST, or a job whose run
+        // straddled the fold — and Foundation resolves the ambiguous wall
+        // time to the *first* 01:30, which is already an hour gone.
+        //
+        // A past answer is not merely wrong: `sleep(until:)` returns at once
+        // for it, so the runner fires, recomputes the same past instant, and
+        // spins until real time leaves the fold.
+        let cron = try CronExpression("0 30 1 * * *")
+
+        // 2026-11-01T06:20:00Z is 01:20 EST — the second pass of the hour.
+        let insideFold = Date(timeIntervalSince1970: 1_793_514_000)
+        #expect(render(insideFold, newYork) == "2026-11-01T01:20:00")
+
+        let next = try #require(cron.nextFireDate(after: insideFold, in: newYork))
+        #expect(next > insideFold, "answered \(render(next, newYork)), which is not in the future")
+    }
+
+    @Test("from inside the fold every subsequent answer still advances")
+    func insideTheFoldStaysMonotonic() throws {
+        // The runner's loop calls nextFireDate repeatedly, so one correct
+        // answer is not enough — the sequence has to keep climbing out.
+        let cron = try CronExpression("0 30 1 * * *")
+        var t = Date(timeIntervalSince1970: 1_793_514_000)
+        for _ in 0..<4 {
+            let next = try #require(cron.nextFireDate(after: t, in: newYork))
+            #expect(next > t, "went backwards at \(render(t, newYork))")
+            t = next
+        }
+    }
+
+    @Test("a second-resolution schedule walks out of the fold rather than looping")
+    func secondResolutionInsideTheFold() throws {
+        // The pathological shape: a schedule that matches inside the fold on
+        // both passes. Every answer must still be strictly later.
+        let cron = try CronExpression("0 * * * * *")
+        var t = Date(timeIntervalSince1970: 1_793_514_000)
+        for _ in 0..<10 {
+            let next = try #require(cron.nextFireDate(after: t, in: newYork))
+            #expect(next > t)
+            t = next
+        }
+    }
 }

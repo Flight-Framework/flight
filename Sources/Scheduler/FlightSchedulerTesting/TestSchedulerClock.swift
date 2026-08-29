@@ -38,7 +38,12 @@ public final class TestSchedulerClock: SchedulerClock, Sendable {
     }
 
     public func advance(by duration: Duration) {
-        current.withLock { $0 = $0.addingTimeInterval(Double(duration.components.seconds)) }
+        // Attoseconds included: reading whole seconds alone made
+        // `advance(by: .milliseconds(500))` a no-op, so a test written
+        // against a sub-second schedule silently proved nothing.
+        let parts = duration.components
+        let seconds = Double(parts.seconds) + Double(parts.attoseconds) / 1e18
+        current.withLock { $0 = $0.addingTimeInterval(seconds) }
     }
 
     public func sleep(until instant: Date) async throws {

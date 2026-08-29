@@ -22,3 +22,17 @@ extension Duration {
     /// difference between the two kinds of schedule.
     public static func days(_ count: Int) -> Duration { .seconds(count * 86_400) }
 }
+
+extension Duration {
+    /// This duration in seconds, attoseconds included.
+    ///
+    /// `components.seconds` alone silently truncates: a scheduler that reads
+    /// it turns `.milliseconds(500)` into zero — a job with no gap between
+    /// firings — and `.milliseconds(1500)` into one second. Named rather than
+    /// a `TimeInterval` initialiser so it cannot collide with anything else
+    /// in an importer's file.
+    var flightSeconds: Double {
+        let parts = components
+        return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
+    }
+}

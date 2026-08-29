@@ -30,13 +30,18 @@ Add `FlightSchedulerModule` to `bootstrap` and that is the whole setup.
 ## The schedule is a build error, not a 3am surprise
 
 ```swift
-@Scheduled("0 0 25 * * *")   // error: hour: 25 is out of range 0–23
+@Scheduled("0 0 25 * * *")                     // error: hour: 25 is out of range 0–23
+@Scheduled("0 0 9 * * *", timeZone: "America/NewYork")   // error: not an IANA identifier
 ```
 
 Worth trusting only if the build and the runtime agree about the grammar, so
 they are not two parsers kept in step by discipline. The macro plugin imports
 `CronExpression` from `FlightCronCore` — the same target the scheduler runs —
 and validates with it. There is no second implementation to drift.
+
+The time zone is checked the same way, against Foundation's own database: a
+missing underscore used to compile cleanly and run the job in GMT with
+nothing said, which is the 3am surprise this section is named for.
 
 Six fields, seconds first; the classic five-field crontab shape means the
 same schedule at second zero.
@@ -96,9 +101,11 @@ write.
 | | |
 |---|---|
 | A job throws | Logged, counted, retried at its next firing. One broken job never stops the others. |
-| A run overruns its next firing | Skipped by default — piling a second copy onto a slow job is how a slow job becomes an outage. `.queue` waits instead. |
+| A run overruns its next firing | Skipped by default — piling a second copy onto a slow job is how a slow job becomes an outage. `.queue` holds the firing and runs it when the job finishes, never alongside; a job more than one firing behind keeps only the newest, and says so. Applies to cron schedules, the only kind with firing instants that can arrive while a run is in progress: an interval is measured from the end of the previous run, so it cannot overlap by construction. |
 | The coordinator is unreachable | The firing is skipped. Not running is recoverable; running a once-only job everywhere because a lock service blipped is not. |
-| The schedule can never match again | Reported once, and the job stops rather than spinning on a question with no answer. |
+| The schedule can never match again | Reported once, and that job stops rather than spinning on a question with no answer. The other jobs carry on — one runner ending is not the scheduler ending. |
+| An interval job is set to run once, with a coordinator registered | Logged as an error at startup, and it runs on every node anyway. An interval's firing instants come from each node's own last run, so no two nodes ever claim the same firing and every claim succeeds. Coordinate it with a cron expression, or say `onEveryNode: true`. |
+| An interval is zero or negative | Startup fails, naming the job. `Duration` is not a literal, so the macro cannot catch it; a firing every time round the loop is a pinned core, not a schedule. |
 
 ## Daylight saving
 
@@ -108,11 +115,18 @@ a deployment behaves the same everywhere. On the two days a year it matters:
 - **Spring forward** — a 02:30 job on the day 02:00–03:00 does not exist runs
   once, at 03:30. Late, rather than not at all.
 - **Fall back** — a 01:30 job on the day 01:00–02:00 happens twice runs once,
-  because "daily at 01:30" promised once.
+  because "daily at 01:30" promised once. Asked from *inside* the repeated
+  hour — a process that booted at 01:20 on the second pass — the answer is
+  the second 01:30, since the first is already gone.
 
-Both are pinned by tests. The first one caught a real bug during development:
-the search normalized its own state through `Calendar`, which resolved the
-missing hour mid-search and skipped the whole day.
+Both are pinned by tests, and so is the third case. The first caught a real
+bug during development: the search normalized its own state through
+`Calendar`, which resolved the missing hour mid-search and skipped the whole
+day. The third caught a worse one: Foundation resolves an ambiguous wall time
+to the first pass, so a query from inside the second pass was answered with
+an instant up to an hour in the *past* — and the runner then slept for no
+time at all, fired, recomputed the same past instant, and spun until real
+time left the fold.
 
 Intervals are a different thing on purpose: they measure from the *end* of
 the previous run and know nothing about wall-clock time, so a job taking

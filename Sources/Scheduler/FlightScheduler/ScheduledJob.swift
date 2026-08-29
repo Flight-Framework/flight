@@ -21,9 +21,36 @@ public enum JobTrigger: Sendable, Equatable {
         case .cron(let expression, let timeZone):
             return expression.nextFireDate(after: date, in: timeZone)
         case .interval(let period, let initialDelay):
+            // Whole seconds only used to be read off both durations, so
+            // `.milliseconds(500)` became a zero-length period — a firing
+            // every time round the loop with no sleep in between — and
+            // `.milliseconds(1500)` fired every second.
+            let seconds = period.flightSeconds
             let base = lastCompletion ?? date.addingTimeInterval(
-                Double(initialDelay.components.seconds) - Double(period.components.seconds))
-            return base.addingTimeInterval(Double(period.components.seconds))
+                initialDelay.flightSeconds - seconds)
+            return base.addingTimeInterval(seconds)
+        }
+    }
+
+    /// The period, for an interval trigger — nil for cron.
+    public var intervalPeriod: Duration? {
+        switch self {
+        case .cron: nil
+        case .interval(let period, _): period
+        }
+    }
+
+    /// Whether this trigger's firing instants are this node's own.
+    ///
+    /// An interval is measured from the end of the previous run, so two nodes
+    /// that started at different moments never agree on when a firing is —
+    /// which means a ``JobCoordinator`` has no shared key to arbitrate and
+    /// ``JobScope/once`` cannot be honoured. Cron instants are wall-clock and
+    /// identical everywhere.
+    public var isNodeLocal: Bool {
+        switch self {
+        case .cron: false
+        case .interval: true
         }
     }
 }
@@ -49,6 +76,11 @@ public enum JobScope: Sendable, Equatable {
 }
 
 /// What to do when a firing arrives and the previous run has not finished.
+///
+/// Only a cron schedule can present this choice. An interval is measured from
+/// the end of the previous run, so its next firing is not even known until
+/// the current one finishes — overlap there is impossible by construction,
+/// and the policy is ignored.
 public enum OverlapPolicy: Sendable, Equatable {
     /// Skip the firing entirely and log it. The default: a job still running
     /// when its next firing arrives is usually a job that got slower, and
@@ -56,6 +88,13 @@ public enum OverlapPolicy: Sendable, Equatable {
     /// outage.
     case skip
     /// Wait for the running job, then run again immediately.
+    ///
+    /// Then, never alongside: two copies at once is what ``skip`` exists to
+    /// avoid, and this differs from it in *when*, not in how many. At most
+    /// one firing waits — a job so far behind that a second one arrives is
+    /// already in trouble, and an unbounded backlog of copies is the same
+    /// outage by a slower route — so a newly arrived firing displaces the
+    /// waiting one, and the displacement is logged.
     case queue
 }
 
