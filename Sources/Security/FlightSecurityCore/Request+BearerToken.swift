@@ -1,5 +1,4 @@
 import FlightWeb
-import Foundation
 
 extension Request {
     /// The bearer token from the `Authorization` header, per RFC 6750,
@@ -18,7 +17,12 @@ extension Request {
 
     /// RFC 7235 credentials syntax: `Bearer 1*SP token68`.
     static func parseBearer(_ headerValue: String) -> String? {
-        let trimmed = headerValue.trimmingCharacters(in: .whitespaces)
+        // `trimmingCharacters(in: .whitespaces)` is the only thing this file
+        // wanted Foundation for, on the path every authenticated request
+        // takes. Two `drop`s off the stdlib do the same job.
+        var trimmed = Substring(headerValue)
+        while let first = trimmed.first, first.isWhitespace { trimmed.removeFirst() }
+        while let last = trimmed.last, last.isWhitespace { trimmed.removeLast() }
         guard trimmed.count > 7 else { return nil }
         let schemeEnd = trimmed.index(trimmed.startIndex, offsetBy: 6)
         guard trimmed[..<schemeEnd].lowercased() == "bearer" else { return nil }

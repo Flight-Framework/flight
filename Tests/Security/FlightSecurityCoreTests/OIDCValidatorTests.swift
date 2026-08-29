@@ -80,9 +80,13 @@ struct OIDCValidatorTests {
         let (validator, _) = try makeValidator()
         let token = try await identity.sign(standardClaims(now: clock.now))
         let principal = try await validator.validate(token)
-        for consumed in ["iss", "sub", "aud", "exp", "nbf", "iat"] {
+        for consumed in ["iss", "sub", "aud", "exp", "nbf"] {
             #expect(principal.claims[consumed] == nil, "\(consumed) should be consumed")
         }
+        // `iat` is not consumed: nothing validates it, so stripping it only
+        // took issued-at away from applications that wanted to age a session
+        // by it. It stays where an app can read it.
+        #expect(principal.claims["iat"] != nil, "iat is surfaced, not consumed")
     }
 
     @Test("audience may be an array that includes this application (RFC 7519)")
@@ -388,6 +392,39 @@ struct OIDCValidatorTests {
         clock.advance(by: 4000)
         let fresh = try await identity.sign(standardClaims(now: clock.now))
         await expectValidationError(.keySourceUnavailable) { try await validator.validate(fresh) }
+    }
+
+    @Test("the stale bound holds for every request, not just the one that retries")
+    func staleBoundHoldsInsideTheCooldown() async throws {
+        // The bound was enforced only where a refresh was attempted and
+        // failed. The refresh is cooldown-gated, so past the limit exactly
+        // one request per cooldown window was refused and every other one
+        // took the cached-return fast path — which had no age check at all.
+        // At any real request rate that is ~all traffic still validating
+        // against keys that may have been revoked, for the whole outage:
+        // the guarantee inverted, while a test that made one request at a
+        // time went on passing.
+        let (validator, source) = try makeValidator(
+            jwksCacheTTL: 300, jwksRefreshCooldown: 30, jwksMaxStaleAge: 3600)
+        let token = try await identity.sign(standardClaims(now: clock.now))
+        _ = try await validator.validate(token)
+
+        source.setError(JWKSSourceError(reason: "IdP down"))
+        clock.advance(by: 4000)  // past the stale limit
+
+        // The request that attempts the refresh is refused, as it always was.
+        let first = try await identity.sign(standardClaims(now: clock.now))
+        await expectValidationError(.keySourceUnavailable) { try await validator.validate(first) }
+        let fetchesAfterRefusal = source.fetchCount
+
+        // Every request behind it, inside the same cooldown window, must be
+        // refused too — without going near the IdP.
+        for _ in 0..<5 {
+            await expectValidationError(.keySourceUnavailable) {
+                try await validator.validate(first)
+            }
+        }
+        #expect(source.fetchCount == fetchesAfterRefusal, "the cooldown still gates fetches")
     }
 
     @Test("no keys at all — fetch failing from the start — is keySourceUnavailable")

@@ -65,7 +65,10 @@ public final class OIDCTokenValidator: TokenValidator {
             guard keys.keyIDs.contains(kid) else {
                 throw TokenValidationError(
                     kind: .unknownKeyID,
-                    reason: "token kid \"\(kid)\" is not in the issuer's JWKS (refresh attempted)"
+                    reason: """
+                        token kid "\(kid)" is not in the issuer's JWKS (a refresh was \
+                        attempted unless one had been within the cooldown window)
+                        """
                 )
             }
         }
@@ -90,7 +93,12 @@ public final class OIDCTokenValidator: TokenValidator {
     }
 
     /// Forces a JWKS fetch. Used by the maintenance service to pre-warm at
-    /// startup and keep keys fresh; failures are the caller's to log.
+    /// startup and keep keys fresh.
+    ///
+    /// Throws only when there is nothing left to serve. A fetch that fails
+    /// while cached keys are still inside their stale window is *not* an
+    /// error here — the cache logs it and keeps serving — so a successful
+    /// return means "keys are usable", not "the IdP answered".
     public func refreshKeys() async throws {
         _ = try await cache.snapshot(.force)
     }
@@ -178,7 +186,12 @@ public final class OIDCTokenValidator: TokenValidator {
 
     /// Claims consumed by validation and surfaced as dedicated `Principal`
     /// fields; everything else lands in `Principal.claims`.
-    private static let consumedClaims: Set<String> = ["iss", "sub", "aud", "exp", "nbf", "iat"]
+    ///
+    /// `iat` is deliberately absent: nothing here validates it, and stripping
+    /// a claim the application can no longer see buys nothing. An app that
+    /// wants issued-at — to age a session, say — finds it in
+    /// ``Principal/claims``.
+    private static let consumedClaims: Set<String> = ["iss", "sub", "aud", "exp", "nbf"]
 
     private func makePrincipal(from claims: RawClaims) -> Principal {
         var remaining: [String: any Sendable] = [:]

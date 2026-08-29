@@ -154,8 +154,12 @@ as you. `allow_insecure_anywhere` has no safe use against a remote host.
 ### Why stale keys expire
 
 When a refresh fails, cached keys keep serving so an IdP blip does not take
-the service down. That window is bounded by `jwks_max_stale`: past it,
-validation fails instead. Unbounded, a revoked key stays honored for as long
+the service down. That window is bounded by `jwks_max_stale`: past it, every
+request fails — not only the one that happens to attempt the refresh. The
+bound used to be checked on the refresh path alone, and refreshes are
+cooldown-gated, so past the limit roughly one request per cooldown window was
+refused while the rest went on validating against keys that might have been
+revoked. Unbounded, a revoked key stays honored for as long
 as the outage lasts — which is the exact window revocation exists to close.
 Six hours is long enough to ride out a real outage and short enough that a
 revocation takes effect the same day.
@@ -165,7 +169,10 @@ revocation takes effect the same day.
 A JWK may carry `use` (`sig`/`enc`) or `key_ops`. Keys not published for
 signature verification are dropped from the verification set rather than
 being trusted to verify tokens — the cross-protocol mistake those fields
-exist to prevent.
+exist to prevent. Matched by position rather than by `kid`, since `kid` is
+optional in RFC 7517 and a key without one used to slip through the filter.
+A key set where *no* key carries a `kid` is legal and usable: tokens without
+a `kid` are verified by trying every key in the set.
 
 Claim-name entries match an exact top-level claim first (so Auth0-style
 namespaced claims like `https://example.com/roles` work), then as a dot-path
@@ -244,7 +251,7 @@ issuance, no TLS opinions.
 
 ```sh
 swift build
-swift test    # 86 tests, hermetic (in-memory JWKS/HTTP fakes, injected clocks)
+swift test    # 98 tests, hermetic (in-memory JWKS/HTTP fakes, injected clocks)
 ```
 
 Depends on `flight-core` and `flight-web` by relative path, plus JWTKit and

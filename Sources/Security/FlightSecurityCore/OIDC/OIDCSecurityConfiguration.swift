@@ -67,17 +67,33 @@ public struct OIDCSecurityConfiguration: Sendable {
     /// element-wise.
     public var scopesClaims: [String]
 
+    /// The defaults, written once.
+    ///
+    /// The memberwise initialiser and the config parser each carried their
+    /// own copy of every one of these, so a changed default was a two-place
+    /// edit with nothing to catch the half that was missed — and the two
+    /// halves disagreeing means a value that depends on which door the
+    /// configuration came through.
+    public enum Defaults {
+        public static let jwksCacheTTL: TimeInterval = 3600
+        public static let clockSkewLeeway: TimeInterval = 60
+        public static let jwksRefreshCooldown: TimeInterval = 30
+        public static let jwksMaxStaleAge: TimeInterval = 6 * 60 * 60
+        public static let rolesClaims = ["roles", "groups", "realm_access.roles"]
+        public static let scopesClaims = ["scope", "scp"]
+    }
+
     public init(
         issuer: String,
         audience: String,
         jwksURL: URL? = nil,
-        jwksCacheTTL: TimeInterval = 3600,
-        clockSkewLeeway: TimeInterval = 60,
-        jwksRefreshCooldown: TimeInterval = 30,
-        jwksMaxStaleAge: TimeInterval = 6 * 60 * 60,
+        jwksCacheTTL: TimeInterval = Defaults.jwksCacheTTL,
+        clockSkewLeeway: TimeInterval = Defaults.clockSkewLeeway,
+        jwksRefreshCooldown: TimeInterval = Defaults.jwksRefreshCooldown,
+        jwksMaxStaleAge: TimeInterval = Defaults.jwksMaxStaleAge,
         jwksTransport: JWKSTransportPolicy = .httpsOnly,
-        rolesClaims: [String] = ["roles", "groups", "realm_access.roles"],
-        scopesClaims: [String] = ["scope", "scp"]
+        rolesClaims: [String] = Defaults.rolesClaims,
+        scopesClaims: [String] = Defaults.scopesClaims
     ) throws {
         guard !issuer.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw ConfigError.decodingFailed(
@@ -127,28 +143,27 @@ public struct OIDCSecurityConfiguration: Sendable {
             issuer: configuration.get("security.oidc.issuer", as: String.self),
             audience: configuration.get("security.oidc.audience", as: String.self),
             jwksURL: configuration.getIfPresent("security.oidc.jwks_url", as: URL.self),
-            jwksCacheTTL: TimeInterval(
-                try configuration.getIfPresent("security.oidc.jwks_cache_ttl", as: Int.self) ?? 3600
-            ),
-            clockSkewLeeway: TimeInterval(
-                try configuration.getIfPresent("security.oidc.clock_skew_leeway", as: Int.self) ?? 60
-            ),
-            jwksRefreshCooldown: TimeInterval(
-                try configuration.getIfPresent("security.oidc.jwks_refresh_cooldown", as: Int.self) ?? 30
-            ),
-            jwksMaxStaleAge: TimeInterval(
-                try configuration.getIfPresent("security.oidc.jwks_max_stale", as: Int.self)
-                    ?? 6 * 60 * 60
-            ),
+            jwksCacheTTL: try configuration.getIfPresent(
+                "security.oidc.jwks_cache_ttl", as: Int.self).map(TimeInterval.init)
+                ?? Defaults.jwksCacheTTL,
+            clockSkewLeeway: try configuration.getIfPresent(
+                "security.oidc.clock_skew_leeway", as: Int.self).map(TimeInterval.init)
+                ?? Defaults.clockSkewLeeway,
+            jwksRefreshCooldown: try configuration.getIfPresent(
+                "security.oidc.jwks_refresh_cooldown", as: Int.self).map(TimeInterval.init)
+                ?? Defaults.jwksRefreshCooldown,
+            jwksMaxStaleAge: try configuration.getIfPresent(
+                "security.oidc.jwks_max_stale", as: Int.self).map(TimeInterval.init)
+                ?? Defaults.jwksMaxStaleAge,
             jwksTransport: try Self.transportPolicy(
                 configuration.getIfPresent("security.oidc.jwks_transport", as: String.self)),
             rolesClaims: Self.claimList(
                 try configuration.getIfPresent("security.oidc.roles_claim", as: String.self),
-                default: ["roles", "groups", "realm_access.roles"]
+                default: Defaults.rolesClaims
             ),
             scopesClaims: Self.claimList(
                 try configuration.getIfPresent("security.oidc.scopes_claim", as: String.self),
-                default: ["scope", "scp"]
+                default: Defaults.scopesClaims
             )
         )
     }

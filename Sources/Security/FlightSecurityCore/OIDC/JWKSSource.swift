@@ -176,29 +176,38 @@ public final class HTTPJWKSSource: JWKSSource {
             return jwks  // Already decoded as a JWKS; nothing more to learn.
         }
 
-        var rejected: [String: String] = [:]
-        for key in document.keys {
-            guard let kid = key.kid else { continue }
+        // By position, not by `kid`. `kid` is optional in RFC 7517, and
+        // matching on it let a kid-less `use: "enc"` key through the filter
+        // and into the verification set — the one key the filter exists to
+        // keep out. `JWKS` decodes its `keys` array wholesale, so a document
+        // that decoded at all has the same keys in the same order; the count
+        // check is what makes that assumption checkable rather than assumed.
+        guard document.keys.count == jwks.keys.count else { return jwks }
+
+        var rejected: [Int: String] = [:]
+        for (index, key) in document.keys.enumerated() {
             if let use = key.use, use != "sig" {
-                rejected[kid] = "use=\(use)"
+                rejected[index] = "use=\(use)"
             } else if let ops = key.keyOps, !ops.contains("verify") {
-                rejected[kid] = "key_ops=\(ops.joined(separator: ","))"
+                rejected[index] = "key_ops=\(ops.joined(separator: ","))"
             }
         }
         guard !rejected.isEmpty else { return jwks }
 
+        let described = rejected.sorted { $0.key < $1.key }.map { index, reason in
+            "\(document.keys[index].kid ?? "<no kid>") (\(reason))"
+        }
         logger.debug(
             "ignoring JWKS keys not published for signature verification",
             metadata: [
                 "jwks_uri": "\(url.absoluteString)",
-                "ignored": "\(rejected.map { "\($0.key) (\($0.value))" }.joined(separator: ", "))",
+                "ignored": "\(described.joined(separator: ", "))",
             ]
         )
         var filtered = jwks
-        filtered.keys = jwks.keys.filter { key in
-            guard let kid = key.keyIdentifier?.string else { return true }
-            return rejected[kid] == nil
-        }
+        filtered.keys = jwks.keys.enumerated()
+            .filter { rejected[$0.offset] == nil }
+            .map(\.element)
         return filtered
     }
 

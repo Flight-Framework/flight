@@ -57,7 +57,7 @@ actor JWKSCache {
         source: any JWKSSource,
         ttl: TimeInterval,
         refreshCooldown: TimeInterval,
-        maxStaleAge: TimeInterval = 6 * 60 * 60,
+        maxStaleAge: TimeInterval = OIDCSecurityConfiguration.Defaults.jwksMaxStaleAge,
         now: @escaping @Sendable () -> Date = { Date() },
         logger: Logger = Logger(label: "flight.security.jwks")
     ) {
@@ -67,6 +67,21 @@ actor JWKSCache {
         self.maxStaleAge = maxStaleAge
         self.now = now
         self.logger = logger
+    }
+
+    /// The refusal for a key set past its stale limit.
+    ///
+    /// One place, so the cached-return path and the refresh-failure path
+    /// cannot drift in what they tell the operator — they did, and the
+    /// cached-return path was not refusing at all.
+    private func staleLimitExceeded(age: TimeInterval, cause: String) -> TokenValidationError {
+        TokenValidationError(
+            kind: .keySourceUnavailable,
+            reason: """
+                cached JWKS is \(Int(age))s old, past the \(Int(maxStaleAge))s stale limit, \
+                and \(cause)
+                """
+        )
     }
 
     func snapshot(_ hint: RefreshHint = .ifStale) async throws -> Snapshot {
@@ -87,7 +102,31 @@ actor JWKSCache {
         }
 
         guard wantsRefresh else {
-            if let current { return current }
+            if let current {
+                // The max-stale bound belongs here too, not only on the
+                // refresh-failure path below. Past the limit, the refresh is
+                // cooldown-gated, so exactly one request per window was
+                // refused and every other one took this fast path with no age
+                // check — at any real request rate, ~all traffic still
+                // validating against keys that may have been revoked, for as
+                // long as the outage lasted. That inverts the guarantee the
+                // bound exists to give.
+                if let fetchedAt {
+                    let age = moment.timeIntervalSince(fetchedAt)
+                    guard age < maxStaleAge else {
+                        // Not logged: this runs per request, and the path
+                        // that actually attempted the refresh has already
+                        // logged the outage once per cooldown window.
+                        throw staleLimitExceeded(
+                            age: age,
+                            cause: """
+                                a refresh was attempted within the last \
+                                \(Int(refreshCooldown))s and failed
+                                """)
+                    }
+                }
+                return current
+            }
             if let inflight {
                 // A fetch is running right now (starting it is what closed
                 // the cooldown gate) — join it rather than failing fast.
@@ -124,13 +163,8 @@ actor JWKSCache {
                             "reason": "\(error)",
                         ]
                     )
-                    throw TokenValidationError(
-                        kind: .keySourceUnavailable,
-                        reason: """
-                            cached JWKS is \(Int(age))s old, past the \(Int(maxStaleAge))s stale \
-                            limit, and the key source is still unreachable: \(error)
-                            """
-                    )
+                    throw staleLimitExceeded(
+                        age: age, cause: "the key source is still unreachable: \(error)")
                 }
                 logger.warning(
                     "JWKS refresh failed; serving cached keys",
@@ -185,9 +219,11 @@ actor JWKSCache {
     private static func buildSnapshot(from jwks: JWKS, logger: Logger) async throws -> Snapshot {
         let collection = JWTKeyCollection()
         var keyIDs: Set<String> = []
+        var usable = 0
         for key in jwks.keys {
             do {
                 try await collection.add(jwk: key)
+                usable += 1
                 if let kid = key.keyIdentifier?.string {
                     keyIDs.insert(kid)
                 }
@@ -201,7 +237,11 @@ actor JWKSCache {
                 )
             }
         }
-        guard !keyIDs.isEmpty else {
+        // Counted, not keyed on `kid`: `kid` is optional in RFC 7517, and a
+        // document whose keys all omit it was rejected outright even though
+        // every key had been added successfully and the validator supports
+        // kid-less tokens by iterating the collection.
+        guard usable > 0 else {
             throw JWKSSourceError(reason: "JWKS document contained no usable signing keys")
         }
         return Snapshot(collection: collection, keyIDs: keyIDs)

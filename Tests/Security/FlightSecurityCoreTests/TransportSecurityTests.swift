@@ -209,6 +209,33 @@ struct KeyUsageFilteringTests {
         #expect(kids == ["a"])
     }
 
+    @Test("a key with no kid is filtered on use like any other")
+    func encryptionKeyWithoutKidIgnored() async throws {
+        // `kid` is optional in RFC 7517, and the filter matched rejections by
+        // it — so a key-id-less `use: "enc"` key was noted as rejected under
+        // no key at all and then kept, landing the one key the filter exists
+        // to exclude in the verification set.
+        let signing = TestIdentity(kid: "sig-key")
+        let encryption = TestIdentity(kid: "enc-key")
+        let getter = Getter()
+        let marked = jwksJSON([signing, encryption])
+            .replacingOccurrences(
+                of: #""use":"sig","alg":"ES256","kid":"enc-key""#,
+                with: #""use":"enc","alg":"ES256""#)
+        getter.respond(to: "https://idp.example.com/keys", with: marked)
+
+        let source = HTTPJWKSSource(
+            issuer: "https://idp.example.com",
+            jwksURL: URL(string: "https://idp.example.com/keys"),
+            http: getter, logger: Logger(label: "test"))
+
+        let keys = try await source.fetchKeys()
+        #expect(
+            keys.keys.count == 1,
+            "the kid-less encryption key stayed in the verification set")
+        #expect(keys.keys.first?.keyIdentifier?.string == "sig-key")
+    }
+
     @Test("use=sig and an absent use are both kept")
     func signingKeysKept() async throws {
         let a = TestIdentity(kid: "a")
