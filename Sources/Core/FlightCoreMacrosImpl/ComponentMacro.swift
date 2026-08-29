@@ -273,6 +273,25 @@ extension RegistrationMacro {
         for member in declaration.memberBlock.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
             guard let kind = injectionKind(of: variable, in: context) else { continue }
+            // A type-level property was collected like any other, and the
+            // generated `init(_flight:)` then assigned to a static member —
+            // a compile error inside an expansion the author cannot see,
+            // instead of a diagnostic naming the problem.
+            if variable.modifiers.contains(where: {
+                $0.name.tokenKind == .keyword(.static) || $0.name.tokenKind == .keyword(.class)
+            }) {
+                context.diagnoseError(
+                    "injected.static",
+                    """
+                    Injection is per-instance: the container populates properties in the \
+                    generated initializer, and a static property has no instance to belong \
+                    to. Make it an instance property, or resolve it explicitly where it is \
+                    used.
+                    """,
+                    at: variable
+                )
+                continue
+            }
             guard let binding = variable.bindings.first,
                 let pattern = binding.pattern.as(IdentifierPatternSyntax.self)
             else { continue }

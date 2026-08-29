@@ -11,12 +11,16 @@ subscribe to one. Everything else is which implementation is registered.
 ```swift
 @Autowired var pubsub: any PubSub
 
-try await pubsub.publish(Message(topic: "orders", payload: data))
+await pubsub.publish(Message(topic: "orders", payload: data))
 
-for await message in try await pubsub.subscribe("orders") {
+for await message in pubsub.subscribe("orders") {
     handle(message)
 }
 ```
+
+Neither call throws, and `subscribe` is synchronous — deliberately, so that
+a subscription is in place the moment the call returns and cannot miss a
+publish that races it.
 
 ``LocalPubSub`` delivers in-process and is what a single node uses.
 ``ClusteredPubSub`` wraps it with a ``DistributedPubSubAdapter`` so a publish

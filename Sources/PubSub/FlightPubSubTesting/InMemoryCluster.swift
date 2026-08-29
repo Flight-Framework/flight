@@ -1,5 +1,5 @@
 import FlightPubSub
-import Foundation
+import struct Foundation.UUID
 import Synchronization
 
 /// An in-memory "wire" connecting any number of `DistributedPubSubAdapter`s

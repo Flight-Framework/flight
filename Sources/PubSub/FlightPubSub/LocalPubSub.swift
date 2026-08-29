@@ -1,4 +1,4 @@
-import Foundation
+import struct Foundation.UUID
 import Logging
 import Synchronization
 
@@ -10,7 +10,7 @@ import Synchronization
 ///
 /// The doc reserves an `actor` for the registry and `AsyncChannel` for
 /// per-subscriber delivery. Implementing against this type's *own API contract*
-/// forces two changes, both recorded in README.md:
+/// forces two changes, both recorded in `Docs/pubsub.md`:
 ///
 /// 1. **`Mutex`-guarded class, not an actor.** `subscribe(_:)` is synchronous
 ///    and must guarantee "a publish that happens-after subscribe is

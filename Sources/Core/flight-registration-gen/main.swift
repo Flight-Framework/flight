@@ -215,10 +215,18 @@ final class ComponentVisitor: SyntaxVisitor {
             }
             if let attribute = attribute(of: variable.attributes, named: "ConfigValue") {
                 let propertyLocation = converter.location(for: variable.position)
+                // A property initializer *is* a default — the macro treats it
+                // as one (`getIfPresent ?? default`). Reading only the
+                // attribute's `default:` label made
+                // `@ConfigValue("legacy.key") var x: String = "fallback"`
+                // a hard build error saying the key is missing from
+                // flight.yaml and has no default, on code that runs correctly.
+                let hasInitializer = variable.bindings.contains { $0.initializer != nil }
                 configValues.append(
                     ScannedConfigValue(
                         key: literalKey(of: attribute),
-                        hasDefault: hasLabeledArgument(attribute, label: "default"),
+                        hasDefault: hasLabeledArgument(attribute, label: "default")
+                            || hasInitializer,
                         source: .explicitConfigValue,
                         file: file,
                         line: propertyLocation.line
@@ -523,11 +531,37 @@ for component in components {
         {
             continue
         }
-        let base =
-            dependency
-            .replacingOccurrences(of: "?", with: "")
-            .trimmingCharacters(in: .whitespaces)
-        if !knownTypeNames.contains(base) && !alwaysAvailable.contains(base) {
+        let written = dependency.trimmingCharacters(in: .whitespaces)
+        // Optional injection is not supported, and stripping the `?` here hid
+        // that: the check passed, then the macro generated `resolve(Cache?.self)`
+        // whose `Optional<Cache>` key is never registered, and the app failed
+        // at bootstrap with `notRegistered` — against Docs/core.md's promise
+        // that missing registrations are reported at build time.
+        if written.hasSuffix("?") {
+            emit(
+                "error",
+                """
+                @Autowired does not support optional types: '\(written)' in \
+                \(component.typeName) would resolve Optional<\
+                \(written.dropLast())>, which nothing registers. Drop the '?' if the \
+                dependency is required, or resolve it by hand where absence is \
+                meaningful.
+                """,
+                file: component.file, line: component.line
+            )
+            continue
+        }
+        let base = written
+        // Compared on the base name, as the bridge check above already does.
+        // Comparing the written text against bare scanned names warned on
+        // every correctly-qualified `@Autowired var x: MyLib.Foo` — an
+        // always-on false positive, which is how a warning teaches people to
+        // stop reading warnings.
+        let known =
+            knownTypeNames.contains(base) || alwaysAvailable.contains(base)
+            || knownTypeNames.contains(baseName(base))
+            || alwaysAvailable.contains(baseName(base))
+        if !known {
             emit(
                 "warning",
                 "@Autowired type '\(base)' in \(component.typeName) is not a scanned @Component. If it is hand-registered in a module's configure(_:), acknowledge it with a `// flight:hand-registered` comment on the property; otherwise resolution will fail at startup.",

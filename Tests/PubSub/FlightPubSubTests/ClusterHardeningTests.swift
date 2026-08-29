@@ -1,6 +1,7 @@
 import FlightPubSub
 import FlightPubSubTesting
 import Foundation
+import Synchronization
 import Testing
 
 /// An adapter that never answers, for proving `publish` does not wait forever.
@@ -10,6 +11,36 @@ final class HangingAdapter: DistributedPubSubAdapter, @unchecked Sendable {
     }
     func incoming() -> AsyncStream<Message> {
         AsyncStream { _ in }
+    }
+}
+
+/// An adapter that never answers **and never notices cancellation** —
+/// blocking I/O bridged to async, or a continuation nobody resumes.
+///
+/// `HangingAdapter` sleeps, and `Task.sleep` unwinds on cancellation, so it
+/// could not catch the defect this exists for: the timeout raced inside a
+/// `withThrowingTaskGroup`, which awaits *all* its children at scope exit, so
+/// `cancelAll()` only helped an adapter that responded to cancellation — and
+/// `DistributedPubSubAdapter` has never required one to.
+final class DeafAdapter: DistributedPubSubAdapter, @unchecked Sendable {
+    private let parked = Mutex<[CheckedContinuation<Void, Never>]>([])
+
+    func broadcast(_ message: Message) async throws {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            parked.withLock { $0.append(continuation) }
+        }
+    }
+
+    func incoming() -> AsyncStream<Message> { AsyncStream { _ in } }
+
+    /// Lets the parked broadcasts go, so the test leaves nothing behind.
+    func release() {
+        let waiting = parked.withLock { current -> [CheckedContinuation<Void, Never>] in
+            let all = current
+            current = []
+            return all
+        }
+        for continuation in waiting { continuation.resume() }
     }
 }
 
@@ -40,6 +71,41 @@ struct ClusterHardeningTests {
         #expect(elapsed < .seconds(2), "publish waited \(elapsed) on a hung adapter")
         // And the local subscriber was served regardless.
         #expect(await iterator.next().map(text) == "hello")
+    }
+
+    @Test("the timeout bounds publish even against an adapter deaf to cancellation")
+    func broadcastTimesOutWithoutCooperation() async {
+        // Docs/pubsub.md: "an adapter that stops answering costs one remote
+        // delivery, not the publisher's liveness." That held only for an
+        // adapter that unwound on cancellation. The timeout child threw, the
+        // deferred `cancelAll()` ran — and then the task group awaited every
+        // child anyway, so a broadcast parked in non-cancellable work hung
+        // `publish` for as long as it lasted, timeout or no timeout.
+        let adapter = DeafAdapter()
+        defer { adapter.release() }
+        let clustered = ClusteredPubSub(
+            local: LocalPubSub(), adapter: adapter,
+            nodeID: "deaf-node", broadcastTimeout: .milliseconds(50))
+
+        var iterator = clustered.subscribe("room:1").makeAsyncIterator()
+        // Deliberately not `await publish(...)` directly: against the code
+        // this pins, that call never returns, and a test that hangs is worse
+        // than one that fails — the broadcast it waits on is uncancellable by
+        // construction, so nothing would ever unwind it.
+        let returned = Mutex(false)
+        let publisher = Task {
+            await clustered.publish(msg("room:1", "hello"))
+            returned.withLock { $0 = true }
+        }
+        for _ in 0..<200 where !returned.withLock({ $0 }) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(
+            returned.withLock { $0 },
+            "publish did not return within 2s on an adapter deaf to cancellation")
+        #expect(await iterator.next().map(text) == "hello")
+        publisher.cancel()
     }
 
     @Test("no timeout still means wait, for callers who want that")

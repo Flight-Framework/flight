@@ -227,11 +227,14 @@ public enum TLSConfigurationError: Error, CustomStringConvertible {
         switch self {
         case .incompleteKeyPair(let missing):
             return """
-                TLS is half-configured: \(missing) is missing. Set both                 server.tls.certificate-chain-path and server.tls.private-key-path to serve                 HTTPS, or neither to serve plaintext behind a proxy.
+                TLS is half-configured: \(missing) is missing. Set both \
+                server.tls.certificate-chain-path and server.tls.private-key-path to serve \
+                HTTPS, or neither to serve plaintext behind a proxy.
                 """
         case .unknownClientAuthentication(let value, let supported):
             return """
-                server.tls.client-authentication is "\(value)"; expected one of                 \(supported.joined(separator: ", ")).
+                server.tls.client-authentication is "\(value)"; expected one of \
+                \(supported.joined(separator: ", ")).
                 """
         case .unreadableCertificateChain(let path, let underlying):
             return "could not read the TLS certificate chain at \(path): \(underlying)"
@@ -241,7 +244,9 @@ public enum TLSConfigurationError: Error, CustomStringConvertible {
             return "could not read the TLS trust roots at \(path): \(underlying)"
         case .clientAuthenticationWithoutTrustRoots(let mode):
             return """
-                server.tls.client-authentication is "\(mode)", which verifies client                 certificates, but server.tls.trust-roots-path names no roots to verify them                 against.
+                server.tls.client-authentication is "\(mode)", which verifies client \
+                certificates, but server.tls.trust-roots-path names no roots to verify them \
+                against.
                 """
         }
     }

@@ -1,5 +1,5 @@
 import Synchronization
-import Foundation
+import struct Foundation.UUID
 import Logging
 
 /// The clustered composition: wraps the local `PubSub` and a
@@ -124,20 +124,41 @@ public final class ClusteredPubSub: PubSub, Sendable {
     private struct BroadcastTimeout: Error {}
 
     /// Broadcasts, giving up after ``broadcastTimeout``.
+    ///
+    /// Deliberately *not* a task group. A group awaits all its children at
+    /// scope exit, so `cancelAll()` after the timeout fires only helps an
+    /// adapter that responds to cancellation — and the adapter contract has
+    /// never required one to. An adapter blocked in non-cancellable work
+    /// (blocking I/O bridged to async, a continuation nobody resumes) hung
+    /// `publish` indefinitely *despite* the timeout, which is the exact
+    /// opposite of what it is for: "an adapter that stops answering costs one
+    /// remote delivery, not the publisher's liveness."
+    ///
+    /// So the racers are unstructured and whoever answers first wins. A
+    /// wedged broadcast task is left running — it is cancelled, and an
+    /// adapter that honours that stops — but it no longer holds up the
+    /// publisher either way, which is the property that was promised.
     private func broadcast(_ message: Message) async throws {
         guard let broadcastTimeout else {
             try await adapter.broadcast(message)
             return
         }
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { try await self.adapter.broadcast(message) }
-            group.addTask {
-                try await Task.sleep(for: broadcastTimeout)
-                throw BroadcastTimeout()
+        let answer = FirstAnswer()
+        let work = Task { [adapter] in
+            do {
+                try await adapter.broadcast(message)
+                answer.answer(.success(()))
+            } catch {
+                answer.answer(.failure(error))
             }
-            defer { group.cancelAll() }
-            try await group.next()
         }
+        let timer = Task {
+            do { try await Task.sleep(for: broadcastTimeout) } catch { return }
+            answer.answer(.failure(BroadcastTimeout()))
+            work.cancel()
+        }
+        defer { timer.cancel() }
+        try await answer.wait()
     }
 
     /// Strips every reserved key, so subscribers never see transport
@@ -197,5 +218,44 @@ public final class ClusteredPubSub: PubSub, Sendable {
             await local.publish(stripping(message))
         }
         logger.debug("adapter incoming stream finished; relay ending", metadata: ["node": "\(nodeID)"])
+    }
+}
+
+/// A one-shot result several racers compete to set, first writer winning.
+///
+/// `Mutex` rather than an actor: two field assignments, and the continuation
+/// is always resumed after the lock is released.
+private final class FirstAnswer: Sendable {
+    private struct State {
+        var isAnswered = false
+        var waiting: CheckedContinuation<Void, any Error>?
+        var pending: Result<Void, any Error>?
+    }
+    private let state = Mutex(State())
+
+    func wait() async throws {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, any Error>) in
+            let ready = state.withLock { s -> Result<Void, any Error>? in
+                if let pending = s.pending { return pending }
+                s.waiting = continuation
+                return nil
+            }
+            if let ready { continuation.resume(with: ready) }
+        }
+    }
+
+    func answer(_ result: Result<Void, any Error>) {
+        let waiting = state.withLock { s -> CheckedContinuation<Void, any Error>? in
+            guard !s.isAnswered else { return nil }
+            s.isAnswered = true
+            if let waiting = s.waiting {
+                s.waiting = nil
+                return waiting
+            }
+            s.pending = result
+            return nil
+        }
+        waiting?.resume(with: result)
     }
 }

@@ -47,7 +47,14 @@ await pubsub.publish(Message(topic: "room:42", payload: data))
 never wait on, or fail with, the inter-node hop. The remote broadcast is
 bounded by `broadcastTimeout` (5 seconds by default, `nil` to wait
 forever): an adapter that stops answering costs one remote delivery, not
-the publisher's liveness.
+the publisher's liveness, and that holds whether or not the adapter responds
+to cancellation.
+
+Per message, though, not per publisher: `publish` returns only once the
+broadcast has completed or timed out, which preserves wire ordering and means
+a *sequential* publisher's next message waits on the previous one's remote
+hop. Publisher throughput is therefore capped by adapter latency. Publish from
+separate tasks if that matters more than ordering.
 
 Under a bounded `BufferingPolicy`, a full subscriber buffer discards the
 message — that is what at-most-once permits. `LocalPubSub.droppedCount` and
@@ -83,6 +90,20 @@ bookkeeping, and never sees a caller's imitation of it.
 `.unbounded` (default — BEAM-mailbox behavior, nothing dropped),
 `.bufferingOldest(n)` / `.bufferingNewest(n)` for a memory ceiling at the
 price of drops, which at-most-once semantics already permit.
+
+Through the module, that and the cluster knobs are constructor arguments:
+
+```swift
+try await Flight.bootstrap(
+    configuration: .load(),
+    modules: [FlightPubSubModule(bufferingPolicy: .bufferingNewest(1024), nodeID: "api-3")]
+)
+```
+
+They had to be, or they did not exist: the module used to hardcode
+`LocalPubSub()`, the container's first registration wins, and a second one
+fails `freeze()` — so an app bootstrapped through the module could not reach
+a bounded policy at all.
 
 ## Multi-node
 
@@ -157,10 +178,15 @@ contract; observable semantics are exactly as specified.
 
 ## Building
 
+PubSub is a target of the `flight` package, not a package of its own, so it
+builds with the repository:
+
 ```
-swift build
-swift test    # 44 tests across 6 suites
+swift build --enable-all-traits
+swift test  --enable-all-traits    # 60 PubSub tests across 9 suites
 ```
 
-Depends on `flight-core` (path), `swift-log`, `swift-service-lifecycle`.
-Linux and macOS 15+ (`Synchronization.Mutex`, same floor as flight-core).
+A plain `swift build` at the root fails by design — the trait-gated targets
+find their dependencies pruned. Depends on `FlightCore`, `swift-log` and
+`swift-service-lifecycle`. Linux and macOS 15+ (`Synchronization.Mutex`, the
+same floor as Core).

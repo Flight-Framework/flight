@@ -82,15 +82,16 @@ startup**:
 | Deployment | Mode | Behavior |
 | --- | --- | --- |
 | No `DistributedPubSubAdapter` | `single-node` | No gossip at all; node failure is not a distributed concern. |
-| Adapter + `PresenceMembershipMonitor` | `membership-aware` | The intended multi-node mode. The monitor (the SWIM adapter, PubSub) declares a node down ⇒ its entries leave promptly, in one operation. Gossip from a down-declared node is ignored until the monitor says up — the monitor is authoritative. |
+| Adapter + `PresenceMembershipMonitor` | `membership-aware` | The intended multi-node mode. The monitor (the SWIM adapter, PubSub) declares a node down ⇒ its entries leave promptly, in one operation. Gossip from a down-declared node is ignored until the monitor says up — the monitor is authoritative. Anti-entropy still broadcasts each node's full own state every `heartbeat-interval`, so traffic scales with state size here exactly as it does in degraded mode; what membership mode buys is prompt, decisive removal, not less traffic. |
 | Adapter only (Valkey-style fan-out) | `heartbeat-expiry` (**degraded**) | Each node re-announces its own state every `heartbeat-interval`; a replica silent past `down-after` is hidden (leaves pushed). Removal is delayed up to the timeout; a slow node may flap; heartbeat traffic scales with state size. Logged at **warning** level so nobody discovers this from a bug report. |
 
 In both clustered modes, a down replica's state is kept (hidden) until
 `permdown-after`, so a wrongly-evicted node that resumes gossiping comes
-back as joins with nothing lost; only then is it purged. Restart safety is
-structural: a replica id is `(node-name, boot-id)` and boot ids never
-recur, so a restarted node can never collide with its previous life's
-counters.
+back as joins with nothing lost; only then is it purged. Restart safety
+rests on the replica id being `(node-name, boot-id)` with a fresh boot id
+each start: a restarted node does not collide with its previous life's
+counters. Probabilistically, not structurally — the boot id is 48 bits of
+randomness, which is ample in practice and not the same claim.
 
 The periodic own-state snapshot doubles as **anti-entropy** in membership
 mode: PubSub is at-most-once, and the snapshot join repairs any dropped

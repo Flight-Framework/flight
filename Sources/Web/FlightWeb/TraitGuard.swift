@@ -1,13 +1,16 @@
 // Compile-time guard: this target exists only when the "Web" trait is on.
-// "Web" is a default trait, so this fires only for a consumer that opted
-// out with `traits: []`, or for a root build with defaults disabled.
+// Both traits are opt-in — Package.swift declares `.default(enabledTraits: [])`
+// — so this fires for any consumer that did not name "Web", and for a root
+// build without --enable-all-traits. The comment used to describe the
+// opposite polarity, which would have made the guard look like a corner case
+// rather than the default path.
 #if !Web
 #error("""
     FlightWeb requires the "Web" trait.
 
     Consuming flight:
         .package(url: "https://github.com/Swift-Flight/flight.git", \
-                 from: "0.1.0", traits: ["Web"])
+                 from: "0.10.0", traits: ["Web"])
 
     Building flight itself:
         swift build --enable-all-traits

@@ -46,7 +46,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        guard let typeName = validateAttachmentTarget(declaration, in: context) else { return [] }
+        guard validateAttachmentTarget(declaration, in: context) != nil else { return [] }
 
         let properties = collectInjectedProperties(from: declaration, in: context)
         guard validateQualifierDisambiguation(properties, in: context) else { return [] }
@@ -101,7 +101,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
             "}",
         ]
         for (route, path) in combinedRoutes {
-            thunkLines.append(contentsOf: routeRegistrationLines(for: route, path: path, controller: typeName, pipelines: parsePipelines(node)))
+            thunkLines.append(contentsOf: routeRegistrationLines(for: route, path: path, pipelines: parsePipelines(node)))
         }
         let thunkBody = thunkLines.map { "    \($0)" }.joined(separator: "\n")
         let thunk: DeclSyntax = """
@@ -118,7 +118,9 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// colliding patterns without tripping Core's duplicate-registration
     /// precondition — the Router reports the conflict as a proper startup
     /// error naming both sources instead.
-    private static func routeRegistrationLines(for route: ScannedRoute, path: String, controller: String, pipelines: String?) -> [String] {
+    private static func routeRegistrationLines(
+        for route: ScannedRoute, path: String, pipelines: String?
+    ) -> [String] {
         let kind = route.kind.isUpgrade ? ".upgrade(.webSocket)" : ".http"
 
         var call = "controller.\(route.methodName)(context"
@@ -218,8 +220,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         return valid
     }
 
-    /// `@Controller`'s own base-path argument (Spring-style combination —
-    /// see the macro declaration's doc comment). Returns `""` for "no base
     /// The `pipelines:` argument's source text, re-embedded verbatim into
     /// every generated RouteRegistration — or nil for the default lane.
     /// Verbatim like @Component's `scope:`: the expression is evaluated in
@@ -232,8 +232,10 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         return nil
     }
 
-    /// path" — omitted, explicit `nil`, empty string, or bare `"/"` are all
-    /// the identity element for `RouteScanning.combinePaths`.
+    /// `@Controller`'s own base-path argument (Spring-style combination — see
+    /// the macro declaration's doc comment). Returns `""` for "no base path":
+    /// omitted, explicit `nil`, empty string, and bare `"/"` are all the
+    /// identity element for `RouteScanning.combinePaths`.
     private static func parseBasePath(
         _ node: AttributeSyntax,
         in context: some MacroExpansionContext

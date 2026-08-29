@@ -116,7 +116,7 @@ A module declares what it needs and registers what it provides:
 struct DataModule: FlightModule {
     static let dependencies: [any FlightModule.Type] = [ConfigModule.self]
 
-    static func configure(_ container: Container) throws {
+    func configure(_ container: Container) throws {
         container.register(DataSource.self, scope: .singleton) { c in
             PostgresDataSource(configuration: try c.resolve(Configuration.self))
         }
@@ -140,10 +140,12 @@ func transfer(from: Account, to: Account, amount: Decimal) async throws {
 }
 ```
 
-The coordinator is supplied by your data layer. Rollback runs in a detached
-task so that a body which threw `CancellationError` — a client disconnecting
-mid-request, a shutdown — still gets its transaction closed rather than
-leaving it open on a cancelled task.
+The coordinator is supplied by your data layer. For an async coordinator,
+rollback runs in a detached task so that a body which threw
+`CancellationError` — a client disconnecting mid-request, a shutdown — still
+gets its transaction closed rather than leaving it open on a cancelled task.
+A synchronous coordinator's rollback runs inline, on the same (possibly
+cancelled) task; there is nothing to detach.
 
 ## Testing
 
@@ -154,8 +156,20 @@ let app = try Flight.assemble(configuration: config, modules: [AppModule.self])
 let service = try app.container.resolve(UserService.self)
 ```
 
-Registering a test double is an ordinary registration — no special support
-needed, because the container is just a container.
+Swapping in a test double uses `override`, which replaces a registration
+made earlier rather than adding a second one:
+
+```swift
+let container = try TestContainer.build { AppModule() } overriding: { container in
+    container.override((any UserRepository).self, scope: .scoped) { _ in InMemoryUsers() }
+}
+```
+
+A plain second `register` for the same key is *not* the way: duplicate
+registrations fail `freeze()` with `duplicateRegistration`, deliberately, and
+`override` exists precisely because they do. It is order-independent — the
+override may be declared before or after the registration it replaces — and
+it is test-facing API; production code has no reason to reach for it.
 
 ## Documentation
 

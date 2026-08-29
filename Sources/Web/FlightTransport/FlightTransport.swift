@@ -164,29 +164,28 @@ public struct FlightTransport: ServerTransport {
                 request: request,
                 dispatch: dispatch,
                 byteCap: routeCap ?? configuration.maxRequestBodyBytes)
-            break
         case .buffered(let routeCap):
-        do {
-            var collected = try await request.body.collect(
-                upTo: routeCap ?? configuration.maxRequestBodyBytes)
-            let body = collected.readData(length: collected.readableBytes) ?? Data()
-            response = await dispatch(Request(head: request.head, body: body))
-        } catch is NIOTooManyBytesError {
-            // Bounded before dispatch ever runs. HummingbirdCore drains
-            // the remainder; `connection: close` hints the client to stop.
-            let problem = FlightWeb.Response.problem(
-                status: .contentTooLarge, message: "Content Too Large"
-            )
-            var head = HTTPResponse(status: problem.status)
-            head.headerFields = problem.headers
-            head.headerFields[.connection] = "close"
-            head.headerFields[.contentLength] = "\(problem.bodyData?.count ?? 0)"
-            try await writer.write(
-                response: head,
-                body: .init(byteBuffer: ByteBuffer(bytes: problem.bodyData ?? Data()))
-            )
-            return
-        }
+            do {
+                var collected = try await request.body.collect(
+                    upTo: routeCap ?? configuration.maxRequestBodyBytes)
+                let body = collected.readData(length: collected.readableBytes) ?? Data()
+                response = await dispatch(Request(head: request.head, body: body))
+            } catch is NIOTooManyBytesError {
+                // Bounded before dispatch ever runs. HummingbirdCore drains
+                // the remainder; `connection: close` hints the client to stop.
+                let problem = FlightWeb.Response.problem(
+                    status: .contentTooLarge, message: "Content Too Large"
+                )
+                var head = HTTPResponse(status: problem.status)
+                head.headerFields = problem.headers
+                head.headerFields[.connection] = "close"
+                head.headerFields[.contentLength] = "\(problem.bodyData?.count ?? 0)"
+                try await writer.write(
+                    response: head,
+                    body: .init(byteBuffer: ByteBuffer(bytes: problem.bodyData ?? Data()))
+                )
+                return
+            }
         }
 
         switch response {

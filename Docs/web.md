@@ -9,21 +9,11 @@ transport instead of hand-rolling HTTP; §5.6 containment) on top of Flight
 Core's `Container`/`FlightModule`/`Scope` — through exactly one channel,
 `FlightModule`, like every other Flight package.
 
-## Build status
-
-**Builds and passes all tests** — verified 2026-07-14 against Swift 6.2.3 on
-Linux (x86_64): `swift build` clean; runtime suites (routing, middleware,
-encoding, SSE, WebSocket, bootstrap), macro fixtures, and real-socket
-transport integration tests green; the demo app
-([`../flight-web-demo`](../flight-web-demo/README.md)) exercised end-to-end
-with curl (HTTP + SSE) and a live WebSocket client, including the build
-plugin path nothing in the test suite covers.
-
 ## What's here
 
 | Product | Contents |
 |---|---|
-| `FlightWeb` | `RequestContext`, `Request`/`Response`, middleware pipeline, `Router`, `@Controller`/`@GetMapping`/…/`@WebSocketMapping` macros, `ResponseEncodable`, SSE helpers, `WebSocketUpgradeHandler`/`WebSocketConnection`, `ServerTransport` protocol, `FlightWebModule` |
+| `FlightWeb` | `RequestContext`, `Request`/`Response`, middleware lanes, `Router`, `@Controller`/`@GetMapping`/…/`@WebSocketMapping` macros, `ResponseEncodable`, cookies, SSE, streaming bodies, multipart, resumable uploads, static assets, `serveContent`'s conditional/range engine, `WebSocketUpgradeHandler`/`WebSocketConnection`, `ServerTransport` protocol, `FlightWebModule` |
 | `FlightTransport` | The default transport (§5.2): wraps **HummingbirdCore** — a mature, versioned low-level HTTP transport — for HTTP/1.1 (keep-alive, pipelining, 100-continue), streaming bodies, and WebSocket protocol handling. The only target in all of Flight that knows what it wraps (§5.6) |
 | `FlightWebTesting` | `TestContainer`, `RequestContext.mock`, `TestClient` (in-process dispatch + in-process WebSocket), `InMemoryTransport` (§5.4's socket-free transport) |
 
@@ -59,19 +49,30 @@ struct UserController {
     @GetMapping("/events")                           // §6.2 — SSE is a response shape
     func events(_ context: RequestContext) -> Response {
         .serverSentEvents { events in
-            events.send(data: "hello", event: "greeting")
+            // `send` suspends until the event has gone out, and answers
+            // false once the client is gone — the producer is paced by the
+            // reader rather than buffered ahead of it.
+            await events.send(data: "hello", event: "greeting")
         }
+    }
+}
+
+@Middleware
+struct Authentication: Middleware {
+    func handle(_ context: RequestContext, next: Next) async throws -> Response {
+        guard context.request.headers[.authorization] != nil else {
+            return .problem(status: .unauthorized, message: "Unauthorized")
+        }
+        return try await next(context)
     }
 }
 
 struct AppModule: FlightModule {
     func configure(_ container: Container) throws {
         try flightRegisterAll(container)             // plugin-generated: components AND controllers
-        container.registerMiddleware("auth", order: 10) { context in
-            guard context.request.headers[.authorization] != nil else {
-                return .respond(.problem(status: .unauthorized, message: "Unauthorized"))
-            }
-            return .continue
+        container.pipeline {                          // the default lane, in order
+            RequestLogging.self
+            Authentication.self
         }
     }
 }
@@ -89,6 +90,89 @@ struct AppModule: FlightModule {
 Transport settings come from the same `flight.yaml` everything else uses:
 `server.host` (127.0.0.1), `server.port` (8080), `server.backlog`,
 `server.max-request-body-bytes`, `server.max-websocket-frame-bytes`.
+
+### Middleware lanes
+
+A *lane* is the whole stack for the routes that name it. `container.pipeline
+{ }` declares the default lane; the named form declares another, and a route,
+controller or asset mount opts in with `pipelines:`:
+
+```swift
+container.pipeline("assets") { RequestLogging.self }
+container.pipeline("admin") { RequireAdmin.self }
+```
+
+```swift
+@Controller("/admin", pipelines: [MiddlewareRegistration.defaultLane, "admin"])
+struct AdminController { … }
+```
+
+Naming a lane alone means *only* that lane runs, which is how a static-asset
+route avoids paying for transaction binding and authentication it can never
+use. Concatenate with `defaultLane` to get the usual behaviour plus extras.
+An empty block still declares its lane. Referencing a lane nobody declared
+fails when dispatch is built — at bootstrap, naming the route and the lane,
+never as a 500.
+
+Middleware types are composed once, when the dispatch closure is assembled,
+so a request pays one call per layer and never the construction of the chain.
+The older `registerMiddleware(_:order:)` / `.respond` / `.continue` API is
+deprecated: return early from `handle` instead of returning a result enum.
+
+### Bodies
+
+Request bodies are buffered by default, bounded by
+`server.max-request-body-bytes`. A handler that takes `body:
+RequestBodyStream` is recorded as streaming-bodied in the route table, and
+the transport — which asks the table before collecting bytes, exactly as it
+already asks `acceptsUpgrade` — pulls chunks through with real backpressure
+instead:
+
+```swift
+@PostMapping("/import", maxBodyBytes: 2 << 30)
+func importArchive(_ context: RequestContext, body: RequestBodyStream) async throws -> Response {
+    for try await chunk in body.chunks { try await ingest(chunk) }
+    return .noContent
+}
+```
+
+`MultipartReader` parses `multipart/form-data` pull-based and in constant
+memory, with Go's post-CVE-2023-24536 part and header caps; filenames are
+hardened down to the `.`/`..` basename edge.
+
+Responses stream the same way. `Response.streaming` hands the producer a
+`ResponseBodyWriter` whose `write` suspends until the transport has taken the
+chunk, and reports a disconnected client at the next write — so a producer
+faster than its reader is slowed by it rather than buffered ahead of it.
+
+### Cookies
+
+```swift
+response.settingCookie(Cookie(name: "session", value: token))   // HttpOnly + SameSite=Lax by default
+request.cookie("session")
+Response.seeOther("/dashboard")                                  // the 303 a form-post login wants
+Cookie.expiring("session")                                       // deletion
+```
+
+`settingCookie` appends rather than replaces, because several cookies means
+several headers.
+
+### Files, assets and uploads
+
+`serveContent` is a pure function over a `ByteSource` implementing RFC 9110's
+conditional and range rules — `If-None-Match`, `If-Modified-Since`,
+`If-Range`, suffix ranges, EOF clamping, 416. `FileByteSource` opens once and
+`fstat`s the descriptor, which closes the stat-vs-open TOCTOU at the type
+level, and reads with `pread` off the cooperative pool.
+
+`container.assets(at:root:pipelines:)` mounts a directory: content hashing,
+`Accept-Encoding` negotiation against precompressed siblings, per-pattern
+cache headers, an SPA fallback, and path containment that resolves before it
+compares.
+
+`ResumableUploads` implements tus 1.0 over a `DiskUploadStore` whose recorded
+offsets can only be produced by a proof type that performs the `fsync` — the
+ordering is unwritable-wrong rather than merely tested.
 
 ### Wire format
 
@@ -264,13 +348,13 @@ Recorded here the way Core records its spec deviations in SPIKE-FINDINGS:
    HTTP/1.1 channel (keep-alive/pipelining); h2 needs a TLS configuration
    surface Flight doesn't define yet. Nothing in the `ServerTransport`
    contract is version-shaped — h2 lands inside the transport without
-   touching the seam. Request bodies are buffered (bounded by
-   `server.max-request-body-bytes`); request-body *streaming* is likewise a
-   transport-internal future change.
+   touching the seam.
 6. **Middleware registration mechanism.** The doc specifies the chain (§3)
-   but not how apps contribute to it; `registerMiddleware(_:order:_:)`
-   registers `MiddlewareRegistration` components through the same pipeline,
-   ordered by `(order, registration sequence)`.
+   but not how apps contribute to it. `container.pipeline { }` declares a
+   lane of `Middleware` types, composed once and ordered by registration
+   sequence — which already reflects both module order and the order within
+   a block. `registerMiddleware(_:order:_:)` was the first spelling and is
+   deprecated.
 7. **WebSocket ping/pong frames are transport-internal on the default
    transport.** HummingbirdCore auto-answers pings and does not surface
    them, so `WebSocketFrame.ping`/`.pong` are never *delivered* through
@@ -298,6 +382,11 @@ Tests/Web/FlightWebTests/          runtime suites (swift-testing)
 Tests/Web/FlightWebMacroTests/     §4 macro fixtures (XCTest, normative expansions)
 Tests/Web/FlightTransportTests/    real-socket HTTP/SSE/WebSocket integration
 ```
+
+## Known gaps
+
+No connection idle or read timeout: a half-open connection is held until the
+OS gives up, roughly four minutes. Recorded in [GAPS.md](../GAPS.md).
 
 ## Deliberately not here (§10)
 

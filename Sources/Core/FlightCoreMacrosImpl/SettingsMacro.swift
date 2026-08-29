@@ -387,7 +387,28 @@ public struct SettingsMacro: MemberMacro, ExtensionMacro {
             }
             return true
         }
-        return declaration.is(StructDeclSyntax.self)
+        if declaration.is(StructDeclSyntax.self) { return true }
+        // Anything else — an enum, an actor, a protocol — returned false with
+        // no diagnostic at all, so the author's first sign of trouble was an
+        // opaque `_FlightRegistrable` conformance error from the extension
+        // role, pointing at a line they did not write.
+        let kind: String
+        switch declaration.kind {
+        case .enumDecl: kind = "an enum"
+        case .actorDecl: kind = "an actor"
+        case .protocolDecl: kind = "a protocol"
+        case .extensionDecl: kind = "an extension"
+        default: kind = "this declaration"
+        }
+        context.diagnoseError(
+            "settings.unsupported",
+            """
+            @Settings can only be attached to a struct or a final class; \(kind) has no \
+            memberwise initializer for it to generate against.
+            """,
+            at: declaration
+        )
+        return false
     }
 
     private static func typeName(of declaration: some DeclGroupSyntax) -> String {

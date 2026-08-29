@@ -143,7 +143,19 @@ struct UnloadedAdapterTests {
         }
         let message = String(describing: try #require(error))
         #expect(message.contains("pubsub.valkey.url"))
-        #expect(message.contains("FlightPubSubValkeyModule"))
+        // Not "FlightPubSubValkeyModule": that module exists nowhere, so the
+        // error told the operator to add something they could not obtain.
+        #expect(message.contains("DistributedPubSubAdapter"))
+        #expect(message.contains("none ships yet"))
+    }
+
+    @Test("the generic adapter key is watched too")
+    func genericAdapterKeyIsWatched() throws {
+        let configuration = Configuration(values: ["pubsub.adapter.url": "nats://127.0.0.1:4222"])
+        let error = #expect(throws: (any Error).self) {
+            try Flight.assemble(configuration: configuration, modules: [FlightPubSubModule.self])
+        }
+        #expect(String(describing: try #require(error)).contains("pubsub.adapter.url"))
     }
 
     @Test("the message names the module to add and the key to remove")

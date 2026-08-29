@@ -351,9 +351,17 @@ struct NoopCoordinatorWarningTests {
         #expect(NoopTransactionCoordinator.warningCountForTesting == 1)
     }
 
-    @Test("the message names both ways out")
+    @Test("the message names the general fix before the Flight Data one")
     func messageIsActionable() {
         let message = NoopTransactionCoordinator.warningMessage
+        // Core owns the shape of transaction coordination and never a
+        // datasource, so the remedy it prescribes has to work for a
+        // coordinator that is not Flight Data's — this used to name only
+        // Postgres helpers, which is wrong advice for anyone else and the
+        // one place Core knew what database you were using.
+        #expect(message.contains("FlightTransactions.coordinator"))
+        #expect(message.contains("your data layer"))
+        // Flight Data's helpers still named, as the concrete example.
         #expect(message.contains("withPostgresScope"))
         #expect(message.contains("withPostgresTransactions"))
         // And says what actually happened, not just what to do about it.

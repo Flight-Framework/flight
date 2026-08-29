@@ -5,8 +5,9 @@ import ServiceLifecycle
 /// lifecycle group. If a future starter seems to need more, extend this
 /// deliberately — never via a side channel.
 public protocol FlightModule {
-    /// Bootstrap instantiates modules itself }`),
-    /// so conformances must be constructible without arguments. Configuration
+    /// Bootstrap instantiates modules itself, from the types listed in
+    /// `Flight.bootstrap(modules:)`, so conformances must be constructible
+    /// without arguments. Configuration
     /// reaches modules through the container (bootstrap registers
     /// `Configuration` before any module configures), not through init.
     init()
@@ -25,9 +26,12 @@ public protocol FlightModule {
     var service: (any Service)? { get }
 
     /// What it means when this module's `service` *returns* from `run()`
-    /// without throwing. Deliberate the contract extension : without it, bootstrap could only host run-until-shutdown
-    /// services — a bounded one-shot service (batch job, queue drain) would
-    /// fail the whole group on completion.
+    /// without throwing.
+    ///
+    /// A deliberate extension of ServiceLifecycle's contract: without it,
+    /// bootstrap could only host run-until-shutdown services, and a bounded
+    /// one-shot service — a batch job, a queue drain — would fail the whole
+    /// group by finishing.
     var serviceCompletion: ServiceCompletionPolicy { get }
 }
 
@@ -118,7 +122,7 @@ public enum ModuleGraphError: Error, CustomStringConvertible, Sendable {
 /// everything `WebModule.dependencies` declares, recursively. A module you
 /// depend on but forgot to list is a wiring bug this removes by design.
 /// - Cycles are an error naming the full chain.
-public func _flightResolveModuleOrder(_ modules: [any FlightModule.Type]) throws
+func _flightResolveModuleOrder(_ modules: [any FlightModule.Type]) throws
     -> [any FlightModule.Type]
 {
     var ordered: [any FlightModule.Type] = []

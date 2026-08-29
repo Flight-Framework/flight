@@ -5,19 +5,24 @@ import Synchronization
 /// ## The two-phase model, as implemented
 ///
 /// - **Registration phase** — from `init()` until `freeze()`. Strictly
-/// single-threaded *by contract* (bootstrap runs `configure(_:)` serially,
-/// the step 6). Registration state is therefore held in plain vars guarded
-/// by preconditions, not locks — a lock here would launder a contract
-/// violation into silent misbehavior instead of a loud trap.
-/// - **Resolution phase** — from the moment `freeze()` returns. `frozenStorage`
-/// is written exactly once, and every concurrent reader lives in a task
-/// created *after* `freeze()` returns (bootstrap hands services to the
-/// ServiceGroup only after step 7). Task creation establishes the
-/// happens-before edge, so the publication is ordered without any fence,
-/// lock, or atomic — this is the "post-freeze case likely needs no
-/// synchronization primitive whatsoever" claim, made concrete. The
-/// `nonisolated(unsafe)` below is the single, documented place where that
-/// argument is load-bearing.
+///   single-threaded *by contract*: bootstrap runs every module's
+///   `configure(_:)` serially, in module-DAG order. Registration state is
+///   therefore held in plain vars guarded by preconditions, not locks — a
+///   lock here would launder a contract violation into silent misbehaviour
+///   instead of a loud trap.
+/// - **Resolution phase** — from the moment `freeze()` returns.
+///   `frozenStorage` is written exactly once, and every concurrent reader
+///   lives in a task created *after* `freeze()` returns: bootstrap hands
+///   services to the `ServiceGroup` only once the container is frozen. Task
+///   creation establishes the happens-before edge, so the publication is
+///   ordered without any fence, lock, or atomic, and post-freeze resolution
+///   is a plain dictionary read. The `nonisolated(unsafe)` below is the
+///   single, documented place where that argument is load-bearing.
+///
+/// The contract holds under Flight's own bootstrap and is unenforceable for
+/// an arbitrary embedder: a reader task created *before* `freeze()` returns
+/// would be a data race this design cannot detect. That is the trade, stated
+/// rather than hidden.
 ///
 /// `@unchecked Sendable` is justified by exactly the reasoning above; if the
 /// two-phase contract ever changes, this annotation is the first thing to
@@ -236,10 +241,10 @@ public final class Container: @unchecked Sendable {
     /// this overload behave exactly as plain `resolve` — a component's scope is a
     /// property of its registration, not of the call site.
     ///
-    /// The whole resolution runs with `Scope.active` bound to `scope`
-    ///, and since delta 12 plain `resolve` consults that binding
-    /// for `.scoped` registrations — so this overload is now exactly "bind
-    /// the scope, then resolve". Factories underneath it (including a
+    /// The whole resolution runs with `Scope.active` bound to `scope`, and
+    /// plain `resolve` consults that binding for `.scoped` registrations — so
+    /// this overload is exactly "bind the scope, then resolve". Factories
+    /// underneath it (including a
     /// transient's) resolve further scoped components against the same scope
     /// through either plain `resolve` or the explicit `resolveInActiveScope`.
     public func resolve<T: Sendable>(
@@ -353,16 +358,27 @@ public final class Container: @unchecked Sendable {
         // TaskLocal rather than thread-local: correct under Swift's
         // cooperative pool (a task may hop threads at suspension points) and
         // it binds synchronously, so it also covers the mid-freeze path.
-        @TaskLocal static var frames: [String] = []
+        //
+        // Keys, not demangled names. `ComponentKey.description` goes through
+        // `String(reflecting:)` — the exact cost `ComponentKey`'s lazy
+        // `typeName` exists to avoid, and which its own comment says
+        // "dominated resolve, which is on the hot path of every request".
+        // Tracking by name paid it on every scoped and transient
+        // construction, once per component per request, to build a string
+        // only the cycle diagnostic ever reads. A `ComponentKey` is an
+        // `ObjectIdentifier` and an optional `String`; comparing one is a
+        // pointer compare.
+        @TaskLocal static var frames: [ComponentKey] = []
     }
 
     private func constructTracked(_ registration: Registration) throws -> Any {
-        let name = registration.key.description
+        let key = registration.key
         let frames = ResolutionStack.frames
-        if frames.contains(name) {
-            throw ResolutionError.circularDependency(frames + [name])
+        if frames.contains(key) {
+            // Demangled here and only here — where there is a cycle to name.
+            throw ResolutionError.circularDependency((frames + [key]).map(\.description))
         }
-        return try ResolutionStack.$frames.withValue(frames + [name]) {
+        return try ResolutionStack.$frames.withValue(frames + [key]) {
             try registration.factory(self)
         }
     }

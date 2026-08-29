@@ -32,7 +32,7 @@ on it.
 ## Getting started
 
 ```swift
-.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.2.1")
+.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.10.0")
 ```
 
 ```swift
@@ -58,14 +58,14 @@ Both are opt-in. Name what you want:
 ```swift
 // An HTTP service.
 .package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.2.1", traits: ["Web"])
+         from: "0.10.0", traits: ["Web"])
 
 // …with authentication.
 .package(url: "https://github.com/Swift-Flight/flight.git",
-         from: "0.2.1", traits: ["Security"])
+         from: "0.10.0", traits: ["Security"])
 
 // Just the container and lifecycle — 7 resolved packages instead of 29.
-.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.2.1")
+.package(url: "https://github.com/Swift-Flight/flight.git", from: "0.10.0")
 ```
 
 **Swift 6.3 or later is required.** Through 6.2.x, SwiftPM did not resolve the
@@ -100,12 +100,20 @@ onto an application that does not use one.
 
 ## Requirements
 
-Swift 6.2+, macOS 15+ or Linux. Strict concurrency throughout — every target
-builds in Swift 6 language mode.
+Swift 6.3+ (see Traits above for why), Linux or macOS 15+. Strict concurrency
+throughout — every target builds in Swift 6 language mode.
+
+> **macOS is not currently buildable**, for a reason upstream of this package:
+> `apple/swift-configuration` 1.2.0 — its latest release — does not compile on
+> Darwin, because `FileProvider.swift` reaches for `Data.bytes`, which exists
+> on the Linux Foundation it was written against and not on the Darwin one.
+> Nothing here can fix it, and pinning an unreleased `main` is worse than
+> saying so. The macOS CI job runs and reports honestly rather than gating
+> merges. Recorded in [GAPS.md](GAPS.md) §1.
 
 ## Testing
 
-`swift test --enable-all-traits` — 685 tests across 14 targets, no external
+`swift test --enable-all-traits` — 1,000+ tests across 16 targets, no external
 services required.
 
 ## License

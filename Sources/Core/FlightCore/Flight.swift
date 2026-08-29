@@ -10,9 +10,9 @@ import ServiceLifecycle
 ///
 /// ```swift
 /// try await Flight.bootstrap(
-/// configuration: try Configuration.load(),
-/// modules: [WebModule.self, DataModule.self]
-///)
+///     configuration: try Configuration.load(),
+///     modules: [WebModule.self, DataModule.self]
+/// )
 /// ```
 public enum Flight {
 
@@ -45,12 +45,12 @@ public enum Flight {
     /// ```swift
     /// @main
     /// struct App {
-    /// static func main() async throws {
-    /// try await Flight.bootstrap(
-    /// configuration: try Configuration.load(),
-    /// modules: [WebModule.self, DataModule.self]
-    ///)
-    /// }
+    ///     static func main() async throws {
+    ///         try await Flight.bootstrap(
+    ///             configuration: try Configuration.load(),
+    ///             modules: [WebModule.self, DataModule.self]
+    ///         )
+    ///     }
     /// }
     /// ```
     public static func bootstrap(
@@ -67,8 +67,10 @@ public enum Flight {
     ///
     /// Deterministic: the same module set always produces the same order.
     ///
-    /// - Throws: an error naming the cycle when module dependencies are
-    ///   circular, or the missing module when a dependency is undeclared.
+    /// - Throws: ``ModuleGraphError/cycle(_:)``, naming the cycle, when module
+    ///   dependencies are circular. There is no missing-module failure: a
+    ///   transitive dependency is pulled in automatically, so "declared but
+    ///   absent from the list" is not a state this can be in.
     public static func resolveModuleOrder(
         _ modules: [any FlightModule.Type]
     ) throws -> [any FlightModule.Type] {

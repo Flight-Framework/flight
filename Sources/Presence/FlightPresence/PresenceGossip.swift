@@ -11,12 +11,15 @@ import class Foundation.JSONEncoder
 /// cannot subscribe to "every presence gossip topic" — and every node
 /// needs all of it, because presence state is replicated everywhere.
 /// Per-channel-topic payloads travel *inside* the messages instead.
-/// Recorded under "Design notes" in README.md.
+/// Recorded under "Design notes" in `Docs/presence.md`.
 public enum PresenceGossip {
-    /// The reserved gossip topic. Applications must not register channels
-    /// matching it (clients could then join it; its frames are not
-    /// broadcast frames and would be dropped by the socket pump with log
-    /// noise).
+    /// The reserved gossip topic.
+    ///
+    /// Applications must not register a channel pattern matching it —
+    /// clients could then join, and its frames are not broadcast frames, so
+    /// the socket pump drops them with log noise. Convention, not
+    /// enforcement: nothing refuses such a pattern today. Noise rather than
+    /// disclosure if it happens, which is why it has stayed a convention.
     public static let topic = "flight:presence"
 
     /// Wire version. A frame with an unknown version is dropped with a

@@ -50,7 +50,11 @@ public enum BootstrapError: Error, CustomStringConvertible {
 /// Configuration assembly) belong to Flight Config; this function receives
 /// their output. Config must be fully resolved before modules configure —
 /// that ordering is enforced here by the signature itself.
-public func _flightAssemble(
+///
+/// Internal: `Flight.assemble` is the public spelling. This was public with
+/// no caller anywhere outside FlightCore, duplicating that surface under a
+/// name nothing was meant to type.
+func _flightAssemble(
     configuration: Configuration,
     modules: [any FlightModule.Type]
 ) throws -> AssembledApplication {
@@ -115,7 +119,7 @@ public func _flightAssemble(
 /// Returns only when the ServiceGroup finishes (shutdown or failure). Apps
 /// with no long-running services return immediately after assembly — a valid
 /// shape for one-shot CLI-style Flight apps.
-public func _flightBootstrap(
+func _flightBootstrap(
     configuration: Configuration,
     modules: [any FlightModule.Type],
     logger: Logger = Logger(label: "flight.bootstrap")

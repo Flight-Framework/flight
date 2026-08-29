@@ -117,12 +117,19 @@ public struct NoopTransactionCoordinator: FlightTransactionCoordinator {
 
     /// The text, held as a constant so the test asserting it is actionable
     /// reads the same string the log does.
+    /// Names no particular datasource. Core "owns only the shape of
+    /// transaction coordination — never a datasource", and this text used to
+    /// prescribe `withPostgresScope` / `withPostgresTransactions(in:)` —
+    /// wrong advice for anyone whose coordinator is not Flight Data's, and
+    /// the one place Core knew what database you were using.
     static let warningMessage = """
         @Transactional ran with no transaction coordinator bound, so it did nothing: \
         the method's writes are not atomic and a thrown error will not roll them back. \
-        Bind one around the unit of work — withPostgresScope for a job, CLI command or \
-        test, or withPostgresTransactions(in:) for a scope you already have, such as a \
-        web request's. This warning is logged once per process.
+        Bind one around the unit of work by setting FlightTransactions.coordinator (or \
+        .asyncCoordinator) for the duration — your data layer provides the binding \
+        helper; Flight Data's are withPostgresScope for a job, CLI command or test, and \
+        withPostgresTransactions(in:) for a scope you already have, such as a web \
+        request's. This warning is logged once per process.
         """
 
     /// How many times the warning has actually been emitted. The
