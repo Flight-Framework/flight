@@ -48,16 +48,19 @@ public struct FlightTransport: ServerTransport {
         let configuration = self.configuration
         let logger = self.logger
 
-        let plain = HTTPServerBuilder.http1WebSocketUpgrade(
-            configuration: .init(
-                http1: .init(),
-                ws: WebSocketServerConfiguration(
-                    maxFrameSize: configuration.maxWebSocketFrameBytes,
-                    validateUTF8: true
-                )
-            ),
-            shouldUpgrade: { (head: HTTPRequest, _: any Channel, _: Logger) async throws
-                -> ShouldUpgradeResult<WebSocketDataHandler<HTTP1WebSocketUpgradeChannel.Context>> in
+        let idleTimeout: TimeAmount? = configuration.idleTimeout.map {
+            .nanoseconds(
+                $0.components.seconds * 1_000_000_000
+                    + $0.components.attoseconds / 1_000_000_000)
+        }
+
+        let shouldUpgrade:
+            @Sendable (HTTPRequest, any Channel, Logger) async throws ->
+                ShouldUpgradeResult<WebSocketDataHandler<HTTP1WebSocketUpgradeChannel.Context>> = {
+                    (head: HTTPRequest, _: any Channel, _: Logger) async throws
+                        -> ShouldUpgradeResult<
+                            WebSocketDataHandler<HTTP1WebSocketUpgradeChannel.Context>
+                        > in
                 // Upgrade requests carry no body by construction (RFC 6455 §4.1).
                 let request = Request(head: head, body: Data())
 
@@ -109,7 +112,29 @@ public struct FlightTransport: ServerTransport {
                     }
                 }
             }
-        )
+
+        // Built by hand rather than through `HTTPServerBuilder
+        // .http1WebSocketUpgrade`, so the header-read timeout can be added
+        // *in front of* the upgrade channel. Hummingbird's own idle handler
+        // is installed from that channel's not-upgrading completion handler,
+        // which does not run until a head has decoded — see
+        // `RequestHeaderTimeoutHandler` for why the window before that needs
+        // its own bound.
+        let plain = HTTPServerBuilder { responder in
+            let upgrade = HTTP1WebSocketUpgradeChannel(
+                responder: responder,
+                configuration: .init(
+                    http1: .init(idleTimeout: idleTimeout),
+                    ws: WebSocketServerConfiguration(
+                        maxFrameSize: configuration.maxWebSocketFrameBytes,
+                        validateUTF8: true
+                    )
+                ),
+                shouldUpgrade: shouldUpgrade
+            )
+            guard let idleTimeout else { return upgrade }
+            return HeaderTimeoutChildChannel(wrapped: upgrade, timeout: idleTimeout)
+        }
 
         // TLS wraps whatever channel the builder produced, so the upgrade
         // path above is unchanged by it — `wss://` is `ws://` inside TLS.

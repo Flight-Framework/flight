@@ -129,6 +129,7 @@ struct WireModule: FlightModule {
 /// hands the bound port to `body`, and tears the server down afterwards.
 func withRunningServer(
     maxRequestBodyBytes: Int = 1 << 20,
+    idleTimeout: Duration? = .seconds(60),
     tls: FlightTransportConfiguration.TLS? = nil,
     _ body: @escaping @Sendable (_ port: Int) async throws -> Void
 ) async throws {
@@ -140,6 +141,7 @@ func withRunningServer(
         host: "127.0.0.1",
         port: 0,
         maxRequestBodyBytes: maxRequestBodyBytes,
+        idleTimeout: idleTimeout,
         tls: tls,
         onBound: { port in portContinuation.yield(port) }
     )

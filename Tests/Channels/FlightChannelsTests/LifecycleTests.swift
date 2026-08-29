@@ -1,9 +1,11 @@
-import FlightChannels
 import FlightChannelsTesting
 import FlightWeb
 import FlightWebTesting
 import Foundation
+import Synchronization
 import Testing
+
+@testable import FlightChannels
 
 @Suite("Connection lifecycle — teardown, heartbeats", .timeLimit(.minutes(1)))
 struct LifecycleTests {
@@ -145,5 +147,60 @@ struct LifecycleTests {
         try wire.send(ref: "z", topic: "room:1", event: "echo")
         #expect(try await wire.nextEnvelope()?.ref == "z")
         wire.close()
+    }
+}
+
+/// The bound the heartbeat watchdog cannot supply.
+@Suite("Outbound write timeout", .timeLimit(.minutes(1)))
+struct WriteTimeoutTests {
+
+    /// A connection whose `send` never completes — the peer that reads
+    /// nothing, so the TCP window never opens.
+    private func stalledConnection() -> WebSocketConnection {
+        WebSocketConnection(
+            frames: AsyncStream { _ in },
+            send: { _ in
+                // Never resumed, and not cancellation-shaped on purpose:
+                // `Task.sleep` would unwind on its own and prove nothing.
+                await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+            },
+            close: { _, _ in }
+        )
+    }
+
+    @Test("a peer that never accepts a frame does not park the writer forever")
+    func stalledWriteGivesUp() async throws {
+        // A client that keeps *sending* heartbeats while never *reading* is
+        // alive by the watchdog's definition — it counts inbound frames — so
+        // the watchdog never fires and the writer sat in `connection.send`
+        // indefinitely. Memory stayed bounded by the outbound queue; a task
+        // and a connection leaked per socket, which is slow resource
+        // exhaustion rather than fast.
+        let started = ContinuousClock.now
+        await #expect(throws: WriteTimedOut.self) {
+            try await ChannelSocketHandler.send(
+                "hello", over: stalledConnection(), within: .milliseconds(100))
+        }
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test("nil means wait, for a deployment that wants that")
+    func timeoutIsOptional() async throws {
+        let connection = WebSocketConnection(
+            frames: AsyncStream { _ in }, send: { _ in }, close: { _, _ in })
+        try await ChannelSocketHandler.send("hello", over: connection, within: nil)
+    }
+
+    @Test("an ordinary send is unaffected by the bound")
+    func healthySendSucceeds() async throws {
+        let sent = Mutex<[String]>([])
+        let connection = WebSocketConnection(
+            frames: AsyncStream { _ in },
+            send: { frame in
+                if case .text(let text) = frame { sent.withLock { $0.append(text) } }
+            },
+            close: { _, _ in })
+        try await ChannelSocketHandler.send("hello", over: connection, within: .seconds(30))
+        #expect(sent.withLock { $0 } == ["hello"])
     }
 }

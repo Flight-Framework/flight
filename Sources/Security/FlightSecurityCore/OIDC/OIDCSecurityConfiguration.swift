@@ -67,6 +67,17 @@ public struct OIDCSecurityConfiguration: Sendable {
     /// element-wise.
     public var scopesClaims: [String]
 
+    /// Signature algorithms a token's `alg` header may name, uppercased.
+    ///
+    /// Defaults to every asymmetric algorithm JWTKit verifies
+    /// (``Defaults/allowedAlgorithms``). Narrow it to what your IdP issues —
+    /// `["RS256"]` for most — and a token arriving with anything else is
+    /// refused before its signature is checked, rather than being verified
+    /// against whatever key happens to match.
+    ///
+    /// Empty means "no screening beyond `none`", the pre-0.11.0 behaviour.
+    public var allowedAlgorithms: Set<String>
+
     /// The defaults, written once.
     ///
     /// The memberwise initialiser and the config parser each carried their
@@ -81,6 +92,23 @@ public struct OIDCSecurityConfiguration: Sendable {
         public static let jwksMaxStaleAge: TimeInterval = 6 * 60 * 60
         public static let rolesClaims = ["roles", "groups", "realm_access.roles"]
         public static let scopesClaims = ["scope", "scp"]
+
+        /// Every asymmetric signature algorithm JWTKit can verify.
+        ///
+        /// A list rather than "anything but `none`", which is what this used
+        /// to be. Not because a symmetric algorithm is reachable — verification
+        /// keys come only from the JWKS, JWTKit's `JWK` has no symmetric type,
+        /// so the RS256→HS256 confusion this normally guards against cannot
+        /// happen here — but because "cannot happen" is a property of three
+        /// separate facts staying true, and an allowlist is one fact. It also
+        /// lets a deployment narrow to what its IdP actually issues, which is
+        /// the useful half in practice.
+        public static let allowedAlgorithms: Set<String> = [
+            "RS256", "RS384", "RS512",
+            "PS256", "PS384", "PS512",
+            "ES256", "ES384", "ES512",
+            "EdDSA",
+        ]
     }
 
     public init(
@@ -93,7 +121,8 @@ public struct OIDCSecurityConfiguration: Sendable {
         jwksMaxStaleAge: TimeInterval = Defaults.jwksMaxStaleAge,
         jwksTransport: JWKSTransportPolicy = .httpsOnly,
         rolesClaims: [String] = Defaults.rolesClaims,
-        scopesClaims: [String] = Defaults.scopesClaims
+        scopesClaims: [String] = Defaults.scopesClaims,
+        allowedAlgorithms: Set<String> = Defaults.allowedAlgorithms
     ) throws {
         guard !issuer.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw ConfigError.decodingFailed(
@@ -115,6 +144,9 @@ public struct OIDCSecurityConfiguration: Sendable {
         self.jwksTransport = jwksTransport
         self.rolesClaims = rolesClaims
         self.scopesClaims = scopesClaims
+        // Uppercased once here, so the per-request check is a set lookup and
+        // a deployment can write "rs256" without it silently never matching.
+        self.allowedAlgorithms = Set(allowedAlgorithms.map { $0.uppercased() })
     }
 
     /// Parses `security.oidc.jwks_transport`, refusing anything unrecognized
@@ -164,7 +196,13 @@ public struct OIDCSecurityConfiguration: Sendable {
             scopesClaims: Self.claimList(
                 try configuration.getIfPresent("security.oidc.scopes_claim", as: String.self),
                 default: Defaults.scopesClaims
-            )
+            ),
+            allowedAlgorithms: Set(
+                Self.claimList(
+                    try configuration.getIfPresent(
+                        "security.oidc.allowed_algorithms", as: String.self),
+                    default: Array(Defaults.allowedAlgorithms)
+                ))
         )
     }
 

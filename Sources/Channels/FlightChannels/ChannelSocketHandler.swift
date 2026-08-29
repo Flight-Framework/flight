@@ -97,12 +97,25 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
         // and joins everything.
         let (finished, finishedContinuation) = AsyncStream<Void>.makeStream()
 
-        let writer = Task {
+        let writer = Task { [configuration] in
             for await text in outbound {
                 do {
-                    try await connection.send(text)
+                    try await Self.send(text, over: connection, within: configuration.writeTimeout)
+                } catch is WriteTimedOut {
+                    // A peer that cannot take one frame in this long is not
+                    // going to take the next. The heartbeat watchdog cannot
+                    // catch this one: it counts *inbound* frames as liveness,
+                    // so a client that keeps heartbeating while never reading
+                    // looks alive to it while the writer is parked forever.
+                    context.logger.info(
+                        "closing channel socket: peer did not accept a frame in time",
+                        metadata: [
+                            "socket": "\(socket.id)",
+                            "timeout": "\(configuration.writeTimeout.map(String.init(describing:)) ?? "none")",
+                        ])
+                    break
                 } catch {
-                    break // connection gone; remaining outbound is undeliverable
+                    break  // connection gone; remaining outbound is undeliverable
                 }
             }
             finishedContinuation.yield(())
@@ -206,5 +219,27 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
         await watchdog.value
         try? await connection.close(code: .normalClosure, reason: "")
         context.logger.debug("channel socket closed", metadata: ["socket": "\(socket.id)"])
+    }
+}
+
+/// One outbound frame took longer than ``ChannelsConfiguration/writeTimeout``.
+struct WriteTimedOut: Error {}
+
+extension ChannelSocketHandler {
+    /// Sends one frame, giving up after `timeout`.
+    ///
+    /// Through ``FlightCore/withFlightTimeout(_:throwing:_:)`` rather than a
+    /// task group, for the reason that type is written down at length:
+    /// `WebSocketConnection.send` is a *closure* any transport supplies, so
+    /// nothing here can require it to respond to cancellation — and a group
+    /// awaits its children at scope exit, so one that does not would hang
+    /// this write despite the timeout. Exactly how `ClusteredPubSub`'s own
+    /// broadcast timeout failed to bound anything.
+    static func send(
+        _ text: String, over connection: WebSocketConnection, within timeout: Duration?
+    ) async throws {
+        try await withFlightTimeout(timeout, throwing: WriteTimedOut()) {
+            try await connection.send(text)
+        }
     }
 }

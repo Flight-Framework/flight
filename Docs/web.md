@@ -383,10 +383,29 @@ Tests/Web/FlightWebMacroTests/     §4 macro fixtures (XCTest, normative expansi
 Tests/Web/FlightTransportTests/    real-socket HTTP/SSE/WebSocket integration
 ```
 
-## Known gaps
+### Connection timeouts
 
-No connection idle or read timeout: a half-open connection is held until the
-OS gives up, roughly four minutes. Recorded in [GAPS.md](../GAPS.md).
+`server.idle-timeout-seconds` (default 60, `0` disables) bounds a connection
+that is not getting on with a request. Two things count as that, and neither
+is a slow *response*:
+
+- a connection between keep-alive requests, and
+- a connection that has started a request — or not even finished its first
+  header block — and stopped.
+
+The second is the one that matters. A client holding many connections open,
+trickling a byte occasionally and never completing a header block, is the
+slowloris shape, and each such connection used to be held until the OS gave
+up, roughly four minutes.
+
+It takes two mechanisms because HummingbirdCore's own idle handler is
+installed from the upgrade channel's not-upgrading completion handler, which
+does not run until a head has decoded — so Flight adds a header-read timeout
+in front of it for the window before that. One setting drives both.
+
+**A long response is never affected.** Both bounds disarm once a request is
+fully read, so a large download, an SSE stream and an upgraded WebSocket run
+as long as they like. That is what makes a default safe.
 
 ## Deliberately not here (§10)
 

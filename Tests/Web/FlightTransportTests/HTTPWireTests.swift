@@ -325,3 +325,63 @@ struct HTTPWireTests {
         }
     }
 }
+
+/// A connection that never finishes its request is not a connection to hold.
+@Suite("Idle timeout", .timeLimit(.minutes(1)))
+struct IdleTimeoutTests {
+
+    @Test("a connection that says nothing is closed rather than held")
+    func silentConnectionIsClosed() async throws {
+        try await withRunningServer(idleTimeout: .seconds(1)) { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                _ = try await session.readToEnd()
+            }
+        }
+    }
+
+    @Test("a half-sent request is closed rather than held")
+    func halfSentRequestIsClosed() async throws {
+        // The slowloris shape, and the gap GAPS.md recorded: a client that
+        // sends a request head and stops held a connection until the OS gave
+        // up, roughly four minutes, with nothing bounding it.
+        try await withRunningServer(idleTimeout: .seconds(1)) { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                // Head only — no blank line, so the request never completes.
+                try await session.send("GET /hello HTTP/1.1\r\nHost: localhost\r\n")
+                let transcript = try await session.readToEnd()
+                #expect(
+                    !transcript.contains("200"),
+                    "an unfinished request was answered: \(transcript)")
+            }
+        }
+    }
+
+    @Test("an idle keep-alive connection is closed rather than held")
+    func idleKeepAliveIsClosed() async throws {
+        try await withRunningServer(idleTimeout: .seconds(1)) { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                try await session.send("GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                try await session.readUntil("hello")
+                // Now say nothing. `readToEnd` returns when the server closes;
+                // the suite's own time limit is what fails if it never does.
+                _ = try await session.readToEnd()
+            }
+        }
+    }
+
+    @Test("a slow response is not an idle connection")
+    func slowResponsesSurvive() async throws {
+        // The property that makes a default safe: the timer stops once the
+        // request is fully read, so a long SSE stream outlives an idle
+        // timeout far shorter than it.
+        try await withRunningServer(idleTimeout: .seconds(1)) { port in
+            try await RawSocketClient.withConnection(port: port) { session in
+                try await session.send("GET /sse HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                let transcript = try await session.readUntil("second")
+                #expect(transcript.contains("event: tick"))
+                #expect(transcript.contains("data: first"))
+                #expect(transcript.contains("data: second"))
+            }
+        }
+    }
+}

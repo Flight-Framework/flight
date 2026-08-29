@@ -10,6 +10,7 @@ import NIOSSL
 ///     server.backlog: 256
 ///     server.max-request-body-bytes: 1048576
 ///     server.max-websocket-frame-bytes: 1048576
+///     server.idle-timeout-seconds: 60          # 0 disables
 ///
 /// HTTPS is off until a certificate and key are named, and on as soon as
 /// they are — there is no separate enable flag to forget:
@@ -42,6 +43,22 @@ public struct FlightTransportConfiguration: ServerTransportConfiguration {
     /// closed — enforced before dispatch ever runs.
     public var maxRequestBodyBytes: Int
     public var maxWebSocketFrameBytes: Int
+
+    /// How long a connection may sit without completing a request before it
+    /// is closed. `nil` waits forever, which is what this used to do.
+    ///
+    /// Two states are idle, and neither is a slow *response*: a connection
+    /// between requests (keep-alive), and one that has sent a request head —
+    /// or part of a body — and stopped. The second is the one that matters:
+    /// a client holding connections half-open, sending a byte occasionally,
+    /// is the slowloris shape, and without a bound each one was held until
+    /// the OS gave up, roughly four minutes.
+    ///
+    /// The timer stops once a request is fully read, so a long download, an
+    /// SSE stream or a WebSocket that has been upgraded is never affected by
+    /// it however long it runs. That is what makes a default safe.
+    public var idleTimeout: Duration?
+
     /// TLS settings, or nil to serve plaintext.
     public var tls: TLS?
 
@@ -153,6 +170,7 @@ public struct FlightTransportConfiguration: ServerTransportConfiguration {
         backlog: Int = 256,
         maxRequestBodyBytes: Int = 1 << 20,
         maxWebSocketFrameBytes: Int = 1 << 20,
+        idleTimeout: Duration? = .seconds(60),
         tls: TLS? = nil,
         onBound: (@Sendable (_ port: Int) -> Void)? = nil
     ) {
@@ -161,6 +179,7 @@ public struct FlightTransportConfiguration: ServerTransportConfiguration {
         self.backlog = backlog
         self.maxRequestBodyBytes = maxRequestBodyBytes
         self.maxWebSocketFrameBytes = maxWebSocketFrameBytes
+        self.idleTimeout = idleTimeout
         self.tls = tls
         self.onBound = onBound
     }
@@ -174,6 +193,11 @@ public struct FlightTransportConfiguration: ServerTransportConfiguration {
                 "server.max-request-body-bytes", as: Int.self) ?? 1 << 20,
             maxWebSocketFrameBytes: try configuration.getIfPresent(
                 "server.max-websocket-frame-bytes", as: Int.self) ?? 1 << 20,
+            // 0 disables it explicitly — an operator who wants no bound
+            // should have to write that down rather than delete a line.
+            idleTimeout: try configuration.getIfPresent(
+                "server.idle-timeout-seconds", as: Int.self)
+                .map { $0 <= 0 ? nil : Duration.seconds($0) } ?? .seconds(60),
             tls: try Self.readTLS(from: configuration)
         )
     }

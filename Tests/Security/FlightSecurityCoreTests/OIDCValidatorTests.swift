@@ -17,7 +17,8 @@ struct OIDCValidatorTests {
         jwksRefreshCooldown: TimeInterval = 30,
         jwksMaxStaleAge: TimeInterval = 6 * 60 * 60,
         rolesClaims: [String] = ["roles", "groups", "realm_access.roles"],
-        scopesClaims: [String] = ["scope", "scp"]
+        scopesClaims: [String] = ["scope", "scp"],
+        allowedAlgorithms: Set<String> = OIDCSecurityConfiguration.Defaults.allowedAlgorithms
     ) throws -> (OIDCTokenValidator, InMemoryJWKSSource) {
         let source = try source ?? InMemoryJWKSSource(json: jwksJSON([identity]))
         let configuration = try OIDCSecurityConfiguration(
@@ -28,7 +29,8 @@ struct OIDCValidatorTests {
             jwksRefreshCooldown: jwksRefreshCooldown,
             jwksMaxStaleAge: jwksMaxStaleAge,
             rolesClaims: rolesClaims,
-            scopesClaims: scopesClaims
+            scopesClaims: scopesClaims,
+            allowedAlgorithms: allowedAlgorithms
         )
         let validator = OIDCTokenValidator(
             configuration: configuration, jwksSource: source, now: clock.nowProvider
@@ -425,6 +427,42 @@ struct OIDCValidatorTests {
             }
         }
         #expect(source.fetchCount == fetchesAfterRefusal, "the cooldown still gates fetches")
+    }
+
+    @Test("an algorithm outside the allowlist is refused before any key is touched")
+    func algorithmAllowlistIsEnforced() async throws {
+        // The only screening was rejecting `none`. Safe today — verification
+        // keys come solely from the JWKS, and JWTKit's `JWK` has no symmetric
+        // type, so RS256→HS256 confusion is unreachable — but that is three
+        // separate facts staying true rather than one check. It also lets a
+        // deployment narrow to what its IdP actually issues, which is the
+        // half that earns its keep in practice.
+        let (validator, source) = try makeValidator(allowedAlgorithms: ["RS256"])
+        let token = try await identity.sign(standardClaims(now: clock.now))  // ES256
+
+        await expectValidationError(.unsupportedAlgorithm) { try await validator.validate(token) }
+        #expect(source.fetchCount == 0, "the key set was fetched before the alg was screened")
+    }
+
+    @Test("the default allowlist accepts every asymmetric algorithm")
+    func defaultAllowlistAcceptsAsymmetric() async throws {
+        let (validator, _) = try makeValidator()
+        let token = try await identity.sign(standardClaims(now: clock.now))
+        #expect(try await validator.validate(token).subject == "user-123")
+    }
+
+    @Test("an empty allowlist means no screening beyond none")
+    func emptyAllowlistScreensNothing() async throws {
+        let (validator, _) = try makeValidator(allowedAlgorithms: [])
+        let token = try await identity.sign(standardClaims(now: clock.now))
+        #expect(try await validator.validate(token).subject == "user-123")
+    }
+
+    @Test("the allowlist is case-insensitive, so \"rs256\" is not silently dead")
+    func allowlistIsCaseInsensitive() async throws {
+        let (validator, _) = try makeValidator(allowedAlgorithms: ["es256"])
+        let token = try await identity.sign(standardClaims(now: clock.now))
+        #expect(try await validator.validate(token).subject == "user-123")
     }
 
     @Test("no keys at all — fetch failing from the start — is keySourceUnavailable")

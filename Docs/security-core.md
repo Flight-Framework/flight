@@ -164,6 +164,25 @@ as the outage lasts — which is the exact window revocation exists to close.
 Six hours is long enough to ride out a real outage and short enough that a
 revocation takes effect the same day.
 
+### Algorithms
+
+A token's `alg` must be in `security.oidc.allowed_algorithms`, which defaults
+to every asymmetric algorithm JWTKit verifies (`RS*`, `PS*`, `ES*`, `EdDSA`).
+Narrow it to what your IdP issues:
+
+```yaml
+security:
+  oidc:
+    allowed_algorithms: RS256
+```
+
+The classic reason for an allowlist — an RS256 token replayed as HS256 with
+the public key as the HMAC secret — is not reachable here: verification keys
+come solely from the JWKS, and JWTKit's `JWK` has no symmetric type. That is
+three separate facts staying true, though, and this is one check. The half
+that earns its keep day to day is the narrowing: an IdP that starts issuing
+something new does not silently start being trusted for it.
+
 ### Keys the IdP did not publish for signing
 
 A JWK may carry `use` (`sig`/`enc`) or `key_ops`. Keys not published for

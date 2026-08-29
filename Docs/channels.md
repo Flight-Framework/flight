@@ -173,6 +173,15 @@ queue — a slow client never blocks a handler, and frames never interleave.
 |---|---|---|
 | `flight.channels.heartbeat-timeout-seconds` | `60` | A socket silent this long is closed (any frame counts as liveness) |
 | `flight.channels.heartbeat-check-interval-seconds` | timeout ÷ 4 | Watchdog cadence |
+| `flight.channels.outbound-buffer-size` | `256` | Queued frames per socket before the oldest are dropped |
+| `flight.channels.write-timeout-seconds` | `30` | One outbound frame taking longer than this closes the socket (`0` disables) |
+
+The write timeout is the bound the watchdog cannot supply. The watchdog counts
+*inbound* frames as liveness, so a client that keeps heartbeating while never
+reading looks perfectly alive to it — and the writer sits in `send` against a
+TCP window that never opens, forever. Memory stays bounded by the outbound
+queue; what accumulates is a task and a connection per such client, which is
+slow resource exhaustion rather than fast.
 
 Client side: `ChannelClientConfiguration(heartbeatInterval: .seconds(25),
 pushTimeout: .seconds(10), reconnect: .exponentialBackoff())`.

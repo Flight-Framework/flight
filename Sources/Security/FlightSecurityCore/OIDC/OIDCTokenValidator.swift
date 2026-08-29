@@ -56,6 +56,24 @@ public final class OIDCTokenValidator: TokenValidator {
                 kind: .unsupportedAlgorithm, reason: "alg \"none\" is not acceptable"
             )
         }
+        // The allowlist, checked before the key set is touched and before any
+        // signature is verified. `none` above was the only screening there
+        // used to be — safe today, because verification keys come solely from
+        // the JWKS and JWTKit's `JWK` has no symmetric type, so the classic
+        // RS256→HS256 confusion is unreachable. That is three separate facts
+        // staying true; this is one.
+        if !configuration.allowedAlgorithms.isEmpty {
+            let algorithm = header.algorithm?.uppercased()
+            guard let algorithm, configuration.allowedAlgorithms.contains(algorithm) else {
+                throw TokenValidationError(
+                    kind: .unsupportedAlgorithm,
+                    reason: """
+                        alg \(header.algorithm.map { "\"\($0)\"" } ?? "(absent)") is not in \
+                        security.oidc.allowed_algorithms
+                        """
+                )
+            }
+        }
 
         // 2. Current keys; an unrecognized `kid` triggers one (cooldown-
         //    gated) refresh — the key-rotation path.
