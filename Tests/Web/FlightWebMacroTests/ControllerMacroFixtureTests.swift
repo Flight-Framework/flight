@@ -141,14 +141,14 @@ struct ControllerMacroFixtureTests {
             @Controller
             struct ChatController {
                 @WebSocketMapping("/chat/:roomId")
-                func chat(_ context: RequestContext) async throws -> ConnectionUpgradeHandler {
+                func chat(_ context: RequestContext) async throws -> any WebSocketUpgradeHandler {
                     ChatRoomHandler(roomId: context.pathParam("roomId")!)
                 }
             }
             """,
             expandedSource: """
             struct ChatController {
-                func chat(_ context: RequestContext) async throws -> ConnectionUpgradeHandler {
+                func chat(_ context: RequestContext) async throws -> any WebSocketUpgradeHandler {
                     ChatRoomHandler(roomId: context.pathParam("roomId")!)
                 }
 
@@ -714,6 +714,97 @@ struct ControllerMacroFixtureTests {
                         route with container.registerRoute.
                         """,
                     line: 2, column: 5
+                )
+            ],
+            macroSpecs: testMacros
+        )
+    }
+
+    @Test("a body: parameter on a WebSocket route is diagnosed, not accepted")
+    func webSocketBodyParameterIsDiagnosed() {
+        // Accepted by the scanner and then guaranteed to fail at runtime: an
+        // upgrade request has an empty body by construction (RFC 6455 §4.1)
+        // and `decodeRequestBody` rejects empty bodies, so the upgrade was
+        // always refused, with nothing pointing at the `body:` that caused it.
+        assertMacroExpansion(
+            """
+            @Controller
+            struct ChatController {
+                @WebSocketMapping("/chat")
+                func chat(_ context: RequestContext, body: Hello) -> any WebSocketUpgradeHandler {
+                    Handler()
+                }
+            }
+            """,
+            expandedSource: """
+            struct ChatController {
+                func chat(_ context: RequestContext, body: Hello) -> any WebSocketUpgradeHandler {
+                    Handler()
+                }
+
+                internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container) throws {
+                    container.register(Self.self, scope: .singleton) { c in
+                        try Self(_flight: c)
+                    }
+                }
+            }
+
+            extension ChatController: FlightCore._FlightRegistrable {
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: """
+                        A @WebSocketMapping handler cannot take a 'body:' parameter: an upgrade \
+                        request has an empty body by construction (RFC 6455 §4.1), so decoding \
+                        one always fails and the upgrade is always refused at runtime. Read \
+                        what you need from the request's headers or query.
+                        """,
+                    line: 3, column: 5
+                )
+            ],
+            macroSpecs: testMacros
+        )
+    }
+
+    @Test("a route path containing a backslash is diagnosed at the attribute")
+    func backslashPathIsDiagnosed() {
+        // Re-embedded verbatim into generated string literals, so it used to
+        // fail as a compile error inside an expansion, at a line nobody wrote.
+        assertMacroExpansion(
+            #"""
+            @Controller
+            struct BadController {
+                @GetMapping("/a\b")
+                func handler(_ context: RequestContext) -> String { "x" }
+            }
+            """#,
+            expandedSource: #"""
+            struct BadController {
+                func handler(_ context: RequestContext) -> String { "x" }
+
+                internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container) throws {
+                    container.register(Self.self, scope: .singleton) { c in
+                        try Self(_flight: c)
+                    }
+                }
+            }
+
+            extension BadController: FlightCore._FlightRegistrable {
+            }
+            """#,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: #"""
+                        @GetMapping path "/a\b" contains a quote or a backslash. Neither is legal unescaped in a URL path; percent-encode it if it is genuinely part of the path.
+                        """#,
+                    line: 3, column: 5
                 )
             ],
             macroSpecs: testMacros

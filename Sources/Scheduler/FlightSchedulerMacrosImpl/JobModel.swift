@@ -32,11 +32,31 @@ enum JobScanning {
         var jobs: [ScannedJob] = []
         for member in members {
             guard let function = member.decl.as(FunctionDeclSyntax.self) else { continue }
-            for attribute in function.attributes {
-                guard
-                    let attr = attribute.as(AttributeSyntax.self),
+            let scheduled = function.attributes.compactMap { attribute -> AttributeSyntax? in
+                guard let attr = attribute.as(AttributeSyntax.self),
                     attr.attributeName.as(IdentifierTypeSyntax.self)?.name.text == "Scheduled"
-                else { continue }
+                else { return nil }
+                return attr
+            }
+            // Every job's registration qualifier is `Type.method`, so two
+            // `@Scheduled` attributes on one method produced two
+            // registrations under one qualifier — either a duplicate the
+            // container refuses at freeze, or one schedule silently winning.
+            // Neither is what "run this twice on two schedules" should mean,
+            // and neither said so.
+            if scheduled.count > 1 {
+                context.diagnoseError(
+                    "scheduled.duplicate",
+                    """
+                    '\(function.name.text)' has \(scheduled.count) @Scheduled attributes, and \
+                    a job is registered under its method name — so they would collide rather \
+                    than both run. Split the schedules across separate methods, or register \
+                    the extra one with container.registerScheduledJob.
+                    """,
+                    at: scheduled[1])
+                continue
+            }
+            for attr in scheduled {
                 if let job = scanJob(function: function, attribute: attr, in: context) {
                     jobs.append(job)
                 }

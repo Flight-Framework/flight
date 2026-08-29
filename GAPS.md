@@ -24,7 +24,21 @@ presence gossip trust model; npm and Homebrew publishing; format debt.
 
 **Closed since this was written:** the scheduler (flight 0.2.0/0.2.1, with the
 Postgres coordinator in flight-data 0.2.0 and a tutorial stage), the target
-regrouping, DocC coverage and its CI jobs, and the macOS jobs.
+regrouping, DocC coverage and its CI jobs, the macOS jobs, and flight-web
+static-file handling.
+
+**A full source audit ran on 2026-08-29** against v0.9.1 — every file under
+`Sources/`, ten reviewers, one per product, with this file and the per-product
+docs as the promise baseline. Its findings were worked through in 0.10.0. The
+shape of what it found is worth recording even now that the individual items
+are fixed: **the code was in better shape than the prose about it.** Where the
+code was wrong it clustered — three of the four highest-severity defects were
+in the Scheduler, and two of the four were bounds that existed but were
+checked on only one of the two paths that needed them (JWKS max-stale on the
+refresh path but not the cached-return path; response backpressure in the
+request direction but not the response direction). That asymmetry is now a
+thing to look for: **when a defect class is closed on one side of a symmetry,
+ask what its mirror image is.**
 
 **DocC is done** where it makes sense: 17 of flight's 20 targets, 8 of
 flight-data's, hangar and swift-changeset. The three flight targets without
@@ -52,6 +66,27 @@ every macro emitting a registration thunk must appear in the generator's list
 because the lesson generalises: a suite, a docs build and compiled snippets
 can all pass *above* the layer that is broken, and the tutorial was the only
 artifact exercising the real path end to end.
+
+**The class was still open in two more places, found by the 2026-08-29 source
+audit and closed in 0.10.0.**
+
+`OverlapPolicy` was a no-op. Every test called `JobRunner.fire()` directly,
+which is precisely the seam the bug was behind: the production loop awaited
+each firing before computing the next, so `isRunning` could never be true and
+`.skip` never skipped. `.queue`'s documented "waits for the running job, then
+runs again" simply did not happen — a feature with an API, a doc table row
+and tests, doing nothing.
+
+A route-mapping attribute on a non-`@Controller` type — or in an extension of
+one — compiled cleanly, registered nothing, and produced no diagnostic
+anywhere. No fixture covered it, for a reason worth writing down: a fixture
+for that case has no expansion to assert and no diagnostic to assert, so it
+looks like there is nothing to test. There was: the *absence* of both is the
+bug.
+
+The generalisable part is the same each time — **test through the seam the
+production path uses, not around it** — plus a second rule these two add:
+when a feature can be inert, write the test that fails if it produces nothing.
 
 ---
 
@@ -300,6 +335,16 @@ left has no consumer-facing API to document.
   story is across protocol versions. *Large, and needs a threat-model decision
   before any code.*
 
+  One concrete vector was closed in 0.10.0 without waiting for that decision,
+  because it was not state corruption but a *remote process kill*: a frame
+  whose causal context claimed dots belonging to the **receiving** replica was
+  merged unconditionally, raising that replica's version past its own clock, so
+  its next local `track` tripped a precondition and killed the process. One
+  frame, one crash. Such claims are now refused — only a replica ever asserts
+  its own dots, so a frame making one is malformed either way. Everything else
+  about the trust model is still open: a peer can still assert entries that are
+  not real, and nothing authenticates a frame.
+
 ### flight-data / drivers
 - No cross-database abstraction, no auto-migration at boot, no query caching.
   *All deliberate.*
@@ -444,22 +489,11 @@ ones. Blocked on a flight release, since templates pin 0.1.2.
   `Repo.with` takes a concrete `Repo` — and is worth doing: it would also make
   the `.waiting` acquisition unnecessary for request handlers that only
   sometimes touch the database.
-- **Flight Web has no static-file handling.** An application that ships a
-  browser interface — a single-page application, or just a favicon — has to
-  write its own, and the hazards are the usual ones: a path that escapes the
-  root, a directory read as a file, content types, and caching rules that
-  differ between a content-hashed asset and the shell that names it.
-
-  Flightdeck wrote about a hundred lines to do it, and the first version had a
-  live traversal bug that only a test with six spellings of `..` caught. That
-  is a bad thing for every application to write once each.
-
-  What belongs in FlightWeb: `Response.file(at:)` plus a
-  `container.registerStaticFiles(root:at:)` covering the same ground — resolve
-  the path and compare against the root rather than pattern-matching for `..`,
-  refuse directories, map extensions to content types, `no-cache` for the
-  entry document and `immutable` for hashed assets, and a fall-through mode
-  for client-side routing. Range requests and ETags are the obvious next
-  layer and not needed for a first version.
-
-  Flightdeck's `WebAppController` is a working reference, tests included.
+- ✅ **Flight Web has no static-file handling.** *Closed.* `container.assets(at:root:)`
+  ships exactly what this entry asked for and more: containment by resolving
+  the path and comparing against the root rather than pattern-matching for
+  `..`, directories refused, an extension→content-type table, per-pattern
+  cache rules, an SPA fallback gated on `Accept`, content hashing, and
+  `Accept-Encoding` negotiation against precompressed siblings. Range
+  requests and ETags — "the obvious next layer" — are there too, as
+  `serveContent`'s RFC 9110 conditional/range engine over a `ByteSource`.

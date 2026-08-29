@@ -124,6 +124,22 @@ enum RouteScanning {
             validatePath(
                 mapping.path, name: mapping.kind.rawValue,
                 at: mapping.attribute, in: context)
+            // A path is re-embedded into generated string literals verbatim,
+            // so a `"` or `\` in one produced a compile error inside an
+            // expansion the author cannot see, at a line they did not write.
+            // Neither belongs in a URL path anyway.
+            if mapping.path.contains("\"") || mapping.path.contains("\\") {
+                context.diagnoseError(
+                    "mapping.path",
+                    """
+                    @\(mapping.kind.rawValue) path "\(mapping.path)" contains a quote or a \
+                    backslash. Neither is legal unescaped in a URL path; percent-encode it \
+                    if it is genuinely part of the path.
+                    """,
+                    at: mapping.attribute
+                )
+                return []
+            }
         }
 
         let name = function.name.text
@@ -178,6 +194,42 @@ enum RouteScanning {
         let effects = function.signature.effectSpecifiers
         let returnTypeText = function.signature.returnClause?.type.trimmedDescription
         let returnType = returnTypeText.flatMap { $0 == "Void" || $0 == "()" ? nil : $0 }
+
+        // Two shapes an upgrade route cannot have, both of which used to fail
+        // as compile errors inside the expansion — or, for the body, not at
+        // all until a runtime refusal nobody could explain.
+        for mapping in mappings where mapping.kind.isUpgrade {
+            if bodyTypeText != nil {
+                context.diagnoseError(
+                    "mapping.upgradebody",
+                    """
+                    A @\(mapping.kind.rawValue) handler cannot take a 'body:' parameter: an \
+                    upgrade request has an empty body by construction (RFC 6455 §4.1), so \
+                    decoding one always fails and the upgrade is always refused at runtime. \
+                    Read what you need from the request's headers or query.
+                    """,
+                    at: mapping.attribute
+                )
+                return []
+            }
+            // Only the definitely-wrong case is diagnosable here: a
+            // concrete conforming type is a legitimate return type, so the
+            // rest is the type checker's — it just used to report inside the
+            // expansion rather than at the handler.
+            guard returnType != nil else {
+                context.diagnoseError(
+                    "mapping.upgradereturn",
+                    """
+                    A @\(mapping.kind.rawValue) handler must return something conforming to \
+                    WebSocketUpgradeHandler — that is what the generated route hands the \
+                    transport. This one returns nothing, so there is no connection to \
+                    upgrade to.
+                    """,
+                    at: function
+                )
+                return []
+            }
+        }
 
         return mappings.map { kind, path, maxBodyBytes, _ in
             ScannedRoute(

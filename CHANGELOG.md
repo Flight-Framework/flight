@@ -4,6 +4,117 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-29
+
+A full source audit — every file under `Sources/`, ten reviewers, one per
+product, with `README.md`, the per-product docs and `GAPS.md` as the promise
+baseline — ran against 0.9.1. This release works through what it found. Every
+high-severity fix has a regression test that fails against the code it
+replaces.
+
+Two shapes ran through the findings and are worth naming, because they are
+what to look for next time. **Bounds enforced on one path but not its
+mirror**: JWKS staleness was checked when a refresh was attempted and not when
+cached keys were returned; backpressure was fixed in the request direction in
+0.8.0 and not in the response direction. **Features shipped inert** — the
+class GAPS.md's own `@Scheduler` postmortem describes — found twice more, both
+times behind a seam every test called around.
+
+### Breaking
+
+- **A streaming response producer takes a `ResponseBodyWriter`, not an
+  `AsyncStream.Continuation`,** and `ServerSentEventWriter.send` /
+  `sendHeartbeat` are `async`. Awaiting is the point: a producer that cannot
+  be made to wait cannot be given backpressure. Add `await` at SSE call sites.
+- **`Response.streaming`'s producer starts on the transport's first read**
+  rather than at response construction.
+- **`SchedulerService.resolveCoordinator` throws** for a coordinator that is
+  registered but cannot be built.
+- **`RouteRegistration(method:)` fails on an unrecognized method string**
+  instead of registering the route as GET.
+- **An unset `FLIGHT_ENV` no longer publishes the actuator dashboard.**
+  Declare `FLIGHT_ENV=dev`, or set `FLIGHT_ACTUATOR_EXPOSURE=full`.
+- **`iat` is no longer stripped from `Principal.claims`.**
+- Cron: `0 0 0 */2 * MON` — both day fields narrowed with a `*/n` step — is
+  refused rather than resolved one of the two ways implementations disagree
+  about.
+
+### Fixed
+
+**Scheduler** — the three worst defects in the audit were all here. One
+exhausted schedule (`0 0 0 30 2 *` parses fine and never fires) cancelled
+*every other job*, against the doc's "one broken job never stops the others".
+`OverlapPolicy` was inert: `fire()` was only ever called from its own awaited
+loop, so `.skip` never skipped and `.queue`'s documented behaviour did not
+exist. And cron could answer with an instant up to an hour *in the past*
+during a DST fall-back, so the runner fired, recomputed the same past instant,
+and spun until real time left the fold.
+
+Also: an interval job with `.once` cannot be coordinated (its firing instants
+are node-local) and now says so at startup; sub-second durations were
+truncated to zero; `lastDuration` reported whole seconds; the `timeZone:`
+argument was never build-checked, so `"America/NewYork"` ran in GMT silently;
+`5-7` in day-of-week was refused as a backwards range.
+
+**Security** — `jwks_max_stale` was enforced only where a refresh was
+attempted. Refreshes are cooldown-gated, so past the limit roughly one request
+per window was refused while every other one kept validating against keys that
+may have been revoked — the guarantee inverted, for the whole outage. Also: a
+JWKS whose keys all omit `kid` (legal) was rejected outright, and a kid-less
+`use: "enc"` key slipped past the signing-key filter.
+
+**Config** — every provider error was read as "the key is absent here", so a
+transient failure in a high-precedence layer fell through and answered from
+the layer below: a production key resolved from a development one, silently.
+`get(_:default:)` masked a present-but-unreadable value the same way.
+Zero-indented block sequences are accepted. Substituted values carry their
+secret flag, and `accessReporter` fires for Flight's own accessors.
+
+**Actuator** — the DocC catalogue documented three endpoints that never
+existed; the README and manifest advertised metrics that were never written;
+and the exposure gate still failed open for a deployment that set nothing.
+`/actuator/health/live` and `/actuator/health/ready` answer the two different
+questions an orchestrator asks, and `Container.reportHealth(_:forModule:)`
+lets a module report what only it knows.
+
+**Web** — response streams had no backpressure at all. A matched request ran
+full route-table matching up to four times. A cookie value could forge cookie
+attributes. `UpgradeResponse`'s "every transport fails to compile" promise was
+defeated by the one transport that exists. A mapping attribute outside
+`@Controller` registered nothing and said nothing. Plus: configured coders
+bypassed for dictionaries and nil-optional 404s, three tus 1.0 wire
+deviations, an asset exclusion evaded by percent-encoding, `gzip;q=0` read as
+acceptance, and `Accept: */*` (which is `fetch()`'s own default) treated as a
+navigation.
+
+**Channels** — three client lifecycle defects: a duplicate join silently lost
+its rejoin intent, `disconnect()` promised a rejoin `connect()` never
+performed, and a disconnect racing an in-flight dial resurrected a closed
+client. Client streams and channel records grew without limit, where the
+server side had bounded both.
+
+**Presence** — a peer frame claiming the receiving replica's own dots was a
+one-frame remote process kill. The CRDT merge scanned every entry in the
+cluster per gossip frame; it is indexed by replica now.
+
+**PubSub** — `broadcastTimeout` did not bound `publish` against an adapter
+that does not respond to cancellation, which the adapter contract never
+required it to. The documented buffering and cluster knobs were unreachable
+through `FlightPubSubModule`.
+
+**Core** — `resolve` demangled a type name on every scoped and transient
+construction, defeating the lazy demangling its own comment justifies.
+
+### Documentation
+
+The README pinned `from: "0.2.1"` in four places, claimed 685 tests across 14
+targets, said Swift 6.2+ where the manifest says 6.3, and stated macOS support
+without the caveat GAPS.md records. `Docs/web.md` was roughly eight releases
+stale and taught a deprecated middleware API as its flagship example. Every
+trait guard's comment described the opposite polarity. The DocC CI job was red
+on `main` — `FlightWeb`'s catalogue listed six macros under signatures none of
+them have — and all 18 catalogues build clean again.
+
 ## [0.9.1] - 2026-08-29
 
 ### Fixed
