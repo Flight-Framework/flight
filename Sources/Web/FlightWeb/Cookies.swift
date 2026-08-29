@@ -46,6 +46,17 @@ public struct Cookie: Sendable, Equatable {
         isHTTPOnly: Bool = true,
         sameSite: SameSite? = .lax
     ) {
+        // A name is developer-supplied — a literal, at every call site anyone
+        // writes — so a bad one is a programming error and trapping on it
+        // finds the bug. `=` would split the pair somewhere the browser
+        // decides; `;` would end it entirely.
+        precondition(
+            !name.isEmpty && !name.contains(where: Cookie.isForbiddenInName),
+            """
+            Cookie name "\(name)" contains a character that cannot appear in a Set-Cookie \
+            name (=, ;, comma, whitespace, or a control character). Set-Cookie has no \
+            escaping mechanism, so there is nothing to escape it to.
+            """)
         self.name = name
         self.value = value
         self.path = path
@@ -69,8 +80,19 @@ public struct Cookie: Sendable, Equatable {
     }
 
     /// The `Set-Cookie` field value.
+    ///
+    /// Structural characters are removed from the value on the way out. A
+    /// `;` in a value does not corrupt it — it *forges attributes*, so a
+    /// value carrying `; SameSite=None; Secure` used to reach the wire as
+    /// exactly that, silently, on a type whose whole framing is safe
+    /// defaults. `Set-Cookie` has no escaping mechanism, so there is nothing
+    /// to escape them to; percent-encode or base64 a value that needs them,
+    /// and decode it yourself on the way back in.
+    ///
+    /// The name is checked at construction instead: it is always a literal
+    /// in practice, so a bad one is a programming error worth finding.
     public var headerValue: String {
-        var parts = ["\(name)=\(value)"]
+        var parts = ["\(name)=\(Cookie.sanitized(value))"]
         if let path { parts.append("Path=\(path)") }
         if let domain { parts.append("Domain=\(domain)") }
         if let maxAge { parts.append("Max-Age=\(maxAge.components.seconds)") }
@@ -79,6 +101,31 @@ public struct Cookie: Sendable, Equatable {
         if isHTTPOnly { parts.append("HttpOnly") }
         if let sameSite { parts.append("SameSite=\(sameSite.rawValue)") }
         return parts.joined(separator: "; ")
+    }
+}
+
+extension Cookie {
+    /// Characters that cannot appear in a `Set-Cookie` name: they would end
+    /// the pair, split it, or end the whole field.
+    fileprivate static func isForbiddenInName(_ character: Character) -> Bool {
+        character == "=" || character == ";" || character == ","
+            || character.isWhitespace || character.unicodeScalars.contains { $0.value < 0x21 }
+    }
+
+    /// RFC 6265's `cookie-value`, minus everything it excludes: `;` and `,`
+    /// (which forge attributes and split the field), whitespace, `\` and
+    /// `"` (which the quoted form uses), and control characters.
+    fileprivate static func sanitized(_ value: String) -> String {
+        String(
+            value.filter { character in
+                guard let scalar = character.unicodeScalars.first,
+                    character.unicodeScalars.count == 1
+                else { return true }
+                switch scalar {
+                case ";", ",", "\\", "\"", " ": return false
+                default: return scalar.value > 0x20 && scalar.value != 0x7F
+                }
+            })
     }
 }
 
@@ -102,7 +149,24 @@ extension Request {
         return found
     }
 
-    public func cookie(_ name: String) -> String? { cookies[name] }
+    /// One cookie's value.
+    ///
+    /// Scans the header for the name rather than going through ``cookies``,
+    /// which builds a whole dictionary for one lookup — a handler reading
+    /// three cookies parsed the header three times and threw away three
+    /// dictionaries. Same first-wins rule.
+    public func cookie(_ name: String) -> String? {
+        guard let header = headers[.cookie] else { return nil }
+        for pair in header.split(separator: ";") {
+            var trimmed = pair
+            while let first = trimmed.first, first.isWhitespace { trimmed.removeFirst() }
+            while let last = trimmed.last, last.isWhitespace { trimmed.removeLast() }
+            guard let separator = trimmed.firstIndex(of: "="), trimmed[..<separator] == name
+            else { continue }
+            return String(trimmed[trimmed.index(after: separator)...])
+        }
+        return nil
+    }
 }
 
 extension Response {

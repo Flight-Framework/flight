@@ -81,6 +81,20 @@ public struct RoutePattern: Sendable, Equatable, CustomStringConvertible {
 public struct RouteMatch: Sendable {
     public let route: RouteRegistration
     public let pathParameters: [String: String]
+    /// This route's position in ``Router/routes``.
+    ///
+    /// Carried so dispatch can find the route's composed responder by
+    /// subscript. It used to build an interpolated
+    /// `"METHOD /path @source"` key per request and look it up in a
+    /// dictionary — a fresh String allocation and a hash on the hot path,
+    /// for information the match already had.
+    public let routeIndex: Int
+
+    public init(route: RouteRegistration, pathParameters: [String: String], routeIndex: Int) {
+        self.route = route
+        self.pathParameters = pathParameters
+        self.routeIndex = routeIndex
+    }
 }
 
 public enum RouterError: Error, CustomStringConvertible {
@@ -109,6 +123,8 @@ public struct Router: Sendable {
     private struct Entry: Sendable {
         let pattern: RoutePattern
         let registration: RouteRegistration
+        /// Position in `routes`, so a match can carry it.
+        let index: Int
     }
 
     /// Entries grouped by method. Linear scan in declaration order with
@@ -121,7 +137,7 @@ public struct Router: Sendable {
     public init(routes: [RouteRegistration]) throws {
         var grouped: [HTTPRequest.Method: [Entry]] = [:]
         var claimed: [String: String] = [:]  // "METHOD shape" → source
-        for registration in routes {
+        for (index, registration) in routes.enumerated() {
             let pattern: RoutePattern
             do {
                 pattern = try RoutePattern(registration.path)
@@ -138,7 +154,7 @@ public struct Router: Sendable {
             }
             claimed[key] = registration.source
             grouped[registration.method, default: []].append(
-                Entry(pattern: pattern, registration: registration)
+                Entry(pattern: pattern, registration: registration, index: index)
             )
         }
         // Most-specific-first within each method: constants sort before
@@ -151,6 +167,15 @@ public struct Router: Sendable {
         self.entriesByMethod = grouped
         self.routes = routes
     }
+
+    /// The match that selected the responder currently running.
+    ///
+    /// Bound by dispatch around the composed chain so the terminal can bind
+    /// path parameters without matching the table a second time. A task-local
+    /// rather than a `RequestContext` field because the context is passed
+    /// `inout` through middleware and a middleware that replaced it wholesale
+    /// would drop the match; the binding outlives any such swap.
+    @TaskLocal public static var currentMatch: RouteMatch?
 
     // MARK: - Matching
 
@@ -189,7 +214,9 @@ public struct Router: Sendable {
         guard let entries = entriesByMethod[method] else { return nil }
         for entry in entries {
             if let parameters = Self.match(entry.pattern, against: segments) {
-                return RouteMatch(route: entry.registration, pathParameters: parameters)
+                return RouteMatch(
+                    route: entry.registration, pathParameters: parameters,
+                    routeIndex: entry.index)
             }
         }
         return nil

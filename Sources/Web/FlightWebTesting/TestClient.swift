@@ -17,17 +17,32 @@ import Logging
 public struct TestClient: Sendable {
     public let dispatch: Dispatch
 
+    /// The wire format the application under test is configured for.
+    ///
+    /// The JSON helpers used a fresh default `JSONEncoder`/`JSONDecoder`, so
+    /// a suite testing an app with `web.json.key-strategy: snake-case` got a
+    /// 400 from `post(json:)` and a decode failure from `decodeJSON` — with
+    /// nothing anywhere pointing at the format mismatch, on a client whose
+    /// whole promise is that it drives the real pipeline.
+    public let coders: WebCoders
+
     /// Builds dispatch from a frozen container, exactly as `FlightWebModule`
     /// would at service start (route-table validation included).
     public init(container: Container) throws {
         var logger = Logger(label: "flight.web.test-client")
         logger.logLevel = .critical
         self.dispatch = try DispatchBuilder.build(container: container, logger: logger)
+        self.coders = (try? container.resolve(WebCoders.self)) ?? WebCoders.default
     }
 
     /// Wraps an existing dispatch closure (for transport-free harnesses).
-    public init(dispatch: Dispatch) {
+    ///
+    /// - Parameter coders: The app's wire format, when the harness knows it.
+    ///   There is no container to read it from here, so it defaults to the
+    ///   package default.
+    public init(dispatch: Dispatch, coders: WebCoders = .default) {
         self.dispatch = dispatch
+        self.coders = coders
     }
 
     // MARK: - Requests
@@ -45,11 +60,11 @@ public struct TestClient: Sendable {
     }
 
     public func post(_ path: String, headers: HTTPFields = [:], json value: some Encodable) async throws -> Response {
-        await execute(Request(method: .post, path: path, headers: headers, body: try JSONEncoder().encode(value)))
+        await execute(Request(method: .post, path: path, headers: headers, body: try coders.jsonEncoder.encode(value)))
     }
 
     public func put(_ path: String, headers: HTTPFields = [:], json value: some Encodable) async throws -> Response {
-        await execute(Request(method: .put, path: path, headers: headers, body: try JSONEncoder().encode(value)))
+        await execute(Request(method: .put, path: path, headers: headers, body: try coders.jsonEncoder.encode(value)))
     }
 
     /// PATCH, which is what a partial update is: the verb a changeset-backed
@@ -59,7 +74,7 @@ public struct TestClient: Sendable {
     }
 
     public func patch(_ path: String, headers: HTTPFields = [:], json value: some Encodable) async throws -> Response {
-        await execute(Request(method: .patch, path: path, headers: headers, body: try JSONEncoder().encode(value)))
+        await execute(Request(method: .patch, path: path, headers: headers, body: try coders.jsonEncoder.encode(value)))
     }
 
     public func delete(_ path: String, headers: HTTPFields = [:]) async -> Response {
@@ -108,8 +123,21 @@ public struct TestClient: Sendable {
             }
             client.finishFromServer()
         }
+        // Cancelled when the client goes, not only when `close()` is called:
+        // a test that drops its client without closing left this task parked
+        // on the frame stream forever, one leaked task per such test.
+        client.cancelServerTaskOnDeinit()
         client.attach(serverTask: serverTask)
         return client
+    }
+}
+
+extension TestClient {
+    /// Decodes a response body with the application's configured decoder.
+    public func decodeJSON<T: Decodable>(
+        _ type: T.Type = T.self, from response: Response
+    ) throws -> T {
+        try coders.jsonDecoder.decode(type, from: response.bodyData ?? Data())
     }
 }
 
@@ -136,9 +164,14 @@ extension TestClient {
 }
 
 extension Response {
-    /// Decodes a `.fixed` JSON body.
+    /// Decodes a `.fixed` JSON body with the package's default decoder.
+    ///
+    /// Prefer ``FlightWebTesting/TestClient/decodeJSON(_:from:)`` when the
+    /// application configures its wire format: this overload cannot know
+    /// about it, which is how a snake-case app's responses failed to decode
+    /// here with nothing pointing at why.
     public func decodeJSON<T: Decodable>(_ type: T.Type = T.self) throws -> T {
-        try JSONDecoder().decode(type, from: bodyData ?? Data())
+        try WebCoders.default.jsonDecoder.decode(type, from: bodyData ?? Data())
     }
 
     /// UTF-8 rendering of a `.fixed` body ("" for streaming/upgrade).

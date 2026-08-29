@@ -76,31 +76,37 @@ public struct FlightTransport: ServerTransport {
 
                 // The upgrade decision needs the *routed* answer, middleware
                 // included, so the pipeline runs for genuine upgrade routes.
-                switch await dispatch(request) {
-                // This transport negotiated an RFC 6455 handshake, so only
-                // the WebSocket kind is servable here. When UpgradeResponse
-                // grows a case (WebTransport), this switch stops compiling —
-                // which is the seam working: the transport must decide, not
-                // silently mishandle a protocol it never heard of.
-                case .upgrade(.webSocket(let webSocketUpgrade)):
+                let routed = await dispatch(request)
+                guard case .upgrade(let upgrade) = routed else {
+                    // HummingbirdCore answers every refused upgrade with its
+                    // own 400 + connection close; the routed status is the
+                    // in-process truth (TestClient surfaces it) but is not
+                    // writable through this seam — see design delta 8.
+                    logger.debug("websocket upgrade refused", metadata: [
+                        "path": "\(head.path ?? "/")",
+                        "status": "\(routed.status.code)",
+                    ])
+                    return .dontUpgrade
+                }
+                // Switched over `UpgradeResponse` itself, with no catch-all.
+                // `UpgradeResponse`'s own doc promises "every transport fails
+                // to compile" when a kind is added — and the one transport
+                // that exists defeated it: a `case let refused` after
+                // `.upgrade(.webSocket)` swallowed a future
+                // `.upgrade(.webTransport)` and logged it as refused with
+                // status 101. Now a new kind really does break this build,
+                // which is the seam working.
+                switch upgrade {
+                case .webSocket(let webSocketUpgrade):
                     return .upgrade([:]) { inbound, outbound, _ in
                         try await Self.runUpgradedConnection(
                             webSocketUpgrade,
                             inbound: inbound,
                             outbound: outbound,
-                            maxMessageBytes: configuration.maxWebSocketFrameBytes
+                            maxMessageBytes: configuration.maxWebSocketFrameBytes,
+                            logger: logger
                         )
                     }
-                case let refused:
-                    // HummingbirdCore answers every refused upgrade with its
-                    // own 400 + connection close; the routed status is the
-                    // in-process truth (TestClient surfaces it) but is not
-                    // writable through this seam — README delta 8.
-                    logger.debug("websocket upgrade refused", metadata: [
-                        "path": "\(head.path ?? "/")",
-                        "status": "\(refused.status.code)",
-                    ])
-                    return .dontUpgrade
                 }
             }
         )
@@ -313,7 +319,8 @@ public struct FlightTransport: ServerTransport {
         _ upgrade: WebSocketUpgrade,
         inbound: WebSocketInboundStream,
         outbound: WebSocketOutboundWriter,
-        maxMessageBytes: Int
+        maxMessageBytes: Int,
+        logger: Logger
     ) async throws {
         let (frames, continuation) = AsyncStream<FlightWeb.WebSocketFrame>.makeStream()
 
@@ -355,22 +362,59 @@ public struct FlightTransport: ServerTransport {
             // against the in-memory transport behave identically here.
             group.addTask {
                 var iterator = inbound.makeAsyncIterator()
-                while let message = try? await iterator.nextMessage(maxSize: maxMessageBytes) {
-                    switch message {
-                    case .text(let text):
-                        continuation.yield(.text(text))
-                    case .binary(let buffer):
-                        continuation.yield(.binary(Data(buffer: buffer)))
+                // `try?` used to swallow *why* the stream ended, so a peer
+                // closing, an oversized message and a protocol error were all
+                // indistinguishable to the handler: each synthesized
+                // `.close(code: .noStatus, reason: "")`. The in-memory
+                // transport delivers the test's real close code verbatim, so
+                // a handler branching on the code passed its tests and did
+                // something else in production — the opposite of "handlers
+                // behave identically on the in-memory transport and the wire".
+                //
+                // The peer's own close code is still not recoverable here:
+                // WSCore consumes the close frame in its state machine and
+                // this stream simply ends, so a clean end honestly reports
+                // "no status". What changed is that an *abnormal* end no
+                // longer pretends to be a clean one.
+                do {
+                    while let message = try await iterator.nextMessage(maxSize: maxMessageBytes) {
+                        switch message {
+                        case .text(let text):
+                            continuation.yield(.text(text))
+                        case .binary(let buffer):
+                            continuation.yield(.binary(Data(buffer: buffer)))
+                        }
                     }
+                    continuation.yield(.close(code: .noStatus, reason: ""))
+                } catch is CancellationError {
+                    continuation.yield(.close(code: .goingAway, reason: "server shutting down"))
+                } catch {
+                    // WSCore's own error type is `package`, so the reason
+                    // travels as text rather than as a matched case — still
+                    // "message too large" or "protocol error" where it used
+                    // to be silence.
+                    logger.debug(
+                        "websocket inbound stream ended abnormally",
+                        metadata: ["error": "\(error)"])
+                    continuation.yield(.close(code: .protocolError, reason: "\(error)"))
                 }
-                continuation.yield(.close(code: .noStatus, reason: ""))
                 continuation.finish()
             }
 
             // Handler: owns the connection for its lifetime (§6.1). When it
             // returns, HummingbirdCore performs the close handshake.
             group.addTask {
-                try? await upgrade.run(connection)
+                do {
+                    try await upgrade.run(connection)
+                } catch is CancellationError {
+                    // The other half of the group ended first; ordinary.
+                } catch {
+                    // Discarded with no log at all, so a handler that crashed
+                    // was invisible even at debug level — the connection just
+                    // closed and nothing anywhere said why.
+                    logger.debug(
+                        "websocket handler threw", metadata: ["error": "\(error)"])
+                }
             }
 
             // Either side finishing ends the session: a returned handler has

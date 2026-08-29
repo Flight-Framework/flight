@@ -30,8 +30,20 @@ extension RouteRegistration {
         bodyMode: BodyMode = .buffered(maxBytes: nil),
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
+        // A method string this does not recognize is a build-generator bug
+        // or a typo, and `?? .get` turned either into a *live GET route* —
+        // reachable, wrong, and silent. Everything else about the route table
+        // fails at startup; so does this.
+        guard let parsed = HTTPRequest.Method(method) else {
+            preconditionFailure(
+                """
+                Route \(source) declares HTTP method "\(method)" for \(path), which is not a \
+                valid method token. Registering it as GET — which is what used to happen — \
+                would publish a route nobody asked for.
+                """)
+        }
         self.init(
-            method: HTTPRequest.Method(method) ?? .get,
+            method: parsed,
             path: path,
             kind: kind,
             source: source,

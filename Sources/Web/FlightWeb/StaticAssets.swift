@@ -187,9 +187,17 @@ extension AssetMountRegistration {
     func claims(_ request: Request) -> Bool {
         guard request.method == .get || request.method == .head else { return false }
         guard let relative = relativePath(of: request.path) else { return false }
+        // Decoded first, as `serveExisting` does. Comparing the raw
+        // percent-encoded path meant `/%61pi/users` did not match an `/api`
+        // exclusion — so an encoded spelling of an excluded prefix was
+        // claimed by the mount and (with an HTML-ish Accept) answered with
+        // the SPA shell instead of the API-shaped 404. No containment breach,
+        // but the documented invariant failed for exactly the spelling
+        // someone probing would use.
+        let candidate = "/" + (relative.removingPercentEncoding ?? relative)
         for excluded in options.exclude {
             let normalized = excluded.hasPrefix("/") ? excluded : "/" + excluded
-            if ("/" + relative) == normalized || ("/" + relative).hasPrefix(normalized + "/") {
+            if candidate == normalized || candidate.hasPrefix(normalized + "/") {
                 return false
             }
         }
@@ -232,9 +240,38 @@ extension AssetMountRegistration {
 
     private func prefersHTML(_ accept: String?) -> Bool {
         // Absent (curl, health checks poking around) counts as a navigation;
-        // an explicit Accept that never mentions HTML or */* does not.
+        // an explicit Accept that never mentions HTML does not.
+        //
+        // `*/*` deliberately does *not* count, and that is a change: it did,
+        // and `fetch()`'s own default Accept is `*/*`, so the promise that "a
+        // fetch never receives the shell" held only for fetches that set
+        // Accept explicitly — which is to say, not the common case. A browser
+        // navigation always sends `text/html` in its Accept; a bare `*/*` is
+        // a programmatic client.
         guard let accept else { return true }
-        return accept.contains("text/html") || accept.contains("*/*")
+        return accept.contains("text/html")
+    }
+
+    /// The codings a client actually accepts, `q=0` excluded.
+    ///
+    /// A `contains` over the raw header treated `gzip;q=0` — which is RFC
+    /// 9110's way of saying "not gzip" — as acceptance, and sent gzip to a
+    /// client that had explicitly refused it.
+    static func acceptedEncodings(_ header: String) -> Set<String> {
+        var accepted: Set<String> = []
+        for entry in header.split(separator: ",") {
+            let parts = entry.split(separator: ";")
+            guard let name = parts.first?.trimmingCharacters(in: .whitespaces).lowercased(),
+                !name.isEmpty
+            else { continue }
+            let refused = parts.dropFirst().contains { parameter in
+                let text = parameter.trimmingCharacters(in: .whitespaces).lowercased()
+                guard text.hasPrefix("q=") else { return false }
+                return Double(text.dropFirst(2)).map { $0 <= 0 } ?? false
+            }
+            if !refused { accepted.insert(name) }
+        }
+        return accepted
     }
 
     /// nil = not servable (missing, escaped, denied) — distinct from an
@@ -285,7 +322,7 @@ extension AssetMountRegistration {
         var etag = await validator(for: source)
         if !options.precompressed.isEmpty {
             extraHeaders[.vary] = "Accept-Encoding"
-            let accepted = context.request.headers[.acceptEncoding] ?? ""
+            let accepted = Self.acceptedEncodings(context.request.headers[.acceptEncoding] ?? "")
             for encoding in options.precompressed where accepted.contains(encoding.rawValue) {
                 if let sidecar = try? await FileByteSource.open(atPath: servePath + encoding.suffix) {
                     chosen = sidecar

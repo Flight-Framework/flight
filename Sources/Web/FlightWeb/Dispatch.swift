@@ -105,8 +105,8 @@ public enum DispatchBuilder {
 
         // One composed responder per route, keyed by the same string that is
         // already that route's unique component qualifier.
-        var respondersByRoute: [String: Next] = [:]
-        for route in router.routes {
+        var respondersByRoute = [Next?](repeating: nil, count: router.routes.count)
+        for (routeIndex, route) in router.routes.enumerated() {
             var chain: [MiddlewareRegistration] = []
             for lane in route.pipelines {
                 guard let laneChain = chainsByLane[lane] else {
@@ -116,10 +116,16 @@ public enum DispatchBuilder {
                 chain += laneChain
             }
             let terminal: Next = { context in
-                // Re-match to bind path parameters: the routed outcome that
-                // selected this responder is not threaded through, and one
-                // extra table lookup per request is cheaper than widening
-                // every middleware signature to carry the match.
+                // The match that selected this responder, threaded through a
+                // task-local rather than re-derived. This used to re-run the
+                // whole route table to recover path parameters the caller had
+                // already computed — a second full match, per request, on
+                // every matched route.
+                if let match = Router.currentMatch, match.routeIndex == routeIndex {
+                    return await Router.execute(match, context: context)
+                }
+                // A hand-built chain (test harnesses run one) calls this
+                // without the binding. Re-matching keeps that path working.
                 guard
                     case .matched(let match) = router.route(
                         method: context.request.method, path: context.request.path)
@@ -128,7 +134,7 @@ public enum DispatchBuilder {
                 }
                 return await Router.execute(match, context: context)
             }
-            respondersByRoute[routeKey(route)] = compose(chain, around: terminal)
+            respondersByRoute[routeIndex] = compose(chain, around: terminal)
 
             logger.debug("route registered", metadata: [
                 "method": "\(route.method.rawValue)",
@@ -191,8 +197,10 @@ public enum DispatchBuilder {
         let respond: Next = { context in
             switch router.route(method: context.request.method, path: context.request.path) {
             case .matched(let match):
-                if let responder = responders[routeKey(match.route)] {
-                    return try await responder(context)
+                if let responder = responders[match.routeIndex] {
+                    return try await Router.$currentMatch.withValue(match) {
+                        try await responder(context)
+                    }
                 }
                 // Unreachable: every route in the table got a responder
                 // above. The fallback keeps this total rather than trapping.
@@ -227,9 +235,6 @@ public enum DispatchBuilder {
             logger: logger)
     }
 
-    private static func routeKey(_ route: RouteRegistration) -> String {
-        "\(route.method.rawValue) \(route.path) @\(route.source)"
-    }
 
     /// The assembled per-request pipeline, exposed separately so test
     /// harnesses can run a hand-built chain — via `collectMiddleware()` on a

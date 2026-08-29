@@ -47,7 +47,13 @@ extension Optional: ResponseEncodable where Wrapped: ResponseEncodable {
     public func response(for context: RequestContext) throws -> Response {
         switch self {
         case .some(let wrapped): return try wrapped.response(for: context)
-        case .none: return .problem(status: .notFound, message: "Not Found")
+        case .none:
+            // Through the app's configured renderer, not `ProblemDetails`
+            // directly: an app that set `errors.format: simple` got the
+            // RFC 9457 body here and its own shape from a router 404 — the
+            // same status, two shapes, depending on which produced it.
+            return .problem(
+                status: .notFound, message: "Not Found", render: context.coders.renderError)
         }
     }
 }
@@ -60,6 +66,10 @@ extension Array: ResponseEncodable where Element: Encodable {
 
 extension Dictionary: ResponseEncodable where Key: Encodable, Value: Encodable {
     public func response(for context: RequestContext) throws -> Response {
-        try .json(self)
+        // The configured encoder, like `Array` and every plain `Encodable`
+        // beside it. This one used the package default, so an app configured
+        // for snake-case keys or a non-default date strategy got default
+        // encoding for exactly the handlers that return a dictionary.
+        try .json(self, encoder: context.coders.jsonEncoder)
     }
 }

@@ -80,19 +80,19 @@ extension Container {
             .post, base, source: source, pipelines: pipelines,
             bodyMode: .streaming(maxBytes: options.maxChunkBytes)
         ) { context in
-            try await mount.create(context)
+            await mount.stamped(context) { try await mount.create(context) }
         }
         registerRoute(.head, "\(base)/:id", source: source, pipelines: pipelines) { context in
-            try await mount.probe(context)
+            await mount.stamped(context) { try await mount.probe(context) }
         }
         registerRoute(
             .patch, "\(base)/:id", source: source, pipelines: pipelines,
             bodyMode: .streaming(maxBytes: options.maxChunkBytes)
         ) { context in
-            try await mount.append(context)
+            await mount.stamped(context) { try await mount.append(context) }
         }
         registerRoute(.delete, "\(base)/:id", source: source, pipelines: pipelines) { context in
-            try await mount.cancel(context)
+            await mount.stamped(context) { try await mount.cancel(context) }
         }
     }
 }
@@ -137,7 +137,7 @@ struct TusMount: Sendable {
         let id = UUID().uuidString.lowercased()
         let expires = Date().addingTimeInterval(
             TimeInterval(options.ttl.components.seconds))
-        var info = UploadInfo(
+        let info = UploadInfo(
             id: id, offset: 0, length: length,
             metadata: Self.parseMetadata(context.request.headers[.uploadMetadata]),
             expires: expires, isComplete: length == 0)
@@ -155,7 +155,6 @@ struct TusMount: Sendable {
         {
             let offset = try await store.append(id, expectedOffset: 0, chunks: stream.chunks)
             headers[.uploadOffset] = "\(offset)"
-            info.offset = offset
         }
         return .fixed(status: .created, headers: headers, body: Data())
     }
@@ -167,6 +166,12 @@ struct TusMount: Sendable {
         headers[.uploadOffset] = "\(info.offset)"
         if let length = info.length { headers[.uploadLength] = "\(length)" }
         if let expires = info.expires { headers[.uploadExpires] = HTTPDate.format(expires) }
+        // Echoed back, as tus requires of a HEAD that has it: the metadata
+        // was parsed and stored at creation and then never surfaced, so a
+        // client resuming in a fresh process could not recover the filename
+        // it had sent.
+        let metadata = Self.renderMetadata(info.metadata)
+        if !metadata.isEmpty { headers[.uploadMetadata] = metadata }
         // The resumption answer must never be cached — a stale offset would
         // make a client resume from the wrong place.
         headers[.cacheControl] = "no-store"
@@ -227,6 +232,30 @@ struct TusMount: Sendable {
         return headers
     }
 
+    /// Runs one endpoint and stamps `Tus-Resumable` on whatever comes back.
+    ///
+    /// tus 1.0 requires that header on *every* response, and only the
+    /// special-cased offset mismatch carried it: everything else went through
+    /// the generic `errorResponse`, which knows nothing about tus. A client
+    /// checking it — which the spec tells clients to do — saw a bare 404 or
+    /// 412 from a server that is otherwise conformant. `TusVersionMismatch`
+    /// likewise documented a `Tus-Version` on its 412 that never reached the
+    /// wire.
+    func stamped(
+        _ context: RequestContext, _ body: () async throws -> Response
+    ) async -> Response {
+        var response: Response
+        do {
+            response = try await body()
+        } catch let error as TusVersionMismatch {
+            response = errorResponse(for: error, context: context)
+                .settingHeader(.tusVersion, Self.version)
+        } catch {
+            response = errorResponse(for: error, context: context)
+        }
+        return response.settingHeader(.tusResumable, Self.version)
+    }
+
     /// Every request but OPTIONS must name the protocol version it speaks;
     /// a mismatch is 412 with the version this server does speak.
     private func requireProtocolVersion(_ context: RequestContext) throws {
@@ -243,6 +272,17 @@ struct TusMount: Sendable {
             throw ResumableUploadError.expired
         }
         return info
+    }
+
+    /// The inverse of ``parseMetadata(_:)``, for echoing on HEAD. Keys are
+    /// sorted so the header is stable between requests.
+    static func renderMetadata(_ metadata: [String: Data]) -> String {
+        metadata.keys.sorted()
+            .map { key in
+                let value = metadata[key] ?? Data()
+                return value.isEmpty ? key : "\(key) \(value.base64EncodedString())"
+            }
+            .joined(separator: ",")
     }
 
     /// `Upload-Metadata: filename <base64>,filetype <base64>` — keys are

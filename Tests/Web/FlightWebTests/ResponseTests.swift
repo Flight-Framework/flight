@@ -1,3 +1,4 @@
+import FlightCore
 import FlightWebTesting
 import Foundation
 import HTTPTypes
@@ -282,5 +283,58 @@ struct RequestTests {
 
     @Test func noQueryMeansNoItems() {
         #expect(Request(path: "/plain").queryItems.isEmpty)
+    }
+}
+
+/// The wire format an application configures has to reach every path that
+/// encodes for it — not most of them.
+@Suite("Configured coders are honored everywhere")
+struct ConfiguredCodersTests {
+
+    /// `context.coders` resolves `WebCoders` from the container, so a
+    /// configured app is one registration.
+    private func context(coders: WebCoders) throws -> RequestContext {
+        let container = Container()
+        container.register(WebCoders.self, scope: .singleton) { _ in coders }
+        try container.freeze()
+        return RequestContext.mock(container: container)
+    }
+
+    @Test("a dictionary honors the configured encoder, like an array does")
+    func dictionaryUsesConfiguredEncoder() throws {
+        // `Array` and every plain `Encodable` used `context.coders`; the
+        // `Dictionary` conformance used the package default, so an app
+        // configured for a non-default wire format got default encoding for
+        // exactly the handlers that return a dictionary. Pretty-printing is
+        // the cheapest configuration to observe; the defect was the same for
+        // date and key strategies.
+        var coders = WebCoders.default
+        coders.jsonEncoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        let response = try ["a": 1, "b": 2].response(for: try context(coders: coders))
+        #expect(response.bodyText.contains("\n"), "encoded with the default, not the app's")
+    }
+
+    @Test("an array already did, and still does")
+    func arrayUsesConfiguredEncoder() throws {
+        var coders = WebCoders.default
+        coders.jsonEncoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        let response = try [1, 2].response(for: try context(coders: coders))
+        #expect(response.bodyText.contains("\n"))
+    }
+
+    @Test("a nil optional renders through the configured error format")
+    func nilOptionalUsesConfiguredErrorRenderer() throws {
+        // nil → 404 went through `ProblemDetails.render` directly, so an app
+        // configured `errors.format: simple` got an RFC 9457 body here and
+        // its own shape from a router 404 — one status, two shapes,
+        // depending on which produced it.
+        var coders = WebCoders.default
+        coders.renderError = { status, message in
+            .fixed(status: status, headers: [:], body: Data(#"{"custom":true}"#.utf8))
+        }
+        let value: String? = nil
+        let response = try value.response(for: try context(coders: coders))
+        #expect(response.status == .notFound)
+        #expect(response.bodyText == #"{"custom":true}"#)
     }
 }

@@ -55,6 +55,11 @@ public final class InMemoryWebSocket: Sendable {
 
     public func send(_ frame: WebSocketFrame) {
         toServer.yield(frame)
+        // A `.close` frame ends the stream here as it does on the wire.
+        // Without this, the raw-frame API could hand a handler a close and
+        // then leave it awaiting a stream end that never came — a hang the
+        // typed `close()` never had.
+        if case .close = frame { toServer.finish() }
     }
 
     public func send(_ text: String) {
@@ -64,6 +69,10 @@ public final class InMemoryWebSocket: Sendable {
     public func send(_ binary: Data) {
         toServer.yield(.binary(binary))
     }
+
+    /// Whether ``deinit`` should stop the handler. Off by default: a
+    /// hand-built pair may legitimately outlive the object that made it.
+    private let cancelsOnDeinit = Mutex(false)
 
     /// Delivers a close frame to the handler and ends its frame stream —
     /// the in-memory equivalent of the peer going away.
@@ -87,5 +96,20 @@ public final class InMemoryWebSocket: Sendable {
 
     public func finishFromServer() {
         fromServer.finish()
+    }
+
+    /// Stops the server handler when this client is released.
+    ///
+    /// A test that dropped its client without calling `close()` left the
+    /// handler task parked on the frame stream forever — one leaked task per
+    /// such test, and a suite that accumulates them looks like a flake later.
+    public func cancelServerTaskOnDeinit() {
+        cancelsOnDeinit.withLock { $0 = true }
+    }
+
+    deinit {
+        guard cancelsOnDeinit.withLock({ $0 }) else { return }
+        toServer.finish()
+        serverTask.withLock { $0 }?.cancel()
     }
 }

@@ -111,4 +111,37 @@ struct CookieTests {
         #expect(response.status == .seeOther)
         #expect(response.headers[.location] == "/projects")
     }
+
+    @Test("a value cannot forge cookie attributes")
+    func valueCannotInjectAttributes() {
+        // `Set-Cookie` has no escaping, so a `;` in a value does not corrupt
+        // the value — it ends it and starts an attribute list. A session
+        // token echoed from user input carrying "; SameSite=None; Secure"
+        // reached the wire as exactly that, silently, on a type whose whole
+        // framing is safe defaults.
+        let cookie = Cookie(name: "session", value: "abc; SameSite=None; Secure")
+        let rendered = cookie.headerValue
+        // The forged text survives *inside the value* — harmless, since
+        // nothing separates it from the value any more — but no `;` reaches
+        // the wire from it, so it forges no attribute.
+        let attributes = rendered.split(separator: ";").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        #expect(attributes.first == "session=abcSameSite=NoneSecure")
+        #expect(attributes.dropFirst().sorted() == ["HttpOnly", "Path=/", "SameSite=Lax"])
+    }
+
+    @Test("control characters and quoting characters are dropped from a value")
+    func valueIsRFC6265Clean() {
+        let cookie = Cookie(name: "t", value: "a\u{0007}b\"c\\d e,f")
+        #expect(cookie.headerValue.hasPrefix("t=abcdef;"))
+    }
+
+    @Test("an ordinary value is untouched")
+    func ordinaryValuesSurvive() {
+        // Base64 and JWTs are the values that actually go in cookies; none of
+        // their alphabet is structural.
+        let token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc-_="
+        #expect(Cookie(name: "jwt", value: token).headerValue.hasPrefix("jwt=\(token);"))
+    }
 }

@@ -1,5 +1,6 @@
 import Foundation
-import FlightWeb
+
+@testable import FlightWeb
 import FlightWebTesting
 import HTTPTypes
 import Testing
@@ -336,5 +337,28 @@ struct HTTPDateTests {
             let date = Date(timeIntervalSince1970: seconds)
             #expect(HTTPDate.parse(HTTPDate.format(date)) == date)
         }
+    }
+}
+
+/// `Accept-Encoding` negotiation, which used to be a `contains` over the raw
+/// header.
+@Suite("Accept-Encoding negotiation")
+struct AcceptEncodingTests {
+
+    @Test("q=0 means 'not this one', not 'this one'")
+    func zeroQualityIsRefusal() {
+        // RFC 9110's way of refusing a coding the server might otherwise
+        // pick. A `contains("gzip")` read it as acceptance and sent gzip to a
+        // client that had explicitly said no.
+        #expect(!AssetMountRegistration.acceptedEncodings("gzip;q=0").contains("gzip"))
+        #expect(!AssetMountRegistration.acceptedEncodings("br, gzip;q=0").contains("gzip"))
+        #expect(AssetMountRegistration.acceptedEncodings("br, gzip;q=0").contains("br"))
+    }
+
+    @Test("ordinary headers still negotiate")
+    func ordinaryHeaders() {
+        #expect(AssetMountRegistration.acceptedEncodings("gzip, deflate, br") == ["gzip", "deflate", "br"])
+        #expect(AssetMountRegistration.acceptedEncodings("gzip;q=1.0, br;q=0.5") == ["gzip", "br"])
+        #expect(AssetMountRegistration.acceptedEncodings("").isEmpty)
     }
 }

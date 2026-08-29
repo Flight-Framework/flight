@@ -62,14 +62,7 @@ public struct Request: Sendable {
     /// Query items in order of appearance, percent-decoded. Repeated keys are
     /// preserved ("?tag=a&tag=b" yields two entries).
     public var queryItems: [(name: String, value: String)] {
-        let target = uri
-        guard let queryStart = target.firstIndex(of: "?") else { return [] }
-        var query = target[target.index(after: queryStart)...]
-        if let fragmentStart = query.firstIndex(of: "#") {
-            query = query[..<fragmentStart]
-        }
-        guard !query.isEmpty else { return [] }
-        return query.split(separator: "&", omittingEmptySubsequences: true).compactMap { pair in
+        Self.queryPairs(of: uri).compactMap { pair in
             let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             guard let name = Self.decodeQueryComponent(parts[0]) else { return nil }
             let value = parts.count > 1 ? Self.decodeQueryComponent(parts[1]) : ""
@@ -79,8 +72,29 @@ public struct Request: Sendable {
     }
 
     /// First value for a query parameter, or nil.
+    ///
+    /// Scans the query string for the name rather than going through
+    /// ``queryItems``, which decodes and allocates every pair — a handler
+    /// reading three parameters parsed the whole query three times and threw
+    /// away three arrays.
     public func queryParam(_ name: String) -> String? {
-        queryItems.first(where: { $0.name == name })?.value
+        for pair in Self.queryPairs(of: uri) {
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard Self.decodeQueryComponent(parts[0]) == name else { continue }
+            return parts.count > 1 ? Self.decodeQueryComponent(parts[1]) : ""
+        }
+        return nil
+    }
+
+    /// The undecoded `name=value` runs of a URI's query, in order.
+    private static func queryPairs(of target: String) -> [Substring] {
+        guard let queryStart = target.firstIndex(of: "?") else { return [] }
+        var query = target[target.index(after: queryStart)...]
+        if let fragmentStart = query.firstIndex(of: "#") {
+            query = query[..<fragmentStart]
+        }
+        guard !query.isEmpty else { return [] }
+        return query.split(separator: "&", omittingEmptySubsequences: true)
     }
 
     /// application/x-www-form-urlencoded semantics: "+" is a space.
