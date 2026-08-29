@@ -4,6 +4,27 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-08-29
+
+### Fixed
+
+- **An empty `container.pipeline("name") { }` now declares its lane.** It
+  registered nothing, so the lane left no trace, and any route or asset
+  mount naming it failed dispatch validation at bootstrap — with an error
+  that itself said "an empty block is legal". `pipeline(_:_:)` registered
+  one `MiddlewareRegistration` per middleware in the block, and
+  `declaredMiddlewareLanes()` derives the lane set from those entries: no
+  middleware, no entries, no lane. It now registers a marker entry per
+  named lane ahead of the loop, filtered out of
+  `collectMiddleware(lane:)`, so a request through an empty lane still
+  runs nothing extra — the marker is bookkeeping, not a layer. The
+  qualifier carries a per-call token because two modules may legally
+  declare into one lane, and a fixed qualifier made the second call a
+  duplicate registration (caught by the existing concatenation test, not
+  by review). The empty lane is the shape a static-asset mount wants, so
+  a request for `app.js` pays for none of the auth and transaction
+  binding the default lane carries — which is how this surfaced.
+
 ## [0.9.0] - 2026-08-28
 
 ### Added
