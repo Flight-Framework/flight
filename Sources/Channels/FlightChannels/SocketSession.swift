@@ -177,7 +177,15 @@ internal actor SocketSession {
             if message.metadata[ChannelBroadcaster.originMetadataKey] == socketID {
                 continue // broadcast(..., excluding:) — this socket is the origin
             }
-            if let precomputed = message.metadata[ChannelBroadcaster.precomputedFrameMetadataKey] {
+            // Only a frame this process's own broadcaster built is
+            // forwarded unvalidated. The key alone was enough before, so any
+            // in-process publisher that stamped it had its string sent
+            // verbatim to every joined socket — around the reserved-event
+            // guard and around valid-envelope framing both.
+            if let precomputed = message.metadata[ChannelBroadcaster.precomputedFrameMetadataKey],
+                let token = message.metadata[ChannelBroadcaster.frameTokenMetadataKey],
+                token == ChannelBroadcaster.frameToken
+            {
                 outbound.yield(precomputed)
                 continue
             }

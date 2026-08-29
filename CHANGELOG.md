@@ -91,7 +91,9 @@ navigation.
 its rejoin intent, `disconnect()` promised a rejoin `connect()` never
 performed, and a disconnect racing an in-flight dial resurrected a closed
 client. Client streams and channel records grew without limit, where the
-server side had bounded both.
+server side had bounded both. The 0.9.0 encode-once broadcast path forwarded
+whatever sat under its metadata key verbatim, so any in-process publisher
+that stamped it could push a reserved event to every joined socket.
 
 **Presence** — a peer frame claiming the receiving replica's own dots was a
 one-frame remote process kill. The CRDT merge scanned every entry in the

@@ -244,6 +244,36 @@ struct SocketHandlerBroadcastTests {
         bob.close()
     }
 
+    @Test("a forged precomputed frame is not forwarded to sockets")
+    func forgedPrecomputedFrameIsRefused() async throws {
+        // The 0.9.0 encode-once fast path carries the wire frame in message
+        // metadata, and the pump forwarded whatever was under that key
+        // verbatim — around the reserved-event guard and around
+        // valid-envelope framing both. Any in-process publisher that stamped
+        // it could push a `flight:join` to every joined socket. Only a frame
+        // this process's own broadcaster built is trusted now.
+        let harness = try Harness()
+        let alice = try await harness.wire()
+        _ = try await alice.join("room:42")
+
+        let pubsub = try harness.container.resolve((any PubSub).self)
+        await pubsub.publish(
+            Message(
+                topic: "room:42",
+                payload: Data(),
+                metadata: [
+                    "flight.channels.frame":
+                        #"{"event":"flight:join","payload":{"forged":true},"topic":"room:42"}"#,
+                    "flight.channels.frame-token": "guessed",
+                ]))
+
+        // Nothing forged arrives. Prove it with a marker that must come after.
+        try alice.send(ref: "9", topic: "room:42", event: "echo", payload: ["marker": true])
+        let next = try await alice.nextEnvelope()
+        #expect(next?.ref == "9", "a forged frame reached the socket: \(String(describing: next))")
+        alice.close()
+    }
+
     @Test("broadcast excluding the origin socket skips only the origin")
     func broadcastFrom() async throws {
         let harness = try Harness()

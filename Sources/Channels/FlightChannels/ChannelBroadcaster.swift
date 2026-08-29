@@ -1,6 +1,7 @@
 import FlightChannelsProtocol
 import FlightPubSub
 import Logging
+import struct Foundation.UUID
 import struct Foundation.Data
 import class Foundation.JSONDecoder
 import class Foundation.JSONEncoder
@@ -69,6 +70,32 @@ public struct ChannelBroadcaster: Sendable {
     /// depends on this key being present.
     internal static let precomputedFrameMetadataKey = "flight.channels.frame"
 
+    /// Names the broadcaster instance that stamped a precomputed frame.
+    ///
+    /// Without it the key above is an unvalidated injection seam: any
+    /// in-process publisher that stamped `flight.channels.frame` on a
+    /// `Message` got that string forwarded verbatim to every joined socket,
+    /// *bypassing the reserved-event guard and valid-envelope framing* — so
+    /// app code that misused a reserved key could push a `flight:join` to
+    /// every subscriber. The token is per-instance and never leaves the
+    /// process, so only frames this broadcaster actually built are trusted;
+    /// anything else falls back to the decode path, which validates.
+    ///
+    /// The same shape `ClusteredPubSub` uses for echo suppression, and for
+    /// the same reason: an operator-supplied or guessable name is not a
+    /// capability.
+    internal static let frameTokenMetadataKey = "flight.channels.frame-token"
+
+    /// The value under ``frameTokenMetadataKey``.
+    ///
+    /// Process-wide rather than per-instance: the seam being closed is app
+    /// code stamping a reserved key, and every broadcaster in this process is
+    /// equally the framework. A per-instance token would additionally have to
+    /// be threaded down to every `SocketSession`, for no threat it stops.
+    /// Never serialized to another node — a clustered frame arrives without
+    /// it and takes the validating decode path, which is correct.
+    internal static let frameToken = UUID().uuidString
+
     private let pubsub: any PubSub
     private let logger: Logger
 
@@ -125,6 +152,7 @@ public struct ChannelBroadcaster: Sendable {
         var metadata = metadata
         if let text = try? Envelope(ref: nil, topic: topic, event: event, payload: payload).encodedText() {
             metadata[Self.precomputedFrameMetadataKey] = text
+            metadata[Self.frameTokenMetadataKey] = Self.frameToken
         }
         await pubsub.publish(Message(topic: topic, payload: data, metadata: metadata))
     }

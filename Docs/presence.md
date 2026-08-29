@@ -18,6 +18,14 @@ tags, and merge is commutative, associative, and idempotent — so reordered
 or duplicated gossip is harmless and replicas converge without a leader,
 locks, or synchronized clocks.
 
+One boundary, stated because "harmless" is otherwise an unqualified word: the
+permdown purge forgets a replica's causal context entirely, so a *duplicate*
+of a pre-purge add-delta from that replica, delivered after the purge, would
+resurrect the entry until that replica's next snapshot repaired it. That
+needs a duplicate arriving more than `permdown-after` late — theoretical with
+any sane transport, and the one hole in the idempotence claim rather than a
+qualification on all of it.
+
 ## Using it
 
 ```swift
