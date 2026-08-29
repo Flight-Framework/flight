@@ -9,6 +9,8 @@ public final class RecordingAdapter: DistributedPubSubAdapter, Sendable {
     private struct State {
         var broadcasts: [Message] = []
         var broadcastError: (any Error)?
+        var subscribed: [String] = []
+        var unsubscribed: [String] = []
     }
 
     private let state = Mutex(State())
@@ -37,7 +39,22 @@ public final class RecordingAdapter: DistributedPubSubAdapter, Sendable {
         incomingStream
     }
 
+    public func subscribed(to topic: String) {
+        state.withLock { $0.subscribed.append(topic) }
+    }
+
+    public func unsubscribed(from topic: String) {
+        state.withLock { $0.unsubscribed.append(topic) }
+    }
+
     // MARK: - Test controls
+
+    /// Topics this node gained its first subscriber for, in order — what a
+    /// per-topic adapter would have `SUBSCRIBE`d to on the wire.
+    public var subscribedTopics: [String] { state.withLock { $0.subscribed } }
+
+    /// Topics this node lost its last subscriber for, in order.
+    public var unsubscribedTopics: [String] { state.withLock { $0.unsubscribed } }
 
     /// Everything broadcast so far, in order.
     public var broadcasts: [Message] {

@@ -133,6 +133,29 @@ An adapter package provides one `FlightModule` that:
 example (`InMemoryAdapterModule`), including two bootstrapped apps forming a
 cluster and shutting down gracefully.
 
+#### Firehose or per-topic
+
+Two shapes, and the difference is scaling rather than correctness:
+
+- **Firehose.** Carry everything on one wire channel and ignore the
+  topic-interest callbacks — they default to no-ops. Every node receives
+  every cluster message; a topic this node has no subscribers for costs one
+  no-op inside `local.publish`. This is what `Phoenix.PubSub.Redis` does, and
+  it is the right choice for most clusters.
+- **Per-topic.** Implement `subscribed(to:)` / `unsubscribed(from:)` and
+  `SUBSCRIBE`/`UNSUBSCRIBE` on the wire, so a node receives only what it has
+  a subscriber for. Worth it when the topic space is large and each node
+  cares about few of it — per-user or per-document topics, where a firehose
+  makes every node's inbound traffic the whole cluster's outbound.
+
+They fire on the *first* subscriber to a topic and the *last* unsubscribe
+from it, not per subscriber, so "this node now needs / no longer needs this
+topic" is exactly what an adapter is told — no debouncing. Neither is async:
+they are called from `subscribe`'s synchronous body, which is what makes the
+subscribe-effective-at-return guarantee possible, so an adapter doing I/O
+should hand it to its own task. A message arriving for a topic this node has
+since dropped is harmless: `local.publish` finds no subscribers.
+
 Adapter contract (see `DistributedPubSubAdapter` docs): `broadcast` failures
 throw and are logged-and-dropped by the composition; `incoming()` has a
 single consumer and finishing it means the adapter is permanently done —

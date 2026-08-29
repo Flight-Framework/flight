@@ -145,3 +145,84 @@ struct ClusteredPubSubTests {
         await relay.value
     }
 }
+
+/// The seam's scaling ceiling, and how an adapter opts out of it.
+@Suite("Topic interest", .timeLimit(.minutes(1)))
+struct TopicInterestTests {
+
+    private func clustered(_ adapter: RecordingAdapter) -> ClusteredPubSub {
+        ClusteredPubSub(local: LocalPubSub(), adapter: adapter, nodeID: "n")
+    }
+
+    @Test("the first subscriber to a topic is announced, later ones are not")
+    func firstSubscriberAnnounced() async {
+        // The seam carried no interest signal at all, so an adapter had no
+        // way to subscribe per topic on the wire — every node had to take the
+        // whole cluster's firehose. Fine at small topic counts, a fan-in
+        // ceiling at large ones, and unliftable without changing the
+        // protocol. This is that change.
+        let adapter = RecordingAdapter()
+        let pubsub = clustered(adapter)
+
+        let first = pubsub.subscribe("room:1")
+        #expect(adapter.subscribedTopics == ["room:1"])
+
+        // A second subscriber to the same topic is not a second wire
+        // subscription; the adapter should not have to debounce.
+        let second = pubsub.subscribe("room:1")
+        #expect(adapter.subscribedTopics == ["room:1"])
+
+        _ = first
+        _ = second
+    }
+
+    @Test("the last unsubscribe is announced, earlier ones are not")
+    func lastUnsubscribeAnnounced() async {
+        let adapter = RecordingAdapter()
+        let pubsub = clustered(adapter)
+
+        var first: AsyncStream<Message>? = pubsub.subscribe("room:1")
+        var second: AsyncStream<Message>? = pubsub.subscribe("room:1")
+
+        first = nil
+        for _ in 0..<100 where adapter.unsubscribedTopics.isEmpty { await Task.yield() }
+        #expect(adapter.unsubscribedTopics.isEmpty, "a topic still has a subscriber")
+
+        second = nil
+        for _ in 0..<100 where adapter.unsubscribedTopics.isEmpty { await Task.yield() }
+        #expect(adapter.unsubscribedTopics == ["room:1"])
+
+        _ = first
+        _ = second
+    }
+
+    @Test("resubscribing after the last leave announces again")
+    func resubscribeAnnouncesAgain() async {
+        let adapter = RecordingAdapter()
+        let pubsub = clustered(adapter)
+
+        var stream: AsyncStream<Message>? = pubsub.subscribe("room:1")
+        stream = nil
+        for _ in 0..<100 where adapter.unsubscribedTopics.isEmpty { await Task.yield() }
+
+        let again = pubsub.subscribe("room:1")
+        #expect(adapter.subscribedTopics == ["room:1", "room:1"])
+        _ = again
+        _ = stream
+    }
+
+    @Test("a firehose adapter needs neither callback")
+    func firehoseAdapterCompiles() async {
+        // The defaults are what keep this additive: an adapter written before
+        // these existed still conforms, and still gets every message.
+        struct Firehose: DistributedPubSubAdapter {
+            func broadcast(_ message: Message) async throws {}
+            func incoming() -> AsyncStream<Message> { AsyncStream { _ in } }
+        }
+        let pubsub = ClusteredPubSub(local: LocalPubSub(), adapter: Firehose(), nodeID: "n")
+        let stream = pubsub.subscribe("room:1")
+        await pubsub.publish(Message(topic: "room:1", payload: Data("hi".utf8)))
+        var iterator = stream.makeAsyncIterator()
+        #expect(await iterator.next() != nil)
+    }
+}

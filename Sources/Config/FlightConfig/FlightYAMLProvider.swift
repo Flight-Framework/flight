@@ -101,3 +101,14 @@ extension FlightYAMLProvider: CustomStringConvertible, CustomDebugStringConverti
         return "FlightYAML[\(providerName), \(document.keys.count) keys: \(values)]"
     }
 }
+
+extension FlightYAMLProvider: FlightKeyPresenceProvider {
+    /// One lookup instead of ten, arrays included: a flattened sequence is
+    /// present under `hosts.0`, so the array request has something to find
+    /// exactly when the scalar probe does. See ``FlightKeyPresenceProvider``.
+    func flightHoldsKey(_ key: AbsoluteConfigKey) -> Bool {
+        let encoded = key.components.joined(separator: ".")
+        return yamlSnapshot.document.rawValue(for: encoded) != nil
+            || yamlSnapshot.document.arrayElements(for: encoded) != nil
+    }
+}

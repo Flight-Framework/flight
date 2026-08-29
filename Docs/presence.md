@@ -144,6 +144,47 @@ membership events). A membership-aware adapter module registers its
 monitor as `(any PresenceMembershipMonitor).self`; Presence detects it by
 presence, the same composition rule as PubSub's adapter seam.
 
+## What this trusts
+
+**The PubSub bus is the trust boundary.** Gossip rides one reserved topic
+(`flight:presence`), so anything that can publish to that topic can assert
+presence state, and nothing here authenticates a frame. That is the same
+posture Phoenix Presence has over Redis, and it is the right one for the
+deployment this is built for: a broker inside your network, reachable by your
+nodes. It is stated rather than assumed because the consequence is worth
+being clear about — **if an attacker can publish to your PubSub broker, they
+can forge presence**, and they can also do considerably worse to everything
+else riding the same bus. Presence is not the thing to harden first in that
+situation; the broker is.
+
+Within that boundary, frames are checked against what a *correct* sender can
+say — a bound on buggy peers and on version skew, not on hostile ones:
+
+| | |
+|---|---|
+| A frame asserting entries owned by a third replica | Dropped and logged. `snapshot(of:)` carries own entries and deltas carry own dots, so no correct sender does this; merging it lets one confused node speak for the cluster. |
+| A frame claiming to have observed *this* replica's dots | Those claims are stripped. Merging one raised our version past our own clock, and the next local `track` then tripped a precondition and killed the process — a one-frame remote crash rather than mere corruption. |
+| A frame with more than `flight.presence.max-entries-per-frame` entries (10,000) | Dropped and logged. A frame carries one node's own presences, a number in the hundreds. |
+| A frame with an unrecognised wire version | Dropped and logged. A mixed-version cluster degrades to silence, never to misinterpretation. |
+
+None of these can reject a legitimate frame, which is what makes them safe to
+have on by default.
+
+### Rolling upgrades
+
+`PresenceGossip.version` is the wire version, and a frame carrying an
+unrecognised one is dropped with a warning rather than guessed at. During a
+rolling upgrade across a version change, the two halves of the cluster
+therefore do not merge each other's state: each sees the other's replicas as
+silent, and — in degraded mode — hides their entries after `down-after`.
+Presence converges again once the roll completes.
+
+That is a deliberate trade: a partition you can see in the logs, rather than
+two versions agreeing on the bytes and disagreeing on the meaning. It does
+mean a version bump should be treated as a brief presence outage rather than
+a transparent upgrade, and that a change which does *not* alter meaning
+should not bump the version.
+
 ## Scaling limits — inherent, not implementation defects
 
 State is O(connections) per topic, replicated to every node; diff traffic

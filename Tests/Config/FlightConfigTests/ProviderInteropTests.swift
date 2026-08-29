@@ -367,3 +367,96 @@ struct AccessReportingTests {
         #expect(secrecy == [true, false], "substituted values must carry the secret flag")
     }
 }
+
+/// Establishing that a key is *absent* used to mean asking a provider for
+/// every shape it could be.
+@Suite("Absent keys cost one lookup, not ten")
+struct AbsentKeyLookupTests {
+
+    /// Counts what the walk actually asks for.
+    private final class CountingProvider: ConfigProvider, @unchecked Sendable {
+        let providerName = "counting"
+        let inner: InMemoryProvider
+        private let lock = NSLock()
+        private var calls = 0
+
+        init(values: [AbsoluteConfigKey: ConfigValue]) {
+            self.inner = InMemoryProvider(name: "counting", values: values)
+        }
+
+        var callCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return calls
+        }
+
+        func value(forKey key: AbsoluteConfigKey, type: ConfigType) throws -> LookupResult {
+            lock.lock()
+            calls += 1
+            lock.unlock()
+            return try inner.value(forKey: key, type: type)
+        }
+
+        func fetchValue(forKey key: AbsoluteConfigKey, type: ConfigType) async throws -> LookupResult
+        {
+            try value(forKey: key, type: type)
+        }
+
+        func snapshot() -> any ConfigSnapshot { inner.snapshot() }
+
+        func watchValue<Return: ~Copyable>(
+            forKey key: AbsoluteConfigKey,
+            type: ConfigType,
+            updatesHandler: nonisolated(nonsending) (
+                _ updates: ConfigUpdatesAsyncSequence<Result<LookupResult, any Error>, Never>
+            ) async throws -> Return
+        ) async throws -> Return {
+            try await watchValueFromValue(forKey: key, type: type, updatesHandler: updatesHandler)
+        }
+
+        func watchSnapshot<Return: ~Copyable>(
+            updatesHandler: nonisolated(nonsending) (
+                _ updates: ConfigUpdatesAsyncSequence<any ConfigSnapshot, Never>
+            ) async throws -> Return
+        ) async throws -> Return {
+            try await watchSnapshotFromSnapshot(updatesHandler: updatesHandler)
+        }
+    }
+
+    @Test("a third-party provider still gets the type-directed walk")
+    func thirdPartyProviderIsProbed() throws {
+        // Correct, and the reason the shortcut is opt-in rather than assumed:
+        // nothing can know a foreign provider's key set without asking.
+        let provider = CountingProvider(values: [:])
+        let configuration = Configuration(providers: [provider])
+        #expect(try configuration.getIfPresent("nothing.here", as: String.self) == nil)
+        #expect(provider.callCount > 1, "the walk must establish absence, not assume it")
+    }
+
+    @Test("Flight's own YAML provider answers absence in one lookup")
+    func flightProviderShortCircuits() throws {
+        // Absent keys are not the rare case they sound like: `AdapterPresence`
+        // probes keys that are *supposed* to be missing, and so does every
+        // `getIfPresent` for an optional setting. Ten typed calls per
+        // provider made one miss on a three-layer stack thirty.
+        let provider = try FlightYAMLProvider(
+            string: "server:\n  port: 8080", name: "flight.yaml", substitution: .none)
+        let configuration = Configuration(providers: [provider])
+
+        #expect(try configuration.getIfPresent("nothing.here", as: String.self) == nil)
+        // And the shortcut must not swallow a key that is genuinely there,
+        // in any shape.
+        #expect(try configuration.get("server.port", as: Int.self) == 8080)
+    }
+
+    @Test("a flattened array is still found through the shortcut")
+    func arraysSurviveTheShortcut() throws {
+        // `hosts` is present only as `hosts.0`, `hosts.1` — so the presence
+        // check has to look for the array shape too, or an array key would
+        // read as absent and fall through to a lower layer.
+        let provider = try FlightYAMLProvider(
+            string: "hosts:\n  - alpha\n  - beta", name: "flight.yaml", substitution: .none)
+        let reader = ConfigReader(provider: provider)
+        #expect(reader.stringArray(forKey: "hosts") == ["alpha", "beta"])
+    }
+}

@@ -83,6 +83,10 @@ public final class ClusteredPubSub: PubSub, Sendable {
         self.instanceToken = UUID().uuidString
         self.broadcastTimeout = broadcastTimeout
         self.logger = logger
+        // Composition-time, and only here: the clustered wrapper is the one
+        // thing that owns both halves, so it is the only thing that can
+        // relay local interest to the wire.
+        local.observeTopicInterest(self)
     }
 
     public func publish(_ message: Message) async {
@@ -206,5 +210,18 @@ public final class ClusteredPubSub: PubSub, Sendable {
             await local.publish(stripping(message))
         }
         logger.debug("adapter incoming stream finished; relay ending", metadata: ["node": "\(nodeID)"])
+    }
+}
+
+extension ClusteredPubSub: TopicInterestObserver {
+    /// Forwarded straight through. `LocalPubSub` fires these on the first
+    /// subscriber and the last unsubscribe, which is already the granularity
+    /// a wire subscription wants, so there is nothing to debounce here.
+    func topicGainedInterest(_ topic: String) {
+        adapter.subscribed(to: topic)
+    }
+
+    func topicLostInterest(_ topic: String) {
+        adapter.unsubscribed(from: topic)
     }
 }

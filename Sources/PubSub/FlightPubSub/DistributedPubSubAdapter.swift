@@ -35,15 +35,30 @@
 ///   on cooperation the contract never asked for, so an adapter blocked in
 ///   non-cancellable work hung every publish despite the timeout.
 ///
-/// ## What the seam does not carry
+/// ## Topic interest, and the two adapter shapes
 ///
-/// There is no topic-interest signal: no hook fires on subscribe or
-/// unsubscribe, so an adapter cannot subscribe per topic on the wire. A
-/// single-channel firehose works — every node receives every cluster message
-/// and non-subscribed topics no-op inside `local.publish`, which is the shape
-/// `Phoenix.PubSub.Redis` takes — and is what the seam is designed for. On a
-/// large cluster with many topics that is a fan-in ceiling, and lifting it
-/// means changing this protocol rather than working around it.
+/// An adapter may be written either way, and the difference is a scaling
+/// one rather than a correctness one:
+///
+/// - **Firehose.** Ignore ``subscribed(to:)``/``unsubscribed(from:)`` — they
+///   default to no-ops — and carry every message on one wire channel. Every
+///   node receives every cluster message; topics this node has no subscribers
+///   for cost one no-op inside `local.publish`. This is the shape
+///   `Phoenix.PubSub.Redis` takes, and it is the right one for most clusters.
+/// - **Per-topic.** Use those callbacks to `SUBSCRIBE`/`UNSUBSCRIBE` on the
+///   wire, so a node receives only what it has a subscriber for. Worth it
+///   when the topic count is large and each node cares about few of them —
+///   a per-user or per-document topic space, where the firehose makes every
+///   node's inbound traffic the whole cluster's outbound.
+///
+/// The callbacks fire on the *first* subscriber to a topic and the *last*
+/// unsubscribe from it, not per subscriber, so an adapter can treat them as
+/// "this node now needs / no longer needs this topic" directly. Neither is
+/// async: they are called from `subscribe`'s synchronous body, which is what
+/// makes the subscribe-effective-at-return guarantee possible, so an adapter
+/// that must do I/O should hand the work to its own task and let ordering be
+/// its concern. A message arriving for a topic this node has since dropped is
+/// harmless — `local.publish` finds no subscribers.
 public protocol DistributedPubSubAdapter: Sendable {
     /// Relay a locally-published message to other nodes.
     func broadcast(_ message: Message) async throws
@@ -51,4 +66,29 @@ public protocol DistributedPubSubAdapter: Sendable {
     /// Messages arriving FROM other nodes, to be delivered into THIS node's
     /// local PubSub.
     func incoming() -> AsyncStream<Message>
+
+    /// This node has gained its first subscriber for `topic`.
+    ///
+    /// Optional: the default does nothing, which is exactly right for a
+    /// firehose adapter. See "Topic interest, and the two adapter shapes".
+    func subscribed(to topic: String)
+
+    /// This node has lost its last subscriber for `topic`.
+    func unsubscribed(from topic: String)
+}
+
+extension DistributedPubSubAdapter {
+    /// Firehose adapters need neither, so neither is a requirement — adding
+    /// them as one would have broken every adapter written before they
+    /// existed, for a capability most adapters do not want.
+    public func subscribed(to topic: String) {}
+    public func unsubscribed(from topic: String) {}
+}
+
+/// What `LocalPubSub` tells its owner about topics gaining and losing
+/// subscribers. `ClusteredPubSub` is the only implementation; it forwards to
+/// the adapter.
+internal protocol TopicInterestObserver: Sendable {
+    func topicGainedInterest(_ topic: String)
+    func topicLostInterest(_ topic: String)
 }

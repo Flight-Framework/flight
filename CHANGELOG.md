@@ -4,6 +4,103 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-29
+
+The six findings the 0.10.0 audit deliberately left open, closed. Three were
+open because the fix looked bigger than it was, two because the cost/benefit
+had not been argued, and one because it needed a decision rather than code.
+
+### Breaking
+
+- **`server.idle-timeout-seconds` defaults to 60** (`0` disables). It cannot
+  affect a long response — see below.
+- **`flight.channels.write-timeout-seconds` defaults to 30** (`0` disables).
+- **`security.oidc.allowed_algorithms` defaults to the asymmetric set.** A
+  token whose `alg` is outside it is refused; previously only `none` was.
+- **`DistributedPubSubAdapter` gains `subscribed(to:)` /
+  `unsubscribed(from:)`.** Both have default no-op implementations, so
+  existing adapters are unaffected and stay firehose-shaped.
+
+### Added
+
+- **Topic interest on the adapter seam.** The seam carried no subscribe
+  signal, so an adapter had to take the whole cluster's firehose — fine at
+  small topic counts, a fan-in ceiling at large ones, and unliftable without
+  changing the protocol. The callbacks fire on the *first* subscriber to a
+  topic and the *last* unsubscribe, which is already the granularity a wire
+  subscription wants, so a per-topic adapter needs no debouncing. Firehose
+  adapters ignore them and are documented as the right default.
+- **A JWT algorithm allowlist.** The RS256→HS256 confusion an allowlist
+  normally guards against is unreachable here — verification keys come solely
+  from the JWKS and JWTKit's `JWK` has no symmetric type — but that is three
+  separate facts staying true rather than one check. The half that earns its
+  keep is narrowing to what an IdP actually issues.
+
+### Fixed
+
+- **Connection idle and header-read timeouts** (GAPS.md's slowloris-adjacent
+  gap). The entry said `HummingbirdCore.ServerConfiguration` "exposes no knob
+  for it at all", which was true of `ServerConfiguration` and wrong about
+  Hummingbird: `HTTP1Channel.Configuration.idleTimeout` has one.
+
+  That alone left the purest case open, and why is the interesting part: the
+  upgrade channel installs Hummingbird's idle handler from its *not-upgrading
+  completion handler*, which does not run until a head has decoded — so a
+  connection that never finishes its first header block is invisible to it.
+  Flight adds a header-read timeout in front of the channel for that window.
+  One setting, two mechanisms.
+
+  Neither can touch a slow *response*: both disarm once a request is fully
+  read, so a large download, an SSE stream and an upgraded WebSocket run as
+  long as they like. That is what makes a default safe, and there is a wire
+  test for each of the four cases.
+- **A WebSocket write had no bound.** The heartbeat watchdog counts *inbound*
+  frames as liveness, so a client that keeps heartbeating while never reading
+  looks alive to it while the writer sits in `send` against a TCP window that
+  never opens. Memory stayed bounded by the outbound queue; a task and a
+  connection accumulated per such client.
+- **Config: an absent key cost up to ten provider calls per layer** — thirty
+  on a three-layer stack — because swift-configuration's lookup is
+  type-directed and absence has to be established rather than assumed.
+  Flight's own providers know their key set outright and now answer in one; a
+  third-party provider keeps the type-directed walk, which is correct, just
+  slower. Absent keys are not the rare case they sound like: `AdapterPresence`
+  probes keys that are *supposed* to be missing, and so does every
+  `getIfPresent` for an optional setting.
+- **Config: the raw-string→`ConfigValue` conversion was written twice**, as
+  two near-identical switches differing only in which error they threw.
+  Neither had drifted, which is the moment to merge them rather than the
+  moment after. A config file's bytes are also copied in one go now, rather
+  than one byte at a time through `unsafeLoad`.
+
+### Changed
+
+- **Presence: the gossip trust model is decided and written down.** The
+  boundary is the PubSub bus: anything that can publish to the reserved topic
+  can assert presence state, and nothing authenticates a frame — Phoenix
+  Presence's posture over Redis, and the right one for a broker inside your
+  network. Stated rather than assumed, because the consequence deserves to be
+  explicit. Frame authentication was considered and not taken: it moves key
+  distribution and rotation onto the operator to defend a boundary the rest of
+  the stack does not defend either.
+
+  Within that boundary, buggy peers and version skew are bounded by rules no
+  correct sender ever violates — a frame asserting a third replica's entries
+  is dropped, and so is one over `flight.presence.max-entries-per-frame`
+  (10,000). The rolling-upgrade story is now written down too: a version bump
+  partitions presence for the duration of the roll, which beats two versions
+  agreeing on the bytes and disagreeing on the meaning.
+- **One timeout primitive, `FlightCore.withFlightTimeout`.** Writing the
+  WebSocket write bound found a live instance of a trap this codebase had
+  already been bitten by once: the first version raced the send in a
+  `withThrowingTaskGroup`, and a task group awaits its children at scope exit
+  — so a `send` that ignores cancellation hangs despite the timeout. The test
+  that proved it hung the suite, which is how it was found. Both this and
+  `ClusteredPubSub.broadcast` go through one primitive now, with the reasoning
+  written down once rather than in two subtle copies.
+
+1052 tests (was 1028).
+
 ## [0.10.1] - 2026-08-29
 
 The last finding from the 0.10.0 audit, which landed after the tag.

@@ -82,6 +82,13 @@ private struct ConfigSourceSnapshot: ConfigSnapshot {
     }
 }
 
+extension ConfigSourceProvider: FlightKeyPresenceProvider {
+    /// One lookup instead of ten. See ``FlightKeyPresenceProvider``.
+    func flightHoldsKey(_ key: AbsoluteConfigKey) -> Bool {
+        source.rawValue(for: key.components.joined(separator: ".")) != nil
+    }
+}
+
 extension ConfigValue {
 
     /// Converts a source's raw string into the requested `ConfigType`.
@@ -91,31 +98,15 @@ extension ConfigValue {
     /// and lets a reader fall through to a lower-precedence layer, which would
     /// turn a malformed value into a silently-wrong one.
     init(flightRawString raw: String, as type: ConfigType, key: String) throws {
-        switch type {
-        case .string:
-            self = .init(.string(raw), isSecret: false)
-        case .int:
-            guard let value = Int(configValue: raw) else {
-                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: Int.self))
-            }
-            self = .init(.int(value), isSecret: false)
-        case .double:
-            guard let value = Double(configValue: raw) else {
-                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: Double.self))
-            }
-            self = .init(.double(value), isSecret: false)
-        case .bool:
-            guard let value = Bool(configValue: raw) else {
-                throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: Bool.self))
-            }
-            self = .init(.bool(value), isSecret: false)
-        case .bytes:
-            self = .init(.bytes([UInt8](raw.utf8)), isSecret: false)
-        case .stringArray, .intArray, .doubleArray, .boolArray, .byteChunkArray:
-            // A source's values are scalars; the flattened-sequence keys
-            // (`hosts.0`) are addressable individually. Reassembling them is
-            // FlightYAMLSnapshot's job, where the document structure is known.
-            throw ConfigError.decodingFailed(key: key, rawValue: raw, targetType: String(describing: [String].self))
+        guard let content = ConfigContent.flightScalar(raw, as: type) else {
+            // Two nil cases, distinguished for the message only: a scalar
+            // that would not convert, and an array shape a flat source
+            // cannot serve at all. The flattened-sequence keys (`hosts.0`)
+            // are addressable individually; reassembling them is
+            // `FlightYAMLSnapshot`'s job, where the structure is known.
+            throw ConfigError.decodingFailed(
+                key: key, rawValue: raw, targetType: type.flightTargetTypeName)
         }
+        self = .init(content, isSecret: false)
     }
 }

@@ -408,11 +408,58 @@ public actor PresenceTracker: Presence {
 
         switch message {
         case .delta(_, let delta), .snapshot(_, let delta):
+            guard let delta = validated(delta, from: sender) else { return }
             await apply(delta)
         case .syncRequest:
             logger.debug("answering presence sync request", metadata: ["from": "\(sender)"])
             await gossipOwnSnapshot()
         }
+    }
+
+    /// Checks a frame against what a well-behaved sender can say, or drops it.
+    ///
+    /// The trust boundary is the PubSub bus, not this function: anything that
+    /// can publish to the gossip topic is inside it, and no amount of
+    /// validation here changes that (`Docs/presence.md`, "What this trusts").
+    /// What these rules do is bound the damage a *buggy* peer can do — a node
+    /// whose own state has gone wrong, or one running a version that means
+    /// something different by the same bytes — which used to be "whatever it
+    /// sent, merged".
+    ///
+    /// Both rules are things no correct sender ever violates, so neither can
+    /// reject a legitimate frame:
+    ///
+    /// - A frame speaks only for its sender. `snapshot(of:)` carries own
+    ///   entries; `add`/`remove` deltas carry own dots. An entry belonging to
+    ///   a third replica means the sender is confused about whose state it
+    ///   holds — and merging it lets one bad node speak for the whole cluster.
+    /// - A frame is not unboundedly large. One node's own presences is a
+    ///   number in the hundreds; ``PresenceConfiguration/maxEntriesPerFrame``
+    ///   sits far above it.
+    ///
+    /// The context is checked separately, by `join(_:ownReplica:)`, which
+    /// refuses a sender's claims about *this* replica's dots — that one is
+    /// not a bound but a crash fix.
+    private func validated(
+        _ state: PresenceCRDTState, from sender: PresenceReplicaID
+    ) -> PresenceCRDTState? {
+        if let limit = configuration.maxEntriesPerFrame, state.entries.count > limit {
+            logger.warning(
+                "dropping oversized presence gossip frame",
+                metadata: [
+                    "replica": "\(sender)",
+                    "entries": "\(state.entries.count)",
+                    "limit": "\(limit)",
+                ])
+            return nil
+        }
+        if let foreign = state.entries.keys.first(where: { $0.replica != sender }) {
+            logger.warning(
+                "dropping presence gossip asserting another replica's entries",
+                metadata: ["replica": "\(sender)", "asserted": "\(foreign.replica)"])
+            return nil
+        }
+        return state
     }
 
     private func touch(_ sender: PresenceReplicaID) async {

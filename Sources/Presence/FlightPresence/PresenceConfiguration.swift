@@ -52,14 +52,29 @@ public struct PresenceConfiguration: Sendable, Equatable {
     /// the old behaviour of trusting the monitor completely.
     public var membershipFallbackAfter: Duration?
 
+    /// The most entries one gossip frame may assert, or nil for no bound.
+    ///
+    /// A bound against a *buggy* peer, not a hostile one — see the trust
+    /// model in `Docs/presence.md`: anything that can publish to the PubSub
+    /// bus is inside the boundary, and a bound cannot change that. What it
+    /// does change is the blast radius of a peer whose own state has gone
+    /// wrong, which used to be "however much it sends, merged".
+    ///
+    /// A frame carries one replica's own entries, so this is really "how many
+    /// presences may one node hold" — 10,000 is far above any real per-node
+    /// count and far below anything that hurts.
+    public var maxEntriesPerFrame: Int?
+
     public init(
         nodeName: String? = nil,
         heartbeatInterval: Duration = .seconds(5),
         downAfter: Duration = .seconds(15),
         permdownAfter: Duration = .seconds(300),
         sweepInterval: Duration? = nil,
-        membershipFallbackAfter: Duration?? = nil
+        membershipFallbackAfter: Duration?? = nil,
+        maxEntriesPerFrame: Int? = 10_000
     ) {
+        self.maxEntriesPerFrame = maxEntriesPerFrame
         self.nodeName = nodeName ?? "node-\(UUID().uuidString.prefix(8).lowercased())"
         self.heartbeatInterval = heartbeatInterval
         self.downAfter = downAfter
@@ -81,6 +96,8 @@ public struct PresenceConfiguration: Sendable, Equatable {
     ///   `down-after / 4`, floored at 0.1)
     /// - `flight.presence.membership-fallback-after-seconds` (Double,
     ///   default: `max(down-after * 4, 60)`; `0` disables the backstop)
+    /// - `flight.presence.max-entries-per-frame` (Int, default 10000; `0`
+    ///   disables the bound)
     public init(configuration: Configuration) throws {
         let nodeName = try configuration.getIfPresent("flight.presence.node-name", as: String.self)
         let heartbeat = configuration.get("flight.presence.heartbeat-interval-seconds", default: 5.0)
@@ -105,7 +122,10 @@ public struct PresenceConfiguration: Sendable, Equatable {
             permdownAfter: .seconds(permdown),
             sweepInterval: sweep.map { .seconds($0) },
             // An explicit 0 means "trust the monitor completely".
-            membershipFallbackAfter: fallback.map { $0 > 0 ? .seconds($0) : nil }
+            membershipFallbackAfter: fallback.map { $0 > 0 ? .seconds($0) : nil },
+            maxEntriesPerFrame: try configuration.getIfPresent(
+                "flight.presence.max-entries-per-frame", as: Int.self)
+                .map { $0 > 0 ? $0 : nil } ?? 10_000
         )
     }
 }

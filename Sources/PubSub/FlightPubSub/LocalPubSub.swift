@@ -54,12 +54,26 @@ public final class LocalPubSub: PubSub, Sendable {
     private let dropped = Mutex([String: Int]())
     private let logger: Logger
 
+    /// Told when a topic gains its first subscriber or loses its last.
+    ///
+    /// `ClusteredPubSub` sets this so a distributed adapter can subscribe on
+    /// the wire per topic instead of receiving the cluster's whole firehose.
+    /// Not a general observer list: exactly one owner, set once at
+    /// composition, because two of them would each have to be told about the
+    /// other's subscriptions to stay consistent.
+    private let interestObserver: Mutex<(any TopicInterestObserver)?> = Mutex(nil)
+
     public init(
         bufferingPolicy: BufferingPolicy = .unbounded,
         logger: Logger = Logger(label: "flight.pubsub.local")
     ) {
         self.bufferingPolicy = bufferingPolicy
         self.logger = logger
+    }
+
+    /// Installs the topic-interest observer. Composition-time only.
+    internal func observeTopicInterest(_ observer: any TopicInterestObserver) {
+        interestObserver.withLock { $0 = observer }
     }
 
     /// Messages a bounded buffer refused, per topic, since this instance
@@ -121,9 +135,16 @@ public final class LocalPubSub: PubSub, Sendable {
             of: Message.self,
             bufferingPolicy: bufferingPolicy
         )
-        registry.withLock { state in
+        let isFirst = registry.withLock { state in
+            let wasEmpty = state.topics[topic] == nil
             state.topics[topic, default: [:]][id] = continuation
+            return wasEmpty
         }
+        // Announced after the registration is complete and outside the lock:
+        // the subscribe-effective-at-return guarantee is the whole reason
+        // this method is synchronous, and an observer must not be able to
+        // re-enter the registry mid-registration.
+        if isFirst { interestObserver.withLock { $0 }?.topicGainedInterest(topic) }
         // Fires on consumer-task cancellation, on the stream being dropped
         // without full consumption, and on finish — every way a subscription
         // ends. This is the "no manual unsubscribe bookkeeping" contract
@@ -131,12 +152,15 @@ public final class LocalPubSub: PubSub, Sendable {
         // happened, the handler runs immediately.
         continuation.onTermination = { [weak self] _ in
             guard let self else { return }
-            self.registry.withLock { state in
+            let isLast = self.registry.withLock { state in
                 state.topics[topic]?[id] = nil
                 if state.topics[topic]?.isEmpty == true {
                     state.topics[topic] = nil
+                    return true
                 }
+                return false
             }
+            if isLast { self.interestObserver.withLock { $0 }?.topicLostInterest(topic) }
         }
         return stream
     }

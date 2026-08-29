@@ -56,13 +56,13 @@ public struct FlightYAMLSnapshot: FileConfigSnapshot {
     /// substitutions, colliding keys) surfaces as the `ConfigLoadError` the
     /// parser already produces.
     public init(data: RawSpan, providerName: String, parsingOptions: ParsingOptions) throws {
-        let bytes = [UInt8](unsafeUninitializedCapacity: data.byteCount) { buffer, count in
-            for index in 0..<data.byteCount {
-                buffer[index] = data.unsafeLoad(fromByteOffset: index, as: UInt8.self)
-            }
-            count = data.byteCount
+        // One bulk copy. This used to load the file a byte at a time through
+        // `unsafeLoad(fromByteOffset:as:)` — a loop per byte of every config
+        // file, where `withUnsafeBytes` hands over the whole region.
+        let text: String? = data.withUnsafeBytes { buffer in
+            String(bytes: buffer, encoding: .utf8)
         }
-        guard let text = String(bytes: bytes, encoding: .utf8) else {
+        guard let text else {
             throw ConfigLoadError.unreadableFile(
                 path: providerName, reason: "file is not valid UTF-8 text"
             )
@@ -142,29 +142,10 @@ extension ConfigValue {
     fileprivate init(
         scalar raw: String, as type: ConfigType, key: String, isSecret: Bool
     ) throws {
-        switch type {
-        case .string:
-            self = .init(.string(raw), isSecret: isSecret)
-        case .int:
-            guard let value = Int(configValue: raw) else {
-                throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
-            }
-            self = .init(.int(value), isSecret: isSecret)
-        case .double:
-            guard let value = Double(configValue: raw) else {
-                throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
-            }
-            self = .init(.double(value), isSecret: isSecret)
-        case .bool:
-            guard let value = Bool(configValue: raw) else {
-                throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
-            }
-            self = .init(.bool(value), isSecret: isSecret)
-        case .bytes:
-            self = .init(.bytes([UInt8](raw.utf8)), isSecret: isSecret)
-        default:
+        guard let content = ConfigContent.flightScalar(raw, as: type) else {
             throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
         }
+        self = .init(content, isSecret: isSecret)
     }
 
     /// Converts a flattened sequence (`hosts.0`, `hosts.1`, …) into an array

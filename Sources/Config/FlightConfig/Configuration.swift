@@ -358,6 +358,19 @@ public struct Configuration: Sendable {
         // ones this matters for.
         var refusal: (any Error)?
 
+        // Flight's own providers know their key set outright, so a miss costs
+        // one lookup rather than ten. That matters because absent keys are
+        // not the rare case they sound like: `AdapterPresence` probes keys
+        // that are *supposed* to be missing, and so does every
+        // `getIfPresent` for an optional setting. A third-party provider has
+        // no such shortcut and keeps the type-directed walk below, which is
+        // correct — just slower.
+        if let presence = provider as? any FlightKeyPresenceProvider,
+            !presence.flightHoldsKey(key)
+        {
+            return .absent
+        }
+
         // Scalars first: the common case, and the only shape Flight's own
         // YAML snapshot ever holds.
         for type in [ConfigType.string, .int, .double, .bool] {

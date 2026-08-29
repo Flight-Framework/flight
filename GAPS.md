@@ -19,8 +19,8 @@ single highest-value gap, because `DistributedPubSubAdapter` has no
 implementation and three documented features rest on it (Channels broadcast
 across nodes, Presence's membership mode, `ClusteredPubSub` itself); the
 three-way duplication of macro injection scanning; flight-web HTTP/2 (a design
-decision, not a task — see below); hangar composite-key associations; the
-presence gossip trust model; npm and Homebrew publishing; format debt.
+decision, not a task — see below); hangar composite-key associations; npm and
+Homebrew publishing; format debt.
 
 **Closed since this was written:** the scheduler (flight 0.2.0/0.2.1, with the
 Postgres coordinator in flight-data 0.2.0 and a tutorial stage), the target
@@ -338,20 +338,37 @@ left has no consumer-facing API to document.
 - No live-updating dashboard, no historical metrics. *Deliberate.*
 
 ### flight-presence
-- **The gossip trust model.** Deferred by agreement, still open: what happens
-  when a malicious or buggy node gossips bad state, and what the rolling-upgrade
-  story is across protocol versions. *Large, and needs a threat-model decision
-  before any code.*
+- ✅ **The gossip trust model.** *Decided and documented in 0.11.0.* The entry
+  asked two questions — what happens when a malicious or buggy node gossips bad
+  state, and what the rolling-upgrade story is across protocol versions — and
+  said a threat-model decision had to come before any code. The decision:
 
-  One concrete vector was closed in 0.10.0 without waiting for that decision,
-  because it was not state corruption but a *remote process kill*: a frame
-  whose causal context claimed dots belonging to the **receiving** replica was
-  merged unconditionally, raising that replica's version past its own clock, so
-  its next local `track` tripped a precondition and killed the process. One
-  frame, one crash. Such claims are now refused — only a replica ever asserts
-  its own dots, so a frame making one is malformed either way. Everything else
-  about the trust model is still open: a peer can still assert entries that are
-  not real, and nothing authenticates a frame.
+  **The PubSub bus is the trust boundary.** Gossip rides one reserved topic, so
+  anything that can publish to it can assert presence state, and nothing
+  authenticates a frame. That is Phoenix Presence's posture over Redis too, and
+  it is the right one for the deployment this targets: a broker inside your
+  network. It is now *stated* rather than assumed, because the consequence
+  deserves to be explicit — an attacker who can publish to your broker can
+  forge presence, and can do considerably worse to everything else on the same
+  bus. Presence is not what to harden first in that situation.
+
+  Frame authentication (a shared secret, an HMAC per frame) was considered and
+  not taken: it moves key distribution and rotation onto the operator to defend
+  a boundary the rest of the stack does not defend either. Revisit it if a
+  deployment ever shares a broker across trust domains.
+
+  Within that boundary, **buggy** peers and version skew are bounded, by rules
+  no correct sender ever violates: a frame asserting a third replica's entries
+  is dropped, a frame over `max-entries-per-frame` (10,000) is dropped, a frame
+  claiming this replica's own dots has those claims stripped (0.10.0 — that one
+  was a one-frame remote process kill, not mere corruption), and a frame with
+  an unrecognised wire version is dropped rather than guessed at.
+
+  **Rolling upgrades:** a version bump partitions the cluster's presence for
+  the duration of the roll — each half sees the other's replicas as silent and,
+  in degraded mode, hides their entries after `down-after`. A visible partition
+  beats two versions agreeing on the bytes and disagreeing on the meaning. Both
+  halves of the trade are written down in `Docs/presence.md`.
 
 ### flight-data / drivers
 - No cross-database abstraction, no auto-migration at boot, no query caching.
