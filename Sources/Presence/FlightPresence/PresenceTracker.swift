@@ -118,6 +118,10 @@ public actor PresenceTracker: Presence {
 
     /// Diffs computed but not yet on the bus, in computation order.
     private var pendingDiffs: [QueuedDiff] = []
+    /// How far `flushDiffs` has drained. See its comment: `removeFirst()`
+    /// shifted the whole array per diff, on the actor every presence change
+    /// goes through.
+    private var pendingDiffsHead = 0
 
     // MARK: - Peer liveness
 
@@ -429,13 +433,23 @@ public actor PresenceTracker: Presence {
     }
 
     private func apply(_ incoming: PresenceCRDTState) async {
-        let changes = state.join(incoming)
+        // `ownReplica:` — this is the wire path, and a frame claiming to have
+        // observed *our* dots is malformed or hostile either way. Merging one
+        // raised our version past our clock, so the next local `track` tripped
+        // `add`'s monotonic-counter precondition and killed the process.
+        let changes = state.join(incoming, ownReplica: replica)
         guard !changes.isEmpty else { return }
 
         var joins: [String: [String: [PresenceMeta]]] = [:]
         var leaves: [String: [String: [PresenceMeta]]] = [:]
         for (dot, record) in changes.added.sorted(by: { $0.0 < $1.0 }) {
             topicIndex[record.topic, default: []].insert(dot)
+            // Kept although a frame only ever carries its sender's entries
+            // and `touch(sender)` has just cleared the sender's down state,
+            // which makes this unreachable through the gossip path today. It
+            // is the invariant, not the caller, that makes it so — and this
+            // is the one place a down replica's entries could otherwise be
+            // announced as joins.
             guard !isDown(dot.replica) else { continue }
             joins[record.topic, default: [:]][record.key, default: []].append(meta(of: record))
         }
@@ -463,7 +477,9 @@ public actor PresenceTracker: Presence {
             )
             downNames.insert(name)
             for (peer, liveness) in peers where peer.name == name && liveness.downSince == nil {
-                await markDown(peer)
+                // The monitor is authoritative here, not a silence timer, so
+                // nothing about `lastSeen` should hold the decision back.
+                await markDown(peer, silentSince: liveness.lastSeen, authoritative: true)
             }
         case .up(let name):
             logger.info("membership monitor declared node up", metadata: ["node": "\(name)"])
@@ -488,7 +504,7 @@ public actor PresenceTracker: Presence {
                     "presence replica silent past down-after; hiding its entries (degraded mode)",
                     metadata: ["replica": "\(peer)", "down-after": "\(configuration.downAfter)"]
                 )
-                await markDown(peer)
+                await markDown(peer, silentSince: liveness.lastSeen)
             }
 
             // Membership mode's backstop. The monitor is authoritative and
@@ -512,7 +528,7 @@ public actor PresenceTracker: Presence {
                         "fallback-after": "\(fallback)",
                     ]
                 )
-                await markDown(peer)
+                await markDown(peer, silentSince: liveness.lastSeen)
             }
             if let downSince = peers[peer]?.downSince, now - downSince > configuration.permdownAfter {
                 purge(peer)
@@ -520,8 +536,18 @@ public actor PresenceTracker: Presence {
         }
     }
 
-    private func markDown(_ peer: PresenceReplicaID) async {
+    /// - Parameter silentSince: The `lastSeen` the caller judged. `sweep`
+    ///   iterates a value copy of `peers` and awaits mid-loop, so a peer that
+    ///   gossiped during that suspension was still judged on a stale
+    ///   `lastSeen` — hidden wrongly, then flapped back on its next frame.
+    ///   Re-checking here, where the actor state is current, closes it.
+    private func markDown(
+        _ peer: PresenceReplicaID,
+        silentSince: ContinuousClock.Instant,
+        authoritative: Bool = false
+    ) async {
         guard var liveness = peers[peer], liveness.downSince == nil else { return }
+        guard authoritative || liveness.lastSeen <= silentSince else { return }
         liveness.downSince = liveClock.now
         peers[peer] = liveness
         await emitVisibility(of: peer, visible: false)
@@ -629,7 +655,10 @@ public actor PresenceTracker: Presence {
             event: PresenceEvent.diff,
             payload: PresenceWire.diffJSON(joins: joins, leaves: leaves)
         )
-        guard let data = try? JSONEncoder().encode(frame) else { return }
+        // One shared encoder, not one per diff: this runs on the actor that
+        // serializes every client's presence change, and `JSONEncoder` is a
+        // class with real setup cost.
+        guard let data = try? Self.diffEncoder.encode(frame) else { return }
         pendingDiffs.append(QueuedDiff(topic: topic, payload: data))
     }
 
@@ -645,11 +674,22 @@ public actor PresenceTracker: Presence {
     /// `await` and drains too, both loops take from the front of the same
     /// queue, so nothing is sent twice and nothing is sent out of order.
     private func flushDiffs() async {
-        while !pendingDiffs.isEmpty {
-            let queued = pendingDiffs.removeFirst()
+        // `removeFirst()` shifts the whole array on every diff. An index into
+        // it, with the storage reclaimed once drained, keeps the FIFO order
+        // the queue exists for without the O(n) shift per element.
+        while pendingDiffsHead < pendingDiffs.count {
+            let queued = pendingDiffs[pendingDiffsHead]
+            pendingDiffsHead += 1
+            if pendingDiffsHead == pendingDiffs.count {
+                pendingDiffs.removeAll(keepingCapacity: true)
+                pendingDiffsHead = 0
+            }
             await localBus.publish(Message(topic: queued.topic, payload: queued.payload))
         }
     }
+
+    /// Shared by every diff this tracker encodes. See ``publishDiff``.
+    private static let diffEncoder = JSONEncoder()
 }
 
 /// One membership's "the topic terminated" signal, readable synchronously

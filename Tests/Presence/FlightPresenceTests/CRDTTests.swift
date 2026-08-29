@@ -189,4 +189,80 @@ struct CRDTTests {
         #expect(state.context.versions[nodeA] == nil)
         #expect(state.context.versions[nodeB] == 1)
     }
+
+    // MARK: - A peer may not speak about our dots
+
+    @Test("a frame claiming our dots is refused, not merged")
+    func foreignClaimsAboutOurOwnDotsAreDropped() {
+        // The concrete failure: a peer's frame whose context claims dots of
+        // the *receiving* replica was merged unconditionally, raising our
+        // version past our own clock. The receiver's next local `track` then
+        // tripped `add`'s monotonic-counter precondition and killed the
+        // process — one frame, one crash, from a buggy or malicious peer.
+        var local = PresenceCRDTState()
+        local.join(local.add(record("user:a", ref: "ra"), at: PresenceDot(replica: nodeA, counter: 1)))
+
+        // Built the way a frame arrives: a snapshot from B, then B forges a
+        // claim about A's counters into its context.
+        var b = PresenceCRDTState()
+        _ = b.add(record("user:b", ref: "rb"), at: PresenceDot(replica: nodeB, counter: 1))
+        var frame = b.snapshot(of: nodeB, clock: 1)
+        frame.forgeClaimForTesting(about: nodeA, through: 100)
+
+        local.join(frame, ownReplica: nodeA)
+
+        // Our own version is untouched; the peer's own claim is kept.
+        #expect(local.context.versions[nodeA] == 1, "a peer moved our clock")
+        #expect(local.context.versions[nodeB] == 1, "the peer's own claim was dropped too")
+        #expect(local.entries.count == 2, "b's own entry still merged")
+
+        // And the next local add — the operation that used to trap — works.
+        local.join(local.add(record("user:a2", ref: "ra2"), at: PresenceDot(replica: nodeA, counter: 2)))
+        #expect(local.entries.count == 3)
+    }
+
+    @Test("a locally-produced delta is joined unfiltered")
+    func localDeltasAreNotFiltered() {
+        // The filter is for the wire only: our own delta legitimately speaks
+        // about our own dots, and filtering it would drop every local add.
+        var local = PresenceCRDTState()
+        var mirror = PresenceCRDTState()
+        let delta = local.add(record("user:a", ref: "ra"), at: PresenceDot(replica: nodeA, counter: 1))
+        mirror.join(delta)
+        #expect(mirror.entries.count == 1)
+    }
+
+    @Test("the replica index stays in step with entries through every operation")
+    func replicaIndexTracksEntries() {
+        // `dots(of:)` reads the index and everything else reads `entries`, so
+        // a missed index update would show as a state that looks right and
+        // gossips wrong.
+        var state = PresenceCRDTState()
+        let d1 = PresenceDot(replica: nodeA, counter: 1)
+        let d2 = PresenceDot(replica: nodeA, counter: 2)
+        state.join(state.add(record("user:a", ref: "ra"), at: d1))
+        #expect(Set(state.dots(of: nodeA)) == [d1])
+
+        _ = state.replace(d1, with: record("user:a", ref: "ra", status: "away"), at: d2)
+        #expect(Set(state.dots(of: nodeA)) == [d2])
+        #expect(Set(state.entries.keys) == [d2])
+
+        _ = state.remove([d2])
+        #expect(state.dots(of: nodeA).isEmpty)
+        #expect(state.entries.isEmpty)
+    }
+
+    @Test("a remote remove still removes, now that the pass is indexed")
+    func indexedRemovalStillRemoves() {
+        var a = PresenceCRDTState()
+        var mirror = PresenceCRDTState()
+        let dot = PresenceDot(replica: nodeA, counter: 1)
+        mirror.join(a.add(record("user:a", ref: "ra"), at: dot))
+        #expect(mirror.entries.count == 1)
+
+        let changes = mirror.join(a.remove([dot]), ownReplica: nodeB)
+        #expect(changes.removed.count == 1)
+        #expect(mirror.entries.isEmpty)
+        #expect(mirror.dots(of: nodeA).isEmpty)
+    }
 }

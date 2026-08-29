@@ -52,6 +52,28 @@ public struct DotContext: Sendable, Equatable, Codable {
         for replica in Set(cloud.map(\.replica)) { compact(replica) }
     }
 
+    /// Every replica this context says anything about.
+    ///
+    /// A gossip frame's context only ever covers its sender, which is what
+    /// lets a join bound its removal pass to those replicas instead of
+    /// scanning the whole cluster's entries.
+    public var replicas: Set<PresenceReplicaID> {
+        Set(versions.keys).union(cloud.map(\.replica))
+    }
+
+    /// Drops everything this context says about `replica`, keeping the rest.
+    ///
+    /// Unlike ``forget(_:)`` this is not a purge: it is how a receiver
+    /// refuses a peer's claim to have observed *its* dots. Only a replica
+    /// asserts its own dots, so such a claim is malformed or hostile — and
+    /// merging it raised the receiver's own version past its clock, so its
+    /// next local `track` tripped `add`'s monotonic-counter precondition and
+    /// killed the process. One frame, one crash.
+    public mutating func dropClaims(about replica: PresenceReplicaID) {
+        versions.removeValue(forKey: replica)
+        cloud = cloud.filter { $0.replica != replica }
+    }
+
     /// Forget a replica entirely — the permdown purge. Only safe
     /// because a purged replica never returns: its boot id is unique per
     /// process, so no future dot can collide with a forgotten one.
