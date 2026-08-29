@@ -100,12 +100,12 @@ whole application without binding a port.
 
 ### Controllers and routes
 
-- ``Controller(_:)``
-- ``GetMapping(_:)``
-- ``PostMapping(_:)``
-- ``PutMapping(_:)``
-- ``PatchMapping(_:)``
-- ``DeleteMapping(_:)``
+- ``Controller(_:pipelines:)``
+- ``GetMapping(_:maxBodyBytes:)``
+- ``PostMapping(_:maxBodyBytes:)``
+- ``PutMapping(_:maxBodyBytes:)``
+- ``PatchMapping(_:maxBodyBytes:)``
+- ``DeleteMapping(_:maxBodyBytes:)``
 - ``WebSocketMapping(_:)``
 
 ### Requests and responses

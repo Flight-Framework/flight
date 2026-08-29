@@ -117,6 +117,15 @@ enum RouteScanning {
         let mappings = mappingAttributes(of: function, in: context)
         guard !mappings.isEmpty else { return [] }
 
+        // Path validation lives here, where the routes are actually built,
+        // rather than in the peer marker macro — which also scanned, so every
+        // mapping diagnostic was emitted twice at the identical location.
+        for mapping in mappings {
+            validatePath(
+                mapping.path, name: mapping.kind.rawValue,
+                at: mapping.attribute, in: context)
+        }
+
         let name = function.name.text
 
         let isTypeLevel = function.modifiers.contains {
@@ -219,6 +228,54 @@ enum RouteScanning {
             return base + method
         } else {
             return base + "/" + method
+        }
+    }
+
+    /// Pattern-syntax validation at compile time (§4: "path-pattern validity
+    /// becomes information the build has before the binary exists"). Kept in
+    /// lockstep with the runtime `RoutePattern` parser — these rules are the
+    /// same ones it enforces.
+    static func validatePath(
+        _ path: String,
+        name: String,
+        at node: AttributeSyntax,
+        in context: some MacroExpansionContext
+    ) {
+        guard path.hasPrefix("/") else {
+            context.diagnoseError(
+                "mapping.path",
+                "@\(name) path '\(path)' must start with '/'.",
+                at: node
+            )
+            return
+        }
+        let segments = path.split(separator: "/", omittingEmptySubsequences: true)
+        var seenParameters: Set<String> = []
+        for (index, segment) in segments.enumerated() {
+            if segment == "**" {
+                if index != segments.count - 1 {
+                    context.diagnoseError(
+                        "mapping.path",
+                        "@\(name) path '\(path)': '**' is only allowed as the final segment.",
+                        at: node
+                    )
+                }
+            } else if segment.hasPrefix(":") {
+                let parameter = String(segment.dropFirst())
+                if parameter.isEmpty {
+                    context.diagnoseError(
+                        "mapping.path",
+                        "@\(name) path '\(path)' has a ':' segment with no parameter name.",
+                        at: node
+                    )
+                } else if !seenParameters.insert(parameter).inserted {
+                    context.diagnoseError(
+                        "mapping.path",
+                        "@\(name) path '\(path)' binds ':\(parameter)' more than once.",
+                        at: node
+                    )
+                }
+            }
         }
     }
 }

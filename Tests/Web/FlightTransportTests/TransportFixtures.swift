@@ -23,9 +23,9 @@ struct WireController {
     @GetMapping("/sse")
     func sse(_ context: RequestContext) -> Response {
         .serverSentEvents { events in
-            events.send(data: "first", event: "tick")
+            await events.send(data: "first", event: "tick")
             try? await Task.sleep(for: .milliseconds(50))
-            events.send(data: "second", event: "tick")
+            await events.send(data: "second", event: "tick")
         }
     }
 

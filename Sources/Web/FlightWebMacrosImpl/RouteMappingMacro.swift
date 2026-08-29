@@ -24,60 +24,55 @@ public struct RouteMappingMacro: PeerMacro {
             return []
         }
 
-        // Validate the signature and the path pattern here, at the method —
-        // scanRoutes and validatePath emit the diagnostics.
-        let routes = RouteScanning.scanRoutes(of: function, in: context)
-        for route in routes {
-            validatePath(route.path, name: name, at: node, in: context)
+        // A mapping attribute on a method of a type that is not @Controller
+        // compiles cleanly and registers nothing. Every line of generated
+        // code lives in @Controller's expansion, which is what reads these
+        // attributes off the members — so without it the route silently does
+        // not exist, and the first anyone knows is a 404 that no diagnostic
+        // ever hinted at.
+        //
+        // That is precisely the failure class GAPS.md's "@Scheduler shipped
+        // inert, and every check passed" postmortem describes, still open in
+        // this corner: no fixture covered it, because a fixture that produces
+        // no output and no diagnostic looks like nothing to assert.
+        //
+        // An extension of a @Controller type counts as not-a-controller here,
+        // and correctly so: @Controller reads its own member block, and a
+        // mapping in an extension is just as inert.
+        guard let enclosing = context.lexicalContext.first,
+            hasControllerAttribute(enclosing)
+        else {
+            context.diagnoseError(
+                "mapping.nocontroller",
+                """
+                @\(name) registers a route only on a method of a type annotated @Controller, \
+                which is what reads these attributes. This method's enclosing type is not \
+                annotated @Controller — nor is a method in an extension of one scanned — so \
+                the route would silently never exist. Add @Controller to the type declaring \
+                this method, or register the route with container.registerRoute.
+                """,
+                at: node
+            )
+            return []
         }
+
+        // The validation itself belongs to @Controller, which scans the same
+        // methods to build the routes. Doing it here as well emitted every
+        // misuse diagnostic *twice*, at the identical line and column — the
+        // fixtures pinned two, with a comment noting it, and the user still
+        // saw double. Nothing is lost: `scanRoutes` reports at the method
+        // either way.
+        _ = function
         return []
     }
 
-    /// Pattern-syntax validation at compile time (§4: "path-pattern validity
-    /// becomes information the build has before the binary exists"). Kept in
-    /// lockstep with the runtime `RoutePattern` parser — these rules are the
-    /// same ones it enforces.
-    private static func validatePath(
-        _ path: String,
-        name: String,
-        at node: AttributeSyntax,
-        in context: some MacroExpansionContext
-    ) {
-        guard path.hasPrefix("/") else {
-            context.diagnoseError(
-                "mapping.path",
-                "@\(name) path '\(path)' must start with '/'.",
-                at: node
-            )
-            return
-        }
-        let segments = path.split(separator: "/", omittingEmptySubsequences: true)
-        var seenParameters: Set<String> = []
-        for (index, segment) in segments.enumerated() {
-            if segment == "**" {
-                if index != segments.count - 1 {
-                    context.diagnoseError(
-                        "mapping.path",
-                        "@\(name) path '\(path)': '**' is only allowed as the final segment.",
-                        at: node
-                    )
-                }
-            } else if segment.hasPrefix(":") {
-                let parameter = String(segment.dropFirst())
-                if parameter.isEmpty {
-                    context.diagnoseError(
-                        "mapping.path",
-                        "@\(name) path '\(path)' has a ':' segment with no parameter name.",
-                        at: node
-                    )
-                } else if !seenParameters.insert(parameter).inserted {
-                    context.diagnoseError(
-                        "mapping.path",
-                        "@\(name) path '\(path)' binds ':\(parameter)' more than once.",
-                        at: node
-                    )
-                }
-            }
+    /// Whether a lexical-context node is a type declaration carrying
+    /// `@Controller`.
+    private static func hasControllerAttribute(_ node: Syntax) -> Bool {
+        guard let group = node.asProtocol(DeclGroupSyntax.self) else { return false }
+        return group.attributes.contains { attribute in
+            attribute.as(AttributeSyntax.self)?
+                .attributeName.as(IdentifierTypeSyntax.self)?.name.text == "Controller"
         }
     }
 }

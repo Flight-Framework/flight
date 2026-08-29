@@ -116,8 +116,8 @@ struct UserController {
     @GetMapping("/events")
     func events(_ context: RequestContext) -> Response {
         .serverSentEvents { events in
-            events.send(data: "one", event: "tick")
-            events.send(data: "two", event: "tick")
+            await events.send(data: "one", event: "tick")
+            await events.send(data: "two", event: "tick")
         }
     }
 }

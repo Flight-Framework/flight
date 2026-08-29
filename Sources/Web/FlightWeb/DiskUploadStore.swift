@@ -30,7 +30,7 @@ import Foundation
 /// covering bytes that never reached the disk, and a resuming client
 /// stitching new data onto a hole.
 ///
-/// Between fsyncs, the sidecar is refreshed every ``flushInterval`` bytes,
+/// Between fsyncs, the sidecar is refreshed every `flushInterval` bytes,
 /// so an abrupt disconnect loses at most that much — the client's next
 /// `HEAD` reports the true durable offset and it re-sends only the tail.
 public actor DiskUploadStore: UploadStore {

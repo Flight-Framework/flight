@@ -1,8 +1,10 @@
-import FlightWeb
 import FlightWebTesting
 import Foundation
 import HTTPTypes
+import Synchronization
 import Testing
+
+@testable import FlightWeb
 
 @Suite("Response & ResponseEncodable (§4, §6.2)")
 struct ResponseTests {
@@ -106,23 +108,82 @@ struct StreamingResponseTests {
 
     @Test func producesChunksInOrder() async {
         let response = Response.streaming(contentType: .text) { emit in
-            emit.yield(Data("one".utf8))
-            emit.yield(Data("two".utf8))
+            await emit.write(Data("one".utf8))
+            await emit.write(Data("two".utf8))
         }
         #expect(response.headers[.contentType]?.contains("text/plain") == true)
         let body = await response.collectStreamingBody()
         #expect(String(decoding: body, as: UTF8.self) == "onetwo")
     }
 
+    @Test func producerWaitsForTheConsumerInsteadOfBuffering() async throws {
+        // The defect this pins: the producer used to be handed an
+        // `AsyncStream.Continuation` with the default `.unbounded` policy, and
+        // `yield` never suspends — so a producer faster than its client ran
+        // to completion into memory. An SSE endpoint pushing to a slow reader
+        // was a memory leak with a pleasant API. Request-body backpressure
+        // was fixed in 0.8.0; this is the other direction.
+        let written = Mutex(0)
+        let response = Response.streaming(contentType: .text) { emit in
+            for index in 0..<100 {
+                await emit.write(Data("\(index)".utf8))
+                written.withLock { $0 += 1 }
+            }
+        }
+        guard case .streaming(_, _, let stream) = response else {
+            Issue.record("expected streaming response")
+            return
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        // Nothing at all before the first read: the producer used to start at
+        // construction, before the transport had looked at the response.
+        #expect(written.withLock { $0 } == 0, "the producer ran before anyone read")
+
+        _ = await iterator.next()
+        // One chunk taken. The producer may have completed that write and be
+        // parked on the next one, so at most one write is ahead of the
+        // consumer — never a hundred.
+        #expect(written.withLock { $0 } <= 2, "the producer ran ahead of the consumer")
+
+        var count = 1
+        while await iterator.next() != nil { count += 1 }
+        #expect(count == 100, "every chunk still arrives, in order, just paced")
+    }
+
+    @Test func aDisconnectedClientIsReportedAtTheNextWrite() async {
+        // `send` promised to "return false once the client has disconnected"
+        // and could only manage it after termination had propagated — by
+        // which time everything written in between was already buffered. Now
+        // the very next write says so, which is the only point at which a
+        // producer can usefully act on it.
+        let handoff = ResponseBodyHandoff()
+        let writer = ResponseBodyWriter(handoff: handoff)
+        handoff.finish()
+        #expect(await writer.write(Data("x".utf8)) == false)
+    }
+
+    @Test func aWriteParkedWhenTheClientGoesIsReleased() async {
+        // The other half: a producer suspended in `write` when the client
+        // disappears must be let go, not left parked forever holding a task.
+        let handoff = ResponseBodyHandoff()
+        let writer = ResponseBodyWriter(handoff: handoff)
+        let producer = Task { await writer.write(Data("x".utf8)) }
+        // Give it a moment to park, then pull the rug.
+        for _ in 0..<10 { await Task.yield() }
+        handoff.finish()
+        #expect(await producer.value == false)
+    }
+
     @Test func producerIsCancelledWhenConsumerStops() async throws {
         let (cancelSignal, cancelContinuation) = AsyncStream<Void>.makeStream()
         let response = Response.streaming(contentType: .text) { emit in
-            emit.yield(Data("first".utf8))
+            await emit.write(Data("first".utf8))
             do {
                 while true {
                     try Task.checkCancellation()
                     try await Task.sleep(for: .milliseconds(10))
-                    emit.yield(Data("more".utf8))
+                    await emit.write(Data("more".utf8))
                 }
             } catch {
                 cancelContinuation.yield(())
@@ -184,9 +245,9 @@ struct ServerSentEventTests {
 
     @Test func sseResponseHasEventStreamHeadersAndPayload() async {
         let response = Response.serverSentEvents { events in
-            events.send(data: "one", event: "tick")
-            events.send(data: "two", event: "tick", id: "2")
-            events.sendHeartbeat()
+            await events.send(data: "one", event: "tick")
+            await events.send(data: "two", event: "tick", id: "2")
+            await events.sendHeartbeat()
         }
         #expect(response.headers[.contentType]?.contains("text/event-stream") == true)
         #expect(response.headers[.cacheControl] == "no-cache")

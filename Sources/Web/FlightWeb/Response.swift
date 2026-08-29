@@ -141,24 +141,37 @@ extension Response {
 
     // MARK: - Streaming (§6.2)
 
-    /// Wraps `produce` into a `.streaming` response. The producer runs in its
-    /// own task, started immediately; it is cancelled if the consumer stops
-    /// reading (client disconnect), and the stream finishes when `produce`
-    /// returns even if the producer forgot to call `finish()`.
+    /// Wraps `produce` into a `.streaming` response.
+    ///
+    /// The producer runs in its own task, started on the transport's first
+    /// read rather than at construction, and every ``ResponseBodyWriter/write(_:)``
+    /// suspends until the chunk has been taken — so a producer faster than
+    /// its client is slowed by it rather than buffered ahead of it. It is
+    /// cancelled if the consumer stops reading (client disconnect), and the
+    /// stream finishes when `produce` returns even if the producer forgot to
+    /// call `finish()`.
+    ///
+    /// The stream handed to the transport is still a plain
+    /// `AsyncStream<Data>`; it is built by unfolding, so demand — not the
+    /// producer's enthusiasm — decides when the next chunk is made.
     public static func streaming(
         status: HTTPResponse.Status = .ok,
         contentType: ContentType,
         headers: HTTPFields = [:],
-        _ produce: @escaping @Sendable (AsyncStream<Data>.Continuation) async -> Void
+        _ produce: @escaping @Sendable (ResponseBodyWriter) async -> Void
     ) -> Response {
-        let (stream, continuation) = AsyncStream<Data>.makeStream()
-        let producer = Task {
-            await produce(continuation)
-            continuation.finish()
+        let handoff = ResponseBodyHandoff()
+        let producer = ResponseBodyProducer(handoff: handoff) { handoff in
+            Task {
+                await produce(ResponseBodyWriter(handoff: handoff))
+                handoff.finish()
+            }
         }
-        continuation.onTermination = { reason in
-            // Client gone or stream dropped before completion: stop producing.
-            if case .cancelled = reason { producer.cancel() }
+        let stream = AsyncStream<Data> {
+            producer.ensureStarted()
+            return await handoff.next()
+        } onCancel: {
+            producer.stop()
         }
         var merged = headers
         merged[.contentType] = contentType.rawValue

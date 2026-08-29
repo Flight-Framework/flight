@@ -56,37 +56,42 @@ extension Response {
     ) -> Response {
         var headers: HTTPFields = [:]
         headers[.cacheControl] = "no-cache"
-        return .streaming(contentType: .eventStream, headers: headers) { continuation in
-            await produce(ServerSentEventWriter(continuation: continuation))
+        return .streaming(contentType: .eventStream, headers: headers) { writer in
+            await produce(ServerSentEventWriter(writer: writer))
         }
     }
 }
 
 /// The emit surface handed to an SSE producer.
 public struct ServerSentEventWriter: Sendable {
-    let continuation: AsyncStream<Data>.Continuation
+    let writer: ResponseBodyWriter
 
-    /// Sends one event. Returns false once the client has disconnected.
+    /// Sends one event, suspending until it has gone out.
+    ///
+    /// Returns false once the client has disconnected — which it now does at
+    /// the first send after the disconnect, rather than after termination had
+    /// propagated through a buffer that kept accepting events in the
+    /// meantime. Awaiting is the point: an SSE producer looping over updates
+    /// is exactly the shape that used to fill memory faster than a slow
+    /// client drained it.
     @discardableResult
-    public func send(_ event: ServerSentEvent) -> Bool {
-        if case .terminated = continuation.yield(event.encoded) { return false }
-        return true
+    public func send(_ event: ServerSentEvent) async -> Bool {
+        await writer.write(event.encoded)
     }
 
     @discardableResult
-    public func send(data: String, event: String? = nil, id: String? = nil) -> Bool {
-        send(ServerSentEvent(data: data, event: event, id: id))
+    public func send(data: String, event: String? = nil, id: String? = nil) async -> Bool {
+        await send(ServerSentEvent(data: data, event: event, id: id))
     }
 
     /// A comment line (":keep-alive") — the standard SSE heartbeat.
     @discardableResult
-    public func sendHeartbeat() -> Bool {
-        if case .terminated = continuation.yield(Data(": keep-alive\n\n".utf8)) { return false }
-        return true
+    public func sendHeartbeat() async -> Bool {
+        await writer.write(Data(": keep-alive\n\n".utf8))
     }
 
     /// Ends the stream early (returning from `produce` also ends it).
     public func finish() {
-        continuation.finish()
+        writer.finish()
     }
 }

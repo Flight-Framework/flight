@@ -206,15 +206,12 @@ struct ControllerMacroFixtureTests {
             }
             """,
             diagnostics: [
-                // Once from @Controller's scan, once from the peer marker.
+                // Once. It used to be twice — @Controller's scan and the peer
+                // marker both validated, at the identical line and column.
                 DiagnosticSpec(
                     message: "@GetMapping requires a string-literal path — the route table is built at compile time (§4).",
                     line: 3, column: 5
-                ),
-                DiagnosticSpec(
-                    message: "@GetMapping requires a string-literal path — the route table is built at compile time (§4).",
-                    line: 3, column: 5
-                ),
+                )
             ],
             macroSpecs: testMacros
         )
@@ -248,14 +245,12 @@ struct ControllerMacroFixtureTests {
             }
             """,
             diagnostics: [
+                // Once. It used to be twice — the peer marker validated the
+                // same method @Controller's scan already had.
                 DiagnosticSpec(
                     message: "Route handler 'handler' must be an instance method — the container resolves the controller instance per registration.",
                     line: 3, column: 5
-                ),
-                DiagnosticSpec(
-                    message: "Route handler 'handler' must be an instance method — the container resolves the controller instance per registration.",
-                    line: 3, column: 5
-                ),
+                )
             ],
             macroSpecs: testMacros
         )
@@ -289,14 +284,12 @@ struct ControllerMacroFixtureTests {
             }
             """,
             diagnostics: [
+                // Once. It used to be twice — the peer marker validated the
+                // same method @Controller's scan already had.
                 DiagnosticSpec(
                     message: "Route handler 'handler' must take '_ context: RequestContext' as its first parameter.",
                     line: 3, column: 5
-                ),
-                DiagnosticSpec(
-                    message: "Route handler 'handler' must take '_ context: RequestContext' as its first parameter.",
-                    line: 3, column: 5
-                ),
+                )
             ],
             macroSpecs: testMacros
         )
@@ -651,6 +644,76 @@ struct ControllerMacroFixtureTests {
                 DiagnosticSpec(
                     message: "Route 'GET /users/:id' is declared by both 'one' and 'two' in this controller.",
                     line: 5, column: 5
+                )
+            ],
+            macroSpecs: testMacros
+        )
+    }
+
+    @Test("a mapping attribute outside @Controller is diagnosed, not silently inert")
+    func mappingOutsideControllerIsDiagnosed() {
+        // The whole point of this fixture is the case a fixture is bad at
+        // catching: it used to produce no output *and* no diagnostic, which
+        // looks like nothing to assert. The route simply did not exist —
+        // @Controller's expansion is what reads these attributes, so without
+        // it nothing is generated and nothing complains. Same failure class
+        // as GAPS.md's "@Scheduler shipped inert, and every check passed".
+        assertMacroExpansion(
+            """
+            struct NotAController {
+                @GetMapping("/users")
+                func list(_ context: RequestContext) -> String { "x" }
+            }
+            """,
+            expandedSource: """
+            struct NotAController {
+                func list(_ context: RequestContext) -> String { "x" }
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: """
+                        @GetMapping registers a route only on a method of a type annotated \
+                        @Controller, which is what reads these attributes. This method's \
+                        enclosing type is not annotated @Controller — nor is a method in an \
+                        extension of one scanned — so the route would silently never exist. \
+                        Add @Controller to the type declaring this method, or register the \
+                        route with container.registerRoute.
+                        """,
+                    line: 2, column: 5
+                )
+            ],
+            macroSpecs: testMacros
+        )
+    }
+
+    @Test("a mapping in an extension of a controller is diagnosed too")
+    func mappingInExtensionIsDiagnosed() {
+        // Just as inert: @Controller reads its own member block, so a mapping
+        // written in an extension is never scanned.
+        assertMacroExpansion(
+            """
+            extension SomeController {
+                @PostMapping("/users")
+                func create(_ context: RequestContext) -> String { "x" }
+            }
+            """,
+            expandedSource: """
+            extension SomeController {
+                func create(_ context: RequestContext) -> String { "x" }
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: """
+                        @PostMapping registers a route only on a method of a type annotated \
+                        @Controller, which is what reads these attributes. This method's \
+                        enclosing type is not annotated @Controller — nor is a method in an \
+                        extension of one scanned — so the route would silently never exist. \
+                        Add @Controller to the type declaring this method, or register the \
+                        route with container.registerRoute.
+                        """,
+                    line: 2, column: 5
                 )
             ],
             macroSpecs: testMacros
