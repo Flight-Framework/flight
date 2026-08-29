@@ -4,6 +4,35 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-08-29
+
+The last finding from the 0.10.0 audit, which landed after the tag.
+
+### Fixed
+
+- **Only this process's own broadcaster gets the encode-once fast path.**
+  The 0.9.0 optimization carries a broadcast's wire frame in message
+  metadata, and `SocketSession.pump` forwarded whatever sat under that key
+  verbatim — around the reserved-event guard and around valid-envelope
+  framing both. Any in-process publisher that stamped `flight.channels.frame`
+  could push a `flight:join`, or any other reserved event, to every joined
+  socket. It takes application code misusing a reserved key, which is why the
+  audit called it misuse-resistance rather than an attack surface; it is
+  still a seam that should not exist. Frames now carry a process-wide random
+  token and the fast path runs only for a match — the same shape
+  `ClusteredPubSub` uses for echo suppression, and for the same reason: a
+  guessable name is not a capability. A clustered frame from another node
+  carries no token and correctly takes the validating path.
+
+### Documentation
+
+- `Docs/presence.md` claimed duplicated gossip is harmless without
+  qualification. It is, except across a permdown purge, which forgets a
+  replica's causal context — so a duplicate of a pre-purge add-delta arriving
+  more than `permdown-after` late would resurrect an entry until the next
+  snapshot repaired it. Theoretical with any sane transport, and worth naming
+  as the one hole rather than leaving the claim unbounded.
+
 ## [0.10.0] - 2026-08-29
 
 A full source audit — every file under `Sources/`, ten reviewers, one per
@@ -91,9 +120,7 @@ navigation.
 its rejoin intent, `disconnect()` promised a rejoin `connect()` never
 performed, and a disconnect racing an in-flight dial resurrected a closed
 client. Client streams and channel records grew without limit, where the
-server side had bounded both. The 0.9.0 encode-once broadcast path forwarded
-whatever sat under its metadata key verbatim, so any in-process publisher
-that stamped it could push a reserved event to every joined socket.
+server side had bounded both.
 
 **Presence** — a peer frame claiming the receiving replica's own dots was a
 one-frame remote process kill. The CRDT merge scanned every entry in the
