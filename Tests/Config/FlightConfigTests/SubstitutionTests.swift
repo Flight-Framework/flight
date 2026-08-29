@@ -34,13 +34,18 @@ struct SubstitutionTests {
             _ = try resolve("datasource:\n  url: ${MISSING_VAR}", env: [:])
             Issue.record("expected unresolvedSubstitution")
         } catch let error as ConfigLoadError {
-            guard case .unresolvedSubstitution(let file, let key, let variable) = error else {
+            guard case .unresolvedSubstitution(let file, let line, let key, let variable) = error
+            else {
                 Issue.record("wrong case: \(error)")
                 return
             }
             #expect(file == "sub.yaml")
+            // The line was in hand and dropped, making this the one load
+            // failure that did not name one.
+            #expect(line == 2)
             #expect(key == "datasource.url")
             #expect(variable == "MISSING_VAR")
+            #expect(error.description.contains("sub.yaml:2"))
         } catch {
             Issue.record("unexpected error: \(error)")
         }

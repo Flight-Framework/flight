@@ -88,11 +88,23 @@ public struct FlightYAMLSnapshot: FileConfigSnapshot {
         // request gathers the contiguous run starting at .0. Done before the
         // scalar lookup because the two never collide: the parser rejects a
         // document that defines both `hosts` and `hosts.0`.
+        // A value substituted from the environment is where the secrets go —
+        // that is what `${DB_PASSWORD}` is for — and every ConfigValue built
+        // here was flagged `isSecret: false`. So the redaction config.md
+        // promises held only for the provider's own `debugDescription`: a
+        // read through `Configuration.reader` with an `AccessLogger` reported
+        // the resolved secret as an ordinary value, in the log.
+        let isSecret = document.substitutedKeys.contains(encodedKey)
+
         if type.isArray {
             if let elements = document.arrayElements(for: encodedKey) {
                 return LookupResult(
                     encodedKey: encodedKey,
-                    value: try ConfigValue(arrayOf: elements, as: type, key: encodedKey)
+                    value: try ConfigValue(
+                        arrayOf: elements, as: type, key: encodedKey,
+                        isSecret: isSecret || elements.indices.contains {
+                            document.substitutedKeys.contains("\(encodedKey).\($0)")
+                        })
                 )
             }
         }
@@ -103,7 +115,8 @@ public struct FlightYAMLSnapshot: FileConfigSnapshot {
         }
         return LookupResult(
             encodedKey: encodedKey,
-            value: try ConfigValue(scalar: raw, as: type, key: encodedKey)
+            value: try ConfigValue(
+                scalar: raw, as: type, key: encodedKey, isSecret: isSecret)
         )
     }
 
@@ -126,27 +139,29 @@ extension ConfigValue {
     /// other provider: nil means *absent* and lets the reader fall through to
     /// a lower-precedence layer, which is exactly the silent-wrong-value
     /// outcome this library exists to prevent.
-    fileprivate init(scalar raw: String, as type: ConfigType, key: String) throws {
+    fileprivate init(
+        scalar raw: String, as type: ConfigType, key: String, isSecret: Bool
+    ) throws {
         switch type {
         case .string:
-            self = .init(.string(raw), isSecret: false)
+            self = .init(.string(raw), isSecret: isSecret)
         case .int:
             guard let value = Int(configValue: raw) else {
                 throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
             }
-            self = .init(.int(value), isSecret: false)
+            self = .init(.int(value), isSecret: isSecret)
         case .double:
             guard let value = Double(configValue: raw) else {
                 throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
             }
-            self = .init(.double(value), isSecret: false)
+            self = .init(.double(value), isSecret: isSecret)
         case .bool:
             guard let value = Bool(configValue: raw) else {
                 throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
             }
-            self = .init(.bool(value), isSecret: false)
+            self = .init(.bool(value), isSecret: isSecret)
         case .bytes:
-            self = .init(.bytes([UInt8](raw.utf8)), isSecret: false)
+            self = .init(.bytes([UInt8](raw.utf8)), isSecret: isSecret)
         default:
             throw FlightYAMLConversionError(key: key, rawValue: raw, type: type)
         }
@@ -154,7 +169,9 @@ extension ConfigValue {
 
     /// Converts a flattened sequence (`hosts.0`, `hosts.1`, …) into an array
     /// value of the requested element type.
-    fileprivate init(arrayOf elements: [String], as type: ConfigType, key: String) throws {
+    fileprivate init(
+        arrayOf elements: [String], as type: ConfigType, key: String, isSecret: Bool
+    ) throws {
         func mapped<T>(_ transform: (String) -> T?) throws -> [T] {
             try elements.map { element in
                 guard let value = transform(element) else {
@@ -165,15 +182,15 @@ extension ConfigValue {
         }
         switch type {
         case .stringArray:
-            self = .init(.stringArray(elements), isSecret: false)
+            self = .init(.stringArray(elements), isSecret: isSecret)
         case .intArray:
-            self = .init(.intArray(try mapped { Int(configValue: $0) }), isSecret: false)
+            self = .init(.intArray(try mapped { Int(configValue: $0) }), isSecret: isSecret)
         case .doubleArray:
-            self = .init(.doubleArray(try mapped { Double(configValue: $0) }), isSecret: false)
+            self = .init(.doubleArray(try mapped { Double(configValue: $0) }), isSecret: isSecret)
         case .boolArray:
-            self = .init(.boolArray(try mapped { Bool(configValue: $0) }), isSecret: false)
+            self = .init(.boolArray(try mapped { Bool(configValue: $0) }), isSecret: isSecret)
         case .byteChunkArray:
-            self = .init(.byteChunkArray(elements.map { [UInt8]($0.utf8) }), isSecret: false)
+            self = .init(.byteChunkArray(elements.map { [UInt8]($0.utf8) }), isSecret: isSecret)
         default:
             throw FlightYAMLConversionError(key: key, rawValue: elements.joined(separator: ","), type: type)
         }

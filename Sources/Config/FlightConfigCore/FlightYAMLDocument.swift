@@ -93,8 +93,12 @@ public struct FlightYAMLDocument: Sendable, Hashable {
             } catch let failure as EnvironmentSubstitution.Failure {
                 switch failure {
                 case .unresolved(let variable):
+                    // The line is in hand — the sibling syntax-failure branch
+                    // below uses it — and dropping it made this the one load
+                    // failure that did not name a line, against config.md's
+                    // "load failures name the file, line, and column".
                     throw ConfigLoadError.unresolvedSubstitution(
-                        file: name, key: entry.key, variable: variable
+                        file: name, line: entry.line, key: entry.key, variable: variable
                     )
                 case .syntax(let message):
                     throw ConfigLoadError.parseFailed(

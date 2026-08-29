@@ -4,6 +4,13 @@ import Foundation
 /// wins. It is the standard "override anything at deploy time" escape
 /// hatch: container orchestrators, CI secrets, one-off local overrides.
 ///
+/// As with `YAMLConfigSource`, the runtime load path no longer goes through
+/// this type: `ConfigurationLoader` builds swift-configuration's own
+/// `EnvironmentVariablesProvider` instead. What survives here, and is still
+/// load-bearing, is ``variableName(for:)`` — the key-to-variable transform,
+/// which `ConfigError.missingKey` uses to tell an operator which variable to
+/// set, and which the build plugin uses for the same reason.
+///
 /// Keys map to variable names via a fixed transform: uppercase, `.` → `_`,
 /// prefixed `FLIGHT_`. So `datasource.url` reads `FLIGHT_DATASOURCE_URL`,
 /// and `datasource.pool_size` reads `FLIGHT_DATASOURCE_POOL_SIZE`.

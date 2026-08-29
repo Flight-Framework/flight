@@ -52,7 +52,8 @@ extension Configuration {
     /// Whether any provider holds the key, regardless of whether it decodes.
     ///
     /// A key held as an array or byte blob throws from
-    /// ``resolveRawValue(for:)`` rather than returning a string. For this
+    /// `resolveRawValue(for:)` rather than returning a string. A provider that
+    /// fails throws too, and that also counts as present here. For this
     /// question that still counts as present — the operator wrote something
     /// there, which is the whole signal.
     private func isPresent(_ key: String) -> Bool {

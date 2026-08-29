@@ -38,6 +38,18 @@ public enum ConfigError: Error, CustomStringConvertible, Sendable, Equatable, Ha
     /// type directly.
     case unrepresentableValue(key: String, provider: String, kind: String)
 
+    /// A provider refused every shape the key was asked for without ever
+    /// saying the key was absent — a secrets store that is down, a denied
+    /// permission, a timed-out socket.
+    ///
+    /// Resolution stops here for the same reason
+    /// ``unrepresentableValue(key:provider:kind:)`` does, and it matters
+    /// more: a provider that fails looked exactly like a provider that is
+    /// empty, so a transient failure in the secrets layer answered from the
+    /// development YAML underneath it, silently and with the right-looking
+    /// value.
+    case providerFailed(key: String, provider: String, reason: String)
+
     public var description: String {
         switch self {
         case .missingKey(let key, let environment):
@@ -52,6 +64,13 @@ public enum ConfigError: Error, CustomStringConvertible, Sendable, Equatable, Ha
             Configuration key '\(key)' has value '\(rawValue)', \
             which is not a valid \(targetType).
             """
+        case .providerFailed(let key, let provider, let reason):
+            return """
+                Configuration key '\(key)' could not be read from \(provider): \(reason). \
+                Resolution stopped here rather than falling through to a lower-precedence \
+                layer, which would answer with a value the failing layer was there to \
+                override.
+                """
         case .unrepresentableValue(let key, let provider, let kind):
             return """
             Configuration key '\(key)' is present in \(provider) as \(kind), \
@@ -85,7 +104,7 @@ public enum ConfigLoadError: Error, CustomStringConvertible, Sendable, Equatable
     /// load here — rather than letting the key silently fall through to a
     /// lower-precedence layer — is deliberate: the alternative is a prod
     /// deployment quietly running on base-layer (dev) values.
-    case unresolvedSubstitution(file: String, key: String, variable: String)
+    case unresolvedSubstitution(file: String, line: Int, key: String, variable: String)
 
     public var description: String {
         switch self {
@@ -99,9 +118,9 @@ public enum ConfigLoadError: Error, CustomStringConvertible, Sendable, Equatable
             return "Configuration file '\(path)' could not be read: \(reason)"
         case .parseFailed(let file, let line, let column, let message):
             return "\(file):\(line):\(column): \(message)"
-        case .unresolvedSubstitution(let file, let key, let variable):
+        case .unresolvedSubstitution(let file, let line, let key, let variable):
             return """
-            \(file): key '\(key)' references environment variable '\(variable)' \
+            \(file):\(line): key '\(key)' references environment variable '\(variable)' \
             via ${\(variable)}, which is not set. Set it, or use \
             ${\(variable):-default} to supply a fallback.
             """
@@ -109,7 +128,6 @@ public enum ConfigLoadError: Error, CustomStringConvertible, Sendable, Equatable
     }
 }
 
-#if canImport(Foundation)
 import Foundation
 
 extension ConfigError: LocalizedError {
@@ -125,4 +143,3 @@ extension ConfigLoadError: LocalizedError {
     /// The same text as ``description``.
     public var errorDescription: String? { description }
 }
-#endif

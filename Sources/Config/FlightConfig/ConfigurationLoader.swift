@@ -47,16 +47,16 @@ extension Configuration {
     ///     are redacted in access logs and in provider descriptions — so a
     ///     dumped provider stack shows `FLIGHT_DATASOURCE_PASSWORD=<REDACTED>`.
     ///     Defaults to `.none`, preserving the previous behavior exactly.
-    ///   - accessReporter: Receives an event per resolved key. Pass an
+    ///   - accessReporter: Receives an event per resolved key, from Flight's
+    ///     own accessors as well as from `Configuration.reader`. Pass an
     ///     `AccessLogger` to log every config read at startup.
     ///   - additionalProviders: Extra providers, inserted *above* the env-var
     ///     layer so they win. The hook for sources this package defers —
     ///     Kubernetes secret directories, remote stores, CLI arguments.
     ///
     /// - Throws: `ConfigLoadError.missingBaseFile` when `flight.yaml` is
-    ///   absent])`
-    ///   directly), and the other `ConfigLoadError` cases for
-    ///   unreadable/invalid files.
+    ///   absent from `directory`, and the other `ConfigLoadError` cases for
+    ///   files that exist but cannot be read or parsed.
     ///
     /// - Returns: The immutable `Configuration`, precedence-ordered
     ///   env vars → `flight-{env}.yaml` → `flight.yaml`, ready to hand to

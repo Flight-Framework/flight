@@ -1,5 +1,3 @@
-import Foundation
-
 /// How a `YAMLConfigSource` treats `${VAR}` placeholders in scalar values.
 ///
 /// Substitution is a load-time convenience for referencing env vars from
@@ -75,9 +73,12 @@ enum EnvironmentSubstitution {
             let inner = String(value[value.index(after: next)..<close])
             let name: String
             let defaultValue: String?
-            if let marker = inner.range(of: ":-") {
-                name = String(inner[..<marker.lowerBound])
-                defaultValue = String(inner[marker.upperBound...])
+            // `range(of:)` was the file's only reason to import Foundation.
+            // A two-character marker does not need it, and the package
+            // advertises itself as dependency-lean.
+            if let marker = Self.firstIndex(of: ":-", in: inner) {
+                name = String(inner[..<marker])
+                defaultValue = String(inner[inner.index(marker, offsetBy: 2)...])
             } else {
                 name = inner
                 defaultValue = nil
@@ -110,6 +111,20 @@ enum EnvironmentSubstitution {
             index = value.index(after: close)
         }
         return output
+    }
+
+    /// The first index of a two-character marker, stdlib-only.
+    private static func firstIndex(of marker: String, in text: String) -> String.Index? {
+        let characters = Array(marker)
+        guard characters.count == 2 else { return nil }
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(after: index)
+            guard next < text.endIndex else { return nil }
+            if text[index] == characters[0] && text[next] == characters[1] { return index }
+            index = next
+        }
+        return nil
     }
 
     private static func isValidVariableName(_ name: String) -> Bool {

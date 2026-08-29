@@ -342,12 +342,35 @@ enum FlightYAML {
             if let next = peek(), next.indent > parentIndent {
                 return try parseBlock(indent: next.indent)
             }
+            // A block sequence may also sit at its key's own indentation —
+            //
+            //     hosts:
+            //     - alpha
+            //     - beta
+            //
+            // which is legal YAML and the commonest spelling in the wild.
+            // Requiring a deeper child dropped these lines back into the
+            // enclosing mapping, where they were diagnosed as mixing '-'
+            // entries with 'key:' entries at one indentation: a true
+            // statement about what the parser saw and a misleading one about
+            // what the author wrote.
+            if let next = peek(), next.indent == parentIndent, isSequenceEntry(next.content) {
+                return try parseSequence(indent: parentIndent, endsAtMappingEntry: true)
+            }
             return .scalar(nil, line: line.number)
         }
 
         // MARK: Sequences
 
-        private mutating func parseSequence(indent: Int) throws -> Node {
+        /// - Parameter endsAtMappingEntry: True for a sequence written at
+        ///   its key's own indentation, where the enclosing mapping resumes
+        ///   at that same level and a `key:` line is the end of the sequence
+        ///   rather than an error. A sequence in a block of its own has no
+        ///   sibling keys, so there a `key:` line really is the mixing
+        ///   mistake.
+        private mutating func parseSequence(
+            indent: Int, endsAtMappingEntry: Bool = false
+        ) throws -> Node {
             var items: [SequenceItem] = []
             while let line = peek() {
                 if line.indent < indent { break }
@@ -359,6 +382,7 @@ enum FlightYAML {
                     )
                 }
                 guard isSequenceEntry(line.content) else {
+                    if endsAtMappingEntry { break }
                     throw ParseError(
                         line: line.number,
                         column: line.indent + 1,

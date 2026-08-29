@@ -127,7 +127,21 @@ let certPath: String? = try configuration.getIfPresent("tls.certificate")
 > exists to surface. The value can come from the environment, so a deployment
 > typo (`FLIGHT_SERVER_PORT=eighty`) reaches this path and aborts the process
 > at startup. If you need to survive a malformed value, use `getIfPresent` or
-> `get(_:as:)` and handle the error.
+> `get(_:as:)` and handle the error. The same holds for a key present in a
+> shape with no raw-string form, and for a provider that fails rather than
+> answering: the default is for one case only, the key genuinely absent
+> everywhere.
+
+### A provider that fails is not a provider that is empty
+
+Resolution walks the layers highest-precedence first and stops at the first
+one holding the key. It also stops when a layer *cannot answer* — the key is
+present in a shape with no raw-string form, or the provider itself failed.
+Falling through would resolve a production key from a development layer with
+nothing said, which is the one failure mode layered configuration must never
+have. It matters most for `additionalProviders`, which is where a Vault or
+Secrets Manager provider goes: a transient failure there used to look exactly
+like "that key is not in this layer".
 
 ## The YAML subset
 
@@ -135,6 +149,15 @@ Deliberately small: nested maps, sequences, scalars, comments, and `${VAR}`
 substitution. Flow style (`[a, b]`, `{k: v}`), block scalars, anchors, and
 aliases are rejected with a message naming the construct and what to use
 instead.
+
+Block sequences may be written indented under their key or flush with it —
+both spellings are accepted and mean the same thing:
+
+```yaml
+hosts:            hosts:
+  - alpha         - alpha
+  - beta          - beta
+```
 
 The point is that a configuration file cannot be *subtly* wrong. Anything the
 parser does not fully understand is a loud failure at load, not a value that
@@ -162,6 +185,23 @@ in any diagnostic dump:
 String(reflecting: provider)
 // FlightYAML[flight.yaml, 2 keys: db.host=localhost, db.password=<REDACTED>]
 ```
+
+The flag rides on the value itself, not just on that one dump, so an
+`accessReporter` that redacts secrets redacts these too.
+
+## Watching every read
+
+`Configuration.load(accessReporter:)` takes a swift-configuration
+`AccessReporter` and gets an event per resolved key — from `get`,
+`getIfPresent` and `get(_:default:)` as well as from `reader` — naming the
+call site, every layer consulted on the way, and what each one said:
+
+```swift
+let configuration = try Configuration.load(accessReporter: AccessLogger(logger: logger))
+```
+
+Which is the answer to "why did this key resolve to *that*", without
+guessing at precedence.
 
 A literal written into the file is printed as-is — it is already disclosed by
 the file it lives in.

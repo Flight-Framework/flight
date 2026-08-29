@@ -171,6 +171,67 @@ struct YAMLGrammarTests {
         #expect(flat == ["hosts.0": "alpha", "hosts.1": "beta", "hosts.2": "gamma"])
     }
 
+    @Test("a sequence at its key's own indentation is the same sequence")
+    func zeroIndentedSequences() throws {
+        // The commonest spelling in the wild, and legal YAML. Requiring a
+        // deeper child dropped these lines back into the enclosing mapping,
+        // where they came back as "cannot mix '-' sequence entries and
+        // 'key:' entries at the same indentation" — a true statement about
+        // what the parser saw, and a misleading one about what was written.
+        let flat = try flatten("""
+        hosts:
+        - alpha
+        - beta
+        """)
+        #expect(flat == ["hosts.0": "alpha", "hosts.1": "beta"])
+    }
+
+    @Test("a zero-indented sequence ends where the mapping resumes")
+    func zeroIndentedSequenceEndsAtSibling() throws {
+        let flat = try flatten("""
+        server:
+          hosts:
+          - alpha
+          - beta
+          port: 8080
+        name: app
+        """)
+        #expect(
+            flat == [
+                "server.hosts.0": "alpha", "server.hosts.1": "beta",
+                "server.port": "8080", "name": "app",
+            ])
+    }
+
+    @Test("both spellings of the same sequence agree")
+    func bothSpellingsAgree() throws {
+        let indented = try flatten("""
+        ports:
+          - 9001
+          - 9002
+        """)
+        let flush = try flatten("""
+        ports:
+        - 9001
+        - 9002
+        """)
+        #expect(indented == flush)
+    }
+
+    @Test("genuinely mixing keys and dashes is still an error")
+    func mixingIsStillRejected() throws {
+        // The diagnosis is only misleading when the '-' lines belong to the
+        // key above them. Where they do not, it is exactly right.
+        #expect(parseError("""
+        - alpha
+        name: app
+        """) != nil)
+        #expect(parseError("""
+        name: app
+        - alpha
+        """) != nil)
+    }
+
     @Test("sequences of mappings — inline first key and continuation keys")
     func sequenceOfMappings() throws {
         let flat = try flatten("""
