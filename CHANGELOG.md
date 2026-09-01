@@ -4,10 +4,15 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-09-01
 
-First increment of the container → composition migration. See
+First two increments of the container → composition migration. See
 `COMPOSITION-MIGRATION.md` for the full specification.
+
+Both changes remove *implicit* mechanisms in favour of explicit ones, and
+neither depends on the composition generator existing yet. Downstream
+packages pinning a published `flight` — `flight-data`, `flight-cli`'s
+templates, `flight-school` — migrate against this release.
 
 ### Breaking
 
