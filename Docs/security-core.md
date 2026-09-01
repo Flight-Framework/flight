@@ -26,7 +26,7 @@ try await bootstrap(
     configuration: .load(),
     modules: [
         FlightWebModule<FlightTransport>.self,
-        FlightSecurityModule.self,
+        FlightOIDCModule.self,
         AppModule.self,
     ]
 )
@@ -217,11 +217,17 @@ For every request bearing `Authorization: Bearer <jwt>`:
   `.continue` on unguarded routes); the precise reason
   (`TokenValidationError`) goes to the internal log only.
 
-## Custom validators (the seam)
+## Choosing how tokens are validated
 
-Most IdPs need no code. For a genuinely non-standard provider, register your
-own `(any TokenValidator)` singleton in a module configured **before**
-`FlightSecurityModule` (list it earlier in the bootstrap `modules:` array):
+`FlightSecurityModule` wires authentication — the request-scoped principal and
+the `Authentication` middleware — but registers **no validator**. How tokens
+are validated is chosen by listing a module:
+
+- **`FlightOIDCModule`** for OIDC/JWT. It registers `OIDCTokenValidator` from
+  `security.oidc.*` and owns the JWKS maintenance service. It depends on
+  `FlightSecurityModule`, so listing it alone is enough.
+- **A module of your own** that registers `(any TokenValidator)`, for session
+  cookies, API keys, mTLS, HMAC, or anything else:
 
 ```swift
 final class MyValidatorModule: FlightModule {
@@ -233,9 +239,18 @@ final class MyValidatorModule: FlightModule {
 }
 ```
 
-`FlightSecurityModule` detects the existing registration, skips the OIDC
-validator (and its config requirements and JWKS service), and still wires
-the middleware and principal plumbing around your implementation.
+List it alongside `FlightSecurityModule` — **order does not matter**, and no
+`security.oidc.*` configuration is required when `FlightOIDCModule` isn't
+listed.
+
+With neither, `(any TokenValidator)` is unregistered and `Authentication`
+fails to resolve it at container freeze — at startup, naming the type.
+
+> **Changed.** Previously `FlightSecurityModule` registered OIDC *unless* it
+> found that you had already registered your own, by scanning the container.
+> That required your module to be configured **before** it — register after,
+> and your validator silently lost — and an internal flag decided whether the
+> JWKS refresher ran. Choosing a module is explicit and order-independent.
 
 ## Implementation notes worth knowing
 

@@ -4,6 +4,64 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-09-01
+
+First two increments of the container → composition migration. See
+`COMPOSITION-MIGRATION.md` for the full specification.
+
+Both changes remove *implicit* mechanisms in favour of explicit ones, and
+neither depends on the composition generator existing yet. Downstream
+packages pinning a published `flight` — `flight-data`, `flight-cli`'s
+templates, `flight-school` — migrate against this release.
+
+### Breaking
+
+- **OIDC moves out of `FlightSecurityModule` into a new `FlightOIDCModule`.**
+  `FlightSecurityModule` now wires authentication only — the request-scoped
+  `PrincipalHolder` and the `Authentication` middleware — and registers no
+  `TokenValidator`. How tokens are validated is chosen by listing a module:
+  `FlightOIDCModule` for OIDC/JWT (it depends on `FlightSecurityModule`, so
+  listing it alone suffices), or your own module registering
+  `(any TokenValidator)` for session cookies, API keys, mTLS, or anything
+  else. With neither, `Authentication` fails to resolve a validator at
+  container freeze — at startup, naming the type.
+
+  Migration: apps relying on the OIDC default replace `FlightSecurityModule`
+  with `FlightOIDCModule` in their `modules:` array. Apps that supplied their
+  own validator can now list their module in any order and no longer need
+  `security.oidc.*` configuration present.
+
+  This removes three implicit behaviors: a `container.allRegistrations()`
+  scan matched by type name; a dependence on *module ordering* (a custom
+  validator registered after `FlightSecurityModule` silently lost); and an
+  internal `registeredOIDCValidator` flag that also decided whether the JWKS
+  maintenance service ran. JWKS maintenance now belongs to `FlightOIDCModule`,
+  so it travels with the validator it maintains and no longer has to park
+  forever when a custom validator is in play.
+
+- **`@Transactional` is removed**, along with `FlightTransactionCoordinator`,
+  `FlightAsyncTransactionCoordinator`, `FlightTransactions` and its
+  task-locals, and the `begin/commit/rollbackPreferringAsync` family.
+  Transactions belong to the data layer: use Hangar's
+  `repo.transaction { tx in … }`, which additionally supports isolation
+  levels, savepoint nesting as designed behavior rather than a guess, and
+  `retryingOnSerializationFailure:` — none of which the macro could express.
+
+  The macro's boundary was invisible at the call site, and its nesting
+  semantics had to infer whether a transaction was already open. That
+  inference is the documented cause of a silent data-loss path in Hangar's
+  integration (a `Repo` resolved before a transaction opened would emit a
+  literal `COMMIT`, ending the enclosing transaction and making writes the
+  caller intended to roll back durable). An explicit closure cannot get this
+  wrong: the transaction's `Repo` either is used or isn't.
+
+  It was also the last framework-mandated ambient state in Flight.
+
+  Migration: replace `@Transactional func f() throws { body }` with
+  `try await repo.transaction { tx in body }`, threading `tx` to helpers that
+  participate. Consumers pinning a published `flight` version migrate after
+  this ships.
+
 ## [0.12.0] - 2026-09-01
 
 ### Breaking

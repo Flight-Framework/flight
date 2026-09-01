@@ -7,8 +7,8 @@ import HTTPTypes
 /// hand downstream depends on mutating this parameter in place: per-request
 /// state that must be visible across the whole chain already goes through
 /// `context.scope` (a reference type shared by every copy of the context for
-/// one request), the same channel `PrincipalHolder` and `@Transactional`
-/// already use. That is what makes wrapping `next` — holding something open
+/// one request), the same channel `PrincipalHolder` uses. That is what makes
+/// wrapping `next` — holding something open
 /// across the handler, the capability a flat pre-handler chain cannot offer
 /// — a single expression instead of a copy-out/copy-back dance:
 ///
