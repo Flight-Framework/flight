@@ -143,13 +143,9 @@ public macro Settings(_ namespace: String) =
 @attached(peer)
 public macro Secret() = #externalMacro(module: "FlightCoreMacrosImpl", type: "SecretMacro")
 
-/// Wraps a method body in begin/commit/rollback against the task-local
-/// `FlightTransactions.coordinator`. A flat compile-time expansion —
-/// no runtime proxy, fully inspectable. Requires a `throws` method (rollback
-/// semantics are meaningless without an error path); works on both sync and
-/// `async` methods.
-///
-/// Implemented as an SE-0415 function body macro — requires Swift 6.1+.
-@attached(body)
-public macro Transactional() =
-    #externalMacro(module: "FlightCoreMacrosImpl", type: "TransactionalMacro")
+// `@Transactional` was removed in the composition migration. Transactions are
+// Hangar's: `repo.transaction { tx in ... }`, which additionally supports
+// isolation levels, savepoint nesting as designed behavior, and
+// serialization-failure retry — none of which the macro could express. The
+// macro's ambient coordinator was also the last framework-mandated task-local.
+// See COMPOSITION-MIGRATION.md §2.4.

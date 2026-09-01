@@ -130,22 +130,28 @@ naming the modules involved.
 
 ## Transactions
 
-`@Transactional` wraps a method in a coordinator-managed transaction:
+Transactions belong to your data layer, not to Core. With Hangar:
 
 ```swift
-@Transactional
-func transfer(from: Account, to: Account, amount: Decimal) async throws {
-    try await debit(from, amount)
-    try await credit(to, amount)   // a throw here rolls back the debit
+try await repo.transaction { tx in
+    try await tx.debit(from, amount)
+    try await tx.credit(to, amount)   // a throw here rolls back the debit
 }
 ```
 
-The coordinator is supplied by your data layer. For an async coordinator,
-rollback runs in a detached task so that a body which threw
-`CancellationError` — a client disconnecting mid-request, a shutdown — still
-gets its transaction closed rather than leaving it open on a cancelled task.
-A synchronous coordinator's rollback runs inline, on the same (possibly
-cancelled) task; there is nothing to detach.
+Returning commits; throwing rolls back. Nested `transaction { }` calls become
+savepoints. The closure receives a `Repo` bound to the transaction's
+connection — use it, not the outer repo, or the work runs outside the
+transaction. Isolation level and retry-on-serialization-failure are arguments:
+`transaction(isolation: .serializable, retryingOnSerializationFailure: 3)`.
+
+Core previously offered a `@Transactional` macro that wrapped a method body
+against an ambient coordinator. It was removed: the boundary it created was
+invisible at the call site, its nesting semantics had to *guess* whether a
+transaction was already open (a guess that could silently turn a rollback into
+a durable commit), and it could express neither isolation levels nor retry.
+An explicit closure makes the boundary and its extent visible in the code that
+opens it.
 
 ## Testing
 

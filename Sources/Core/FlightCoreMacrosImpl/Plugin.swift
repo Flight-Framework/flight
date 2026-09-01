@@ -11,7 +11,6 @@ struct FlightCoreMacrosPlugin: CompilerPlugin {
         RepositoryMacro.self,
         InjectMacro.self,
         ConfigValueMacro.self,
-        TransactionalMacro.self,
         SettingsMacro.self,
         SecretMacro.self,
     ]

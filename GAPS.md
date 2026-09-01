@@ -373,8 +373,8 @@ left has no consumer-facing API to document.
 ### flight-data / drivers
 - No cross-database abstraction, no auto-migration at boot, no query caching.
   *All deliberate.*
-- `FlightDataValkey` has no PubSub and no `@Transactional`. *Deliberate — Valkey
-  is not transactional in that sense.*
+- `FlightDataValkey` has no PubSub and no transaction support. *Deliberate —
+  Valkey is not transactional in that sense.*
 
 ### flight-channels-js
 - Published to a repo, **not to npm**. Blocked on the org being public.

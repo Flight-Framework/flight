@@ -12,9 +12,6 @@
 //  F-6  Two @Inject properties of one type without distinct explicit
 //       qualifiers are a compile error (fixture 6a) — Flight refuses to
 //       guess positionally. With qualifiers, resolution is explicit (6b).
-//  T-1  @Transactional requires `throws`; the body is wrapped in an
-//       immediately-invoked, explicitly-typed closure so `return` and
-//       implicit `self` keep their meaning.
 //
 // NOTE ON FIRST RUN: expected strings were written without a toolchain to
 // verify against (see README). assertMacroExpansion output formatting
@@ -42,7 +39,6 @@ private let testMacros: [String: MacroSpec] = [
         type: RepositoryMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
     "Inject": MacroSpec(type: InjectMacro.self),
     "ConfigValue": MacroSpec(type: ConfigValueMacro.self),
-    "Transactional": MacroSpec(type: TransactionalMacro.self),
     "Settings": MacroSpec(
         type: SettingsMacro.self,
         conformances: ["FlightCore._FlightRegistrable", "CustomStringConvertible"]),
@@ -209,82 +205,6 @@ struct MacroFixtureTests {
             macroSpecs: testMacros
         )
     }
-
-    // MARK: Fixture 3 — @Transactional on a synchronous throwing method
-
-    @Test("transactional sync")
-    func transactionalSync() {
-        assertMacroExpansion(
-            """
-            final class Ledger {
-                @Transactional
-                func post(_ amount: Int) throws -> Int {
-                    try store.append(amount)
-                    return amount
-                }
-            }
-            """,
-            expandedSource: """
-                final class Ledger {
-                    func post(_ amount: Int) throws -> Int {
-                        let _flightTx = try FlightCore.FlightTransactions.coordinator.begin()
-                        do {
-                            let _flightResult: Int = try { () throws -> Int in
-                                try store.append(amount)
-                                return amount
-                            }()
-                            try FlightCore.FlightTransactions.coordinator.commit(_flightTx)
-                            return _flightResult
-                        } catch {
-                            FlightCore.FlightTransactions.coordinator.rollback(_flightTx)
-                            throw error
-                        }
-                    }
-                }
-                """,
-            macroSpecs: testMacros
-        )
-    }
-
-    // MARK: Fixture 4 — @Transactional on an async throwing method (Void)
-    //
-    // Async methods route through the preferring-async helpers (delta 14):
-    // the async-native coordinator when one is bound, the sync coordinator
-    // otherwise — selected at runtime, awaited rather than blocked on.
-
-    @Test("transactional async void")
-    func transactionalAsyncVoid() {
-        assertMacroExpansion(
-            """
-            final class Mover {
-                @Transactional
-                func transfer(_ amount: Int) async throws {
-                    try await debit(amount)
-                    try await credit(amount)
-                }
-            }
-            """,
-            expandedSource: """
-                final class Mover {
-                    func transfer(_ amount: Int) async throws {
-                        let _flightTx = try await FlightCore.FlightTransactions.beginPreferringAsync()
-                        do {
-                            try await { () async throws -> Void in
-                                try await debit(amount)
-                                try await credit(amount)
-                            }()
-                            try await FlightCore.FlightTransactions.commitPreferringAsync(_flightTx)
-                        } catch {
-                            await FlightCore.FlightTransactions.rollbackPreferringAsync(_flightTx)
-                            throw error
-                        }
-                    }
-                }
-                """,
-            macroSpecs: testMacros
-        )
-    }
-
     // MARK: Fixture 5 — a scoped component
 
     @Test("scoped component")
@@ -541,36 +461,6 @@ struct MacroFixtureTests {
                         "Stored property 'id' of a @Component type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
                     line: 3,
                     column: 5
-                )
-            ],
-            macroSpecs: testMacros
-        )
-    }
-
-    @Test("transactional requires throws")
-    func transactionalRequiresThrows() {
-        assertMacroExpansion(
-            """
-            final class Quiet {
-                @Transactional
-                func run() {
-                    work()
-                }
-            }
-            """,
-            expandedSource: """
-                final class Quiet {
-                    func run() {
-                        work()
-                    }
-                }
-                """,
-            diagnostics: [
-                DiagnosticSpec(
-                    message:
-                        "@Transactional requires a throwing method — mark it 'throws' (rollback needs an error path).",
-                    line: 3,
-                    column: 10
                 )
             ],
             macroSpecs: testMacros
