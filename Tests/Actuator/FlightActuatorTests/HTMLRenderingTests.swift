@@ -18,7 +18,7 @@ struct HTMLRenderingTests {
         #expect(response.bodyText.contains("<h1>Flight Actuator</h1>"))
     }
 
-    @Test("page lists environment, beans, and layer sections")
+    @Test("page lists environment, components, and layer sections")
     func pageContents() async throws {
         let container = try TestContainer.build {
             ActuatorModule(environment: .staging, exposure: .full)
@@ -35,7 +35,7 @@ struct HTMLRenderingTests {
         #expect(body.contains("<h3>Services (1)</h3>"))
         #expect(body.contains("<h3>Repositories (1)</h3>"))
         #expect(body.contains("<h3>Components"))
-        // @Middleware and @Settings beans get their own sections — added to
+        // @Middleware and @Settings components get their own sections — added to
         // Stereotype without the dashboard's own section-order list being
         // updated to match once already (see actuatorSectionOrder's own
         // comment); this is what would have caught it.
@@ -90,8 +90,8 @@ struct HTMLRenderingTests {
     @Test("every Stereotype case has a dashboard section — none render as absent")
     func everyStereotypeHasASection() {
         // A stereotype missing from actuatorSectionOrder is not folded into
-        // .component, the way a bean of an unrecognized *type* might be —
-        // its beans simply never appear on the page at all, silently. That
+        // .component, the way a component of an unrecognized *type* might be —
+        // its components simply never appear on the page at all, silently. That
         // happened for real: .middleware and .settings were both added to
         // Stereotype without this list being updated to match, and nothing
         // failed until Flightdeck's own dashboard was read by eye. Reading

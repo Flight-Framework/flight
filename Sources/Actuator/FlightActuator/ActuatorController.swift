@@ -72,7 +72,7 @@ struct ActuatorController {
 
     private func respond(to probe: Probe) throws -> Response {
         // `moduleStatuses()` rather than a full `ActuatorSnapshot`: the
-        // snapshot also copies the entire bean registration table, and this
+        // snapshot also copies the entire component registration table, and this
         // path used every bit of it to compute three integers — on the one
         // route an orchestrator polls every few seconds.
         let modules = container.moduleStatuses()

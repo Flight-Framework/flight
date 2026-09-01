@@ -245,7 +245,7 @@ sequential loop (not an onion), so a task-local bound inside the
 authentication middleware would unwind before the handler runs. The
 implemented mechanism keeps the intended semantics with the real APIs:
 
-- The principal rides the request's `Scope` as a `.scoped` bean
+- The principal rides the request's `Scope` as a `.scoped` component
   (`PrincipalHolder`), read through `context.principal`.
 - `Principal.current` still exists as a task-local; handlers opt in with
   `context.withPrincipal { ... }`, which binds it around service calls. The

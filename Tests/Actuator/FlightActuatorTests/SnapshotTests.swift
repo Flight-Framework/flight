@@ -9,32 +9,32 @@ import Testing
 @Suite("ActuatorSnapshot assembly")
 struct SnapshotTests {
 
-    @Test("snapshot carries every registered bean with its metadata")
-    func snapshotCarriesBeans() throws {
+    @Test("snapshot carries every registered component with its metadata")
+    func snapshotCarriesComponents() throws {
         let container = try TestContainer.build { SampleAppModule() }
         let snapshot = ActuatorSnapshot(container: container, environment: .test)
 
         #expect(snapshot.environment == .test)
 
-        let service = try #require(snapshot.beans.first {
+        let service = try #require(snapshot.components.first {
             $0.typeName == "FlightActuatorTests.SampleService"
         })
         #expect(service.scope == .singleton)
         #expect(service.stereotype == .service)
 
-        let repository = try #require(snapshot.beans.first {
+        let repository = try #require(snapshot.components.first {
             $0.typeName == "FlightActuatorTests.SampleRepository"
         })
         #expect(repository.stereotype == .repository)
 
-        let transient = try #require(snapshot.beans.first {
+        let transient = try #require(snapshot.components.first {
             $0.typeName == "FlightActuatorTests.SampleTransient"
         })
         #expect(transient.scope == .transient)
 
         // Qualified duplicate-type registrations stay distinguishable —
         // the reason ComponentDescriptor carries the qualifier at all.
-        let qualified = snapshot.beans.filter {
+        let qualified = snapshot.components.filter {
             $0.typeName == "FlightActuatorTests.SampleQualified"
         }
         #expect(qualified.map(\.qualifier) == ["primary", "secondary"])
@@ -56,7 +56,7 @@ struct SnapshotTests {
         let snapshot = ActuatorSnapshot(
             environment: .test,
             modules: app.container.moduleStatuses(),
-            beans: app.container.allRegistrations()
+            components: app.container.allRegistrations()
         )
         let status = try #require(snapshot.modules.first {
             $0.moduleName == "FailingServiceModule"

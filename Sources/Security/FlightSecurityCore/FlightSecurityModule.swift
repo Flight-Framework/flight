@@ -8,7 +8,7 @@ import ServiceLifecycle
 /// Registers:
 /// - the ``TokenValidator`` singleton — the generic ``OIDCTokenValidator``
 ///   configured from `security.oidc.*`, unless the application registered
-///   its own `(any TokenValidator)` bean first (the seam: configure a
+///   its own `(any TokenValidator)` component first (the seam: configure a
 ///   custom-validator module *before* this one in the bootstrap module
 ///   list);
 /// - the request-scoped ``PrincipalHolder`` carrying the principal;
@@ -39,7 +39,7 @@ public final class FlightSecurityModule: FlightModule {
 
         // The seam: an already-registered validator wins; the generic
         // OIDC implementation is the default, not a mandate.
-        // String(reflecting:) matches how the container names bean types.
+        // String(reflecting:) matches how the container names component types.
         let validatorTypeName = String(reflecting: (any TokenValidator).self)
         let hasCustomValidator = container.allRegistrations().contains {
             $0.typeName == validatorTypeName && $0.qualifier == nil

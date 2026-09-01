@@ -4,7 +4,7 @@ import HTTPTypes
 
 /// Extracts the bearer token, validates it, and — on success — publishes
 /// the ``Principal`` on the request's scope (via the scoped
-/// ``PrincipalHolder`` bean). Registered by ``FlightSecurityModule``.
+/// ``PrincipalHolder`` component). Registered by ``FlightSecurityModule``.
 ///
 /// Authentication is deliberately not enforcement: requests with no token,
 /// and requests whose token fails validation, both continue as
@@ -47,7 +47,7 @@ public struct Authentication: Sendable {
             // this type is running without `FlightSecurityModule`, which is
             // what registers it.
             context.logger.error(
-                "authentication middleware is registered but the PrincipalHolder scoped bean is not; register FlightSecurityModule"
+                "authentication middleware is registered but the PrincipalHolder scoped component is not; register FlightSecurityModule"
             )
             return .problem(status: .internalServerError, message: "Internal Server Error")
         }

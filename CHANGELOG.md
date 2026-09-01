@@ -4,10 +4,23 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.0] - 2026-09-01
 
 ### Breaking
 
+- **Flight Actuator's JSON and HTML wire format drops "bean" for
+  "component."** The JSON key `"beans"` is now `"components"`; the internal
+  `BeanRepresentation` type is `ComponentRepresentation`; the HTML dashboard's
+  "Beans" section is "Components." Anything polling `/actuator/*`'s JSON
+  output needs to read the new key. `ComponentDescriptor` (Core's own
+  introspection type, unchanged) already used "component" — this brings the
+  wire format in line with it, and finishes a rename SPIKE-FINDINGS.md
+  records as already having been attempted once (2026-07-17, delta 13) but
+  which didn't fully take. "Bean" is JavaBeans/Spring vocabulary Flight
+  doesn't otherwise use; one exception was left deliberately —
+  `FlightActuator.docc/FlightActuator.md`'s "there is no `/actuator/beans`"
+  names Spring Boot Actuator's own real endpoint as a contrast, not Flight's
+  vocabulary.
 - **`@Autowired` is renamed `@Inject`.** Every property injection site across
   every product (`FlightCore`, `FlightWeb`, `FlightScheduler`,
   `FlightSecurityCore`, and any application code) must update. No deprecated

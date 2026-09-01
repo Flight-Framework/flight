@@ -14,7 +14,7 @@ struct SnapshotWire: Decodable {
         let health: String
         let error: String?
     }
-    struct Bean: Decodable {
+    struct Component: Decodable {
         let type: String
         let scope: String
         let stereotype: String
@@ -23,7 +23,7 @@ struct SnapshotWire: Decodable {
     }
     let environment: String
     let modules: [Module]
-    let beans: [Bean]
+    let components: [Component]
 }
 
 @Suite("JSON rendering")
@@ -46,7 +46,7 @@ struct JSONRenderingTests {
         #expect(response.headers[.contentType] == "application/json; charset=utf-8")
     }
 
-    @Test("the wire shape carries environment, modules, and beans")
+    @Test("the wire shape carries environment, modules, and components")
     func wireShape() async throws {
         let client = try TestClient(container: jsonContainer(environment: .staging))
         let response = await client.get("/actuator")
@@ -54,25 +54,25 @@ struct JSONRenderingTests {
 
         #expect(wire.environment == "staging")
 
-        let service = try #require(wire.beans.first {
+        let service = try #require(wire.components.first {
             $0.type == "FlightActuatorTests.SampleService"
         })
         #expect(service.scope == "singleton")
         #expect(service.stereotype == "service")
         #expect(service.qualifier == nil)
 
-        let transient = try #require(wire.beans.first {
+        let transient = try #require(wire.components.first {
             $0.type == "FlightActuatorTests.SampleTransient"
         })
         #expect(transient.scope == "transient")
 
-        let qualified = wire.beans.filter { $0.type == "FlightActuatorTests.SampleQualified" }
+        let qualified = wire.components.filter { $0.type == "FlightActuatorTests.SampleQualified" }
         #expect(qualified.compactMap(\.qualifier).sorted() == ["primary", "secondary"])
 
         // Actuator's own machinery is visible through the same introspection
         // as everything else — no side channel, no special casing.
-        #expect(wire.beans.contains { $0.type == "FlightActuator.ActuatorController" })
-        #expect(wire.beans.contains { $0.type == "FlightWeb.RouteRegistration" })
+        #expect(wire.components.contains { $0.type == "FlightActuator.ActuatorController" })
+        #expect(wire.components.contains { $0.type == "FlightWeb.RouteRegistration" })
     }
 
     @Test("a failed module encodes health 'failed' with its error")

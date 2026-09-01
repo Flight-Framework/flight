@@ -1,7 +1,7 @@
 import FlightCore
 
 // SSR rendering: deliberately basic, plain server-rendered HTML — a
-// heading, a table of modules with health status, tables of beans grouped by
+// heading, a table of modules with health status, tables of components grouped by
 // layer. No CSS framework, no client-side JS, no dependency on the future
 // reactive templating engine (Flight Web scopes that as a separate,
 // later package — this is not it). String-templated generation is sufficient
@@ -34,7 +34,7 @@ func renderActuatorHTML(_ snapshot: ActuatorSnapshot) -> String {
     """
 
     html += renderModulesSection(snapshot.modules)
-    html += renderBeansSection(snapshot.beans)
+    html += renderComponentsSection(snapshot.components)
     html += """
     </body>
     </html>
@@ -67,15 +67,15 @@ private func renderModulesSection(_ modules: [ModuleStatus]) -> String {
     return section
 }
 
-private func renderBeansSection(_ beans: [ComponentDescriptor]) -> String {
-    var section = "<h2>Beans (\(beans.count))</h2>\n"
-    guard !beans.isEmpty else {
-        return section + "<p>No beans registered.</p>\n"
+private func renderComponentsSection(_ components: [ComponentDescriptor]) -> String {
+    var section = "<h2>Components (\(components.count))</h2>\n"
+    guard !components.isEmpty else {
+        return section + "<p>No components registered.</p>\n"
     }
     // Grouped by layer (Flight Core: the stereotype tag exists to
     // feed exactly this grouping), registration order preserved within each.
     for stereotype in Stereotype.actuatorSectionOrder {
-        let group = beans.filter { $0.stereotype == stereotype }
+        let group = components.filter { $0.stereotype == stereotype }
         guard !group.isEmpty else { continue }
         section += """
         <h3>\(stereotype.actuatorSectionTitle) (\(group.count))</h3>
@@ -84,12 +84,12 @@ private func renderBeansSection(_ beans: [ComponentDescriptor]) -> String {
         <tbody>
 
         """
-        for bean in group {
+        for component in group {
             section += """
-            <tr><td><code>\(htmlEscaped(bean.typeName))</code></td>\
-            <td>\(bean.scope.actuatorLabel)</td>\
-            <td>\(bean.qualifier.map { "<code>\(htmlEscaped($0))</code>" } ?? "&mdash;")</td>\
-            <td>\(htmlEscaped(bean.sourceModule))</td></tr>
+            <tr><td><code>\(htmlEscaped(component.typeName))</code></td>\
+            <td>\(component.scope.actuatorLabel)</td>\
+            <td>\(component.qualifier.map { "<code>\(htmlEscaped($0))</code>" } ?? "&mdash;")</td>\
+            <td>\(htmlEscaped(component.sourceModule))</td></tr>
 
             """
         }

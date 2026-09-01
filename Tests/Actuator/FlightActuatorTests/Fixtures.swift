@@ -6,7 +6,7 @@ import ServiceLifecycle
 // Shared test fixtures. All go through public Flight contracts only —
 // Actuator is a consumer of the stack, and so are its tests.
 
-/// A module registering one bean of each stereotype/scope combination the
+/// A module registering one component of each stereotype/scope combination the
 /// dashboard needs to distinguish, plus a qualified duplicate-type pair.
 struct SampleAppModule: FlightModule {
     func configure(_ container: Container) throws {
@@ -41,7 +41,7 @@ struct SampleQualified: Sendable {}
 struct SampleMiddleware: Sendable {}
 struct SampleSettings: Sendable {}
 
-/// A module registering a bean whose qualifier is an XSS probe — the SSR
+/// A module registering a component whose qualifier is an XSS probe — the SSR
 /// escaping tests feed the renderer through this.
 struct HostileQualifierModule: FlightModule {
     static let hostileQualifier = #"<script>alert("pwned")</script>"#

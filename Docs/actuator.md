@@ -1,7 +1,7 @@
 # Flight Actuator
 
 A lightweight, no-frills introspection surface for a running Flight app —
-what beans are registered, which modules are healthy, basic runtime facts —
+what components are registered, which modules are healthy, basic runtime facts —
 served over HTTP. This README covers usage and records the choices the
 implementation had to make.
 
@@ -78,7 +78,7 @@ The JSON rendering is a public contract for hand-rolled front-ends. Shape
     {"module": "AppModule", "health": "running"},
     {"module": "JobsModule", "health": "failed", "error": "…"}
   ],
-  "beans": [
+  "components": [
     {"type": "App.UserService", "scope": "singleton",
      "stereotype": "service", "qualifier": "primary",
      "sourceModule": "AppModule"}
@@ -115,13 +115,13 @@ Recorded here the same way sibling packages record theirs:
    of them put `@Component`/`@Controller` on their own infrastructure.
    `ActuatorModule.configure` registers the controller and its routes by hand (`registerRoute`, the
    escape hatch `@GetRoute` sits beside).
-2. **The container is no longer a registered bean at all.** A consequence
+2. **The container is no longer a registered component at all.** A consequence
    of (1): `ActuatorController` now holds `container` as a plain stored
    property, captured directly from `configure(_:)`'s own parameter — no
    `@Inject`, so nothing needs `Container` to be resolvable, and the
    guarded self-registration (and its duplicate-registration-avoidance
    dance) is gone.
-3. **The gate's environment is a qualified bean.** The dashboard reports
+3. **The gate's environment is a qualified component.** The dashboard reports
    the same environment the registration gate ran against, injected as
    `FlightEnvironment` with qualifier `"flight.actuator"`, rather than
    re-reading `FLIGHT_ENV` per request. The two can otherwise disagree
@@ -243,7 +243,7 @@ Wherever `full` is on, treat those strings as disclosed.
 
 ## Non-goals
 
-No live-updating dashboard, no historical/metrics data, and no per-bean
+No live-updating dashboard, no historical/metrics data, and no per-component
 instance inspection. No metrics endpoint of any kind: metrics want a
 dedicated library with its own cardinality and retention story, and half of
 one here would be worse than none. The README used to advertise them anyway;

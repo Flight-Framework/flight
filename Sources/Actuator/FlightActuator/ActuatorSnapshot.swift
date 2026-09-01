@@ -8,16 +8,16 @@ import FlightCore
 public struct ActuatorSnapshot: Sendable {
     public let environment: FlightEnvironment
     public let modules: [ModuleStatus]
-    public let beans: [ComponentDescriptor]
+    public let components: [ComponentDescriptor]
 
     public init(
         environment: FlightEnvironment,
         modules: [ModuleStatus],
-        beans: [ComponentDescriptor]
+        components: [ComponentDescriptor]
     ) {
         self.environment = environment
         self.modules = modules
-        self.beans = beans
+        self.components = components
     }
 
     /// The per-request assembly the controller performs, as a public
@@ -26,7 +26,7 @@ public struct ActuatorSnapshot: Sendable {
         self.init(
             environment: environment,
             modules: container.moduleStatuses(),
-            beans: container.allRegistrations()
+            components: container.allRegistrations()
         )
     }
 }
@@ -43,21 +43,21 @@ public struct ActuatorSnapshot: Sendable {
 /// {
 ///   "environment": "dev",
 ///   "modules": [{"module": "WebModule", "health": "running", "error": null}],
-///   "beans": [{"type": "App.UserService", "scope": "singleton",
+///   "components": [{"type": "App.UserService", "scope": "singleton",
 ///              "stereotype": "service", "qualifier": null,
 ///              "sourceModule": "AppModule"}]
 /// }
 /// ```
 extension ActuatorSnapshot: Encodable {
     private enum CodingKeys: String, CodingKey {
-        case environment, modules, beans
+        case environment, modules, components
     }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(environment.rawValue, forKey: .environment)
         try container.encode(modules.map(ModuleStatusRepresentation.init), forKey: .modules)
-        try container.encode(beans.map(BeanRepresentation.init), forKey: .beans)
+        try container.encode(components.map(ComponentRepresentation.init), forKey: .components)
     }
 }
 
@@ -75,9 +75,9 @@ struct ModuleStatusRepresentation: Encodable {
     }
 }
 
-/// One bean row on the wire — `ComponentDescriptor`, field for field, with
+/// One component row on the wire — `ComponentDescriptor`, field for field, with
 /// enums rendered as their stable labels.
-struct BeanRepresentation: Encodable {
+struct ComponentRepresentation: Encodable {
     let type: String
     let scope: String
     let stereotype: String

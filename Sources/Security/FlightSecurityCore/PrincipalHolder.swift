@@ -22,13 +22,13 @@ public enum AuthenticationState: Sendable {
 
 /// Per-request carrier for the authentication state.
 ///
-/// Registered by ``FlightSecurityModule`` as a `.scoped` bean, so each
+/// Registered by ``FlightSecurityModule`` as a `.scoped` component, so each
 /// request's `Scope` holds exactly one. The authentication middleware writes
 /// it; handlers read it through `context.principal` /
 /// `context.authenticationState`.
 ///
 /// This is a reference type doing its own internal mutation because the
-/// request `Scope`'s bean cache is get-or-create: the *instance* is fixed at
+/// request `Scope`'s component cache is get-or-create: the *instance* is fixed at
 /// first resolve, the *state* is set once the token is validated. It exists
 /// because Flight Web's middleware chain is flat — a task-local bound inside
 /// the authentication middleware would unwind before the handler runs, so

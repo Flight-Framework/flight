@@ -4,7 +4,7 @@ extension RequestContext {
     /// The authenticated principal for this request, or `nil` when the
     /// request is unauthenticated.
     ///
-    /// Backed by the request-scoped ``PrincipalHolder`` bean; returns `nil`
+    /// Backed by the request-scoped ``PrincipalHolder`` component; returns `nil`
     /// when ``FlightSecurityModule`` (or an equivalent registration) is not
     /// installed.
     public var principal: Principal? {
