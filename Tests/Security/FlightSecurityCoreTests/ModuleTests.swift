@@ -15,16 +15,14 @@ struct ModuleTests {
         ])
     }
 
-    @Test("the module registers the OIDC validator, holder, and middleware")
-    func registersEverything() throws {
+    @Test("the security module registers the holder and middleware, but no validator")
+    func securityModuleRegistersAuthenticationOnly() throws {
         let module = FlightSecurityModule()
-        let container = try TestContainer.build(configuration: minimalConfig) {
+        let container = try TestContainer.build {
             module
+            CustomValidatorModule(validator: StubValidator(principalsByToken: [:]))
             MiddlewareScannerStandIn()
         }
-
-        let validator = try container.resolve((any TokenValidator).self)
-        #expect(validator is OIDCTokenValidator)
 
         // The scoped holder resolves per scope — same instance within one,
         // fresh across scopes.
@@ -36,44 +34,75 @@ struct ModuleTests {
         #expect(holderA1 !== holderB)
 
         let middleware = try container.collectMiddleware()
-        let auth = middleware.first { $0.name.contains("Authentication") }
-        #expect(auth != nil)
+        #expect(middleware.contains { $0.name.contains("Authentication") })
 
-        #expect(module.service != nil, "OIDC path owns the JWKS maintenance service")
+        #expect(module.service == nil, "JWKS maintenance belongs to FlightOIDCModule")
     }
 
-    @Test("missing required configuration fails at startup, not first request")
-    func missingConfiguration() {
-        #expect(throws: (any Error).self) {
-            try TestContainer.build { FlightSecurityModule() }
-        }
-        #expect(throws: (any Error).self) {
-            try TestContainer.build(
-                configuration: Configuration(values: ["security.oidc.issuer": testIssuer])
-            ) { FlightSecurityModule() }
-        }
-    }
-
-    @Test("a custom TokenValidator registered first wins — the seam")
-    func customValidatorWins() throws {
-        let stub = StubValidator(principalsByToken: ["t": testPrincipal()])
-        let securityModule = FlightSecurityModule()
-        // No security.oidc.* configuration at all: the module must not
-        // demand OIDC config when the app brought its own validator.
-        let container = try TestContainer.build {
-            CustomValidatorModule(validator: stub)
-            securityModule
+    @Test("FlightOIDCModule supplies the validator and owns JWKS maintenance")
+    func oidcModuleSuppliesValidator() throws {
+        let oidc = FlightOIDCModule()
+        let container = try TestContainer.build(configuration: minimalConfig) {
+            oidc
             MiddlewareScannerStandIn()
         }
 
         let validator = try container.resolve((any TokenValidator).self)
-        #expect(validator is StubValidator)
-        #expect(securityModule.service == nil, "no JWKS to maintain for a custom validator")
+        #expect(validator is OIDCTokenValidator)
+        #expect(oidc.service != nil, "OIDC owns the JWKS maintenance service")
+
+        // Listing FlightOIDCModule pulls FlightSecurityModule in transitively,
+        // so the holder and middleware arrive without naming them.
+        _ = try container.resolve(PrincipalHolder.self, in: Scope())
+        #expect(
+            try container.collectMiddleware()
+                .contains { $0.name.contains("Authentication") }
+        )
+    }
+
+    @Test("missing OIDC configuration fails at startup, not first request")
+    func missingConfiguration() {
+        #expect(throws: (any Error).self) {
+            try TestContainer.build { FlightOIDCModule() }
+        }
+        #expect(throws: (any Error).self) {
+            try TestContainer.build(
+                configuration: Configuration(values: ["security.oidc.issuer": testIssuer])
+            ) { FlightOIDCModule() }
+        }
+    }
+
+    @Test("any validator works: supply one and omit FlightOIDCModule — no ordering")
+    func customValidatorNeedsNoOrdering() throws {
+        let stub = StubValidator(principalsByToken: ["t": testPrincipal()])
+
+        // Listed *after* the security module, which under the old
+        // scan-and-probe seam would have lost to the OIDC default. Choosing
+        // modules has no such ordering dependence. Note also that no
+        // security.oidc.* configuration is present: nothing demands it when
+        // FlightOIDCModule isn't listed.
+        let container = try TestContainer.build {
+            FlightSecurityModule()
+            CustomValidatorModule(validator: stub)
+            MiddlewareScannerStandIn()
+        }
+
+        #expect(try container.resolve((any TokenValidator).self) is StubValidator)
         #expect(
             try container.collectMiddleware()
                 .contains { $0.name.contains("Authentication") },
             "middleware still registered"
         )
+    }
+
+    @Test("security module without any validator fails loudly at freeze")
+    func noValidatorFailsAtStartup() {
+        #expect(throws: (any Error).self) {
+            try TestContainer.build {
+                FlightSecurityModule()
+                MiddlewareScannerStandIn()
+            }
+        }
     }
 
     @Test("configuration keys map onto OIDCSecurityConfiguration with documented defaults")
@@ -129,7 +158,10 @@ struct ModuleTests {
         let validator = OIDCTokenValidator(configuration: configuration, jwksSource: source)
 
         let container = Container()
-        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
+        // The service resolves the concrete type now: it belongs to
+        // FlightOIDCModule, which registered it, so there is nothing to
+        // discover and no cast that can fail.
+        container.register(OIDCTokenValidator.self, scope: .singleton) { _ in validator }
         try container.freeze()
 
         let service = JWKSMaintenanceService(container: container)

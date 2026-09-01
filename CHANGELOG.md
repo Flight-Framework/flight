@@ -11,6 +11,29 @@ First increment of the container → composition migration. See
 
 ### Breaking
 
+- **OIDC moves out of `FlightSecurityModule` into a new `FlightOIDCModule`.**
+  `FlightSecurityModule` now wires authentication only — the request-scoped
+  `PrincipalHolder` and the `Authentication` middleware — and registers no
+  `TokenValidator`. How tokens are validated is chosen by listing a module:
+  `FlightOIDCModule` for OIDC/JWT (it depends on `FlightSecurityModule`, so
+  listing it alone suffices), or your own module registering
+  `(any TokenValidator)` for session cookies, API keys, mTLS, or anything
+  else. With neither, `Authentication` fails to resolve a validator at
+  container freeze — at startup, naming the type.
+
+  Migration: apps relying on the OIDC default replace `FlightSecurityModule`
+  with `FlightOIDCModule` in their `modules:` array. Apps that supplied their
+  own validator can now list their module in any order and no longer need
+  `security.oidc.*` configuration present.
+
+  This removes three implicit behaviors: a `container.allRegistrations()`
+  scan matched by type name; a dependence on *module ordering* (a custom
+  validator registered after `FlightSecurityModule` silently lost); and an
+  internal `registeredOIDCValidator` flag that also decided whether the JWKS
+  maintenance service ran. JWKS maintenance now belongs to `FlightOIDCModule`,
+  so it travels with the validator it maintains and no longer has to park
+  forever when a custom validator is in play.
+
 - **`@Transactional` is removed**, along with `FlightTransactionCoordinator`,
   `FlightAsyncTransactionCoordinator`, `FlightTransactions` and its
   task-locals, and the `begin/commit/rollbackPreferringAsync` family.
