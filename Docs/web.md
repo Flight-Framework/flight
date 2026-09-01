@@ -103,16 +103,52 @@ container.pipeline("admin") { RequireAdmin.self }
 ```
 
 ```swift
-@Controller("/admin", pipelines: [MiddlewareRegistration.defaultLane, "admin"])
+@Controller("/admin", pipelines: [.default, "admin"])
 struct AdminController { … }
 ```
 
 Naming a lane alone means *only* that lane runs, which is how a static-asset
 route avoids paying for transaction binding and authentication it can never
-use. Concatenate with `defaultLane` to get the usual behaviour plus extras.
+use. Concatenate with `.default` to get the usual behaviour plus extras.
 An empty block still declares its lane. Referencing a lane nobody declared
 fails when dispatch is built — at bootstrap, naming the route and the lane,
 never as a 500.
+
+Lanes are `PipelineLane` values, and a string literal is one — `"admin"`
+above is a lane. Three names are canonical: `.default`, `.authentication`
+(establishes identity, rejects nobody) and `.authenticated` (rejects
+anonymous). `.public` means explicitly no lanes and needs no declaration of
+its own.
+
+### Lanes per route
+
+A route can name its own lanes, which **replace** the controller's rather
+than adding to them:
+
+```swift
+@Controller("/dashboard", pipelines: [.authenticated])
+struct DashboardController {
+    @GetRoute("/", pipelines: [.public])   // deliberate, and says so
+    func index(_ context: RequestContext) -> Response { … }
+
+    @GetRoute("/admin")                     // inherits [.authenticated]
+    func admin(_ context: RequestContext) -> Response { … }
+}
+```
+
+Replacement is what expresses both directions — a public controller with one
+authenticated route, and an authenticated controller with one public route.
+Appending could only ever add, so it cannot say "this one is public".
+
+Because replacement can silently drop authentication, a route that narrows
+away its controller's security lane without naming `.public` draws a build
+*warning*. It is not an error: narrowing is a call the author is entitled to
+make. But `.public` is how you say you meant it, which puts the intent in the
+declaration instead of a comment beside it — and makes every deliberately
+public route under an authenticated controller greppable.
+
+Authorization stays in the handler: `requireRole` / `requireScope` depend on a
+value rather than a lane, so no lane declaration can describe them.
 
 Middleware types are composed once, when the dispatch closure is assembled,
 so a request pays one call per layer and never the construction of the chain.

@@ -810,4 +810,190 @@ struct ControllerMacroFixtureTests {
             macroSpecs: testMacros
         )
     }
+
+    // MARK: Pipelines at controller and route (§2.7)
+
+    @Test("a route inherits its controller's pipelines when it says nothing")
+    func routeInheritsControllerPipelines() {
+        assertMacroExpansion(
+            """
+            @Controller("/dashboard", pipelines: [.authenticated])
+            struct DashboardController {
+                @GetRoute("/admin")
+                func admin(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+            }
+            """,
+            expandedSource: """
+            struct DashboardController {
+                func admin(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+
+                internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container) throws {
+                    container.register(Self.self, scope: .singleton) { c in
+                        try Self(_flight: c)
+                    }
+                    container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard/admin @" + String(reflecting: Self.self) + ".admin", scope: .singleton) { c in
+                        let controller = try c.resolve(Self.self)
+                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard/admin", kind: .http, source: String(reflecting: Self.self) + ".admin", pipelines: [.authenticated]) { context in
+                            let result = controller.admin(context)
+                            return try FlightWeb.encodeResponse(result, for: context)
+                        }
+                    }
+                }
+            }
+
+            extension DashboardController: FlightCore._FlightRegistrable {
+            }
+            """,
+            macroSpecs: testMacros
+        )
+    }
+
+    /// Replace, not append: the route's list is the whole stack. Saying
+    /// `.public` is also the acknowledgment that silences the narrowing
+    /// warning.
+    @Test("a route's own pipelines replace the controller's")
+    func routePipelinesReplaceControllers() {
+        assertMacroExpansion(
+            """
+            @Controller("/dashboard", pipelines: [.authenticated])
+            struct DashboardController {
+                @GetRoute("/", pipelines: [.public])
+                func index(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+            }
+            """,
+            expandedSource: """
+            struct DashboardController {
+                func index(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+
+                internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container) throws {
+                    container.register(Self.self, scope: .singleton) { c in
+                        try Self(_flight: c)
+                    }
+                    container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
+                        let controller = try c.resolve(Self.self)
+                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: [.public]) { context in
+                            let result = controller.index(context)
+                            return try FlightWeb.encodeResponse(result, for: context)
+                        }
+                    }
+                }
+            }
+
+            extension DashboardController: FlightCore._FlightRegistrable {
+            }
+            """,
+            macroSpecs: testMacros
+        )
+    }
+
+    /// The mistake worth catching: narrowing away the controller's
+    /// authentication without saying so. A warning, not an error — the
+    /// author is entitled to make this call, they just have to mean it.
+    @Test("dropping the controller's auth without saying .public warns")
+    func narrowingAwayAuthenticationWarns() {
+        assertMacroExpansion(
+            """
+            @Controller("/dashboard", pipelines: [.authenticated])
+            struct DashboardController {
+                @GetRoute("/", pipelines: ["metrics"])
+                func index(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+            }
+            """,
+            expandedSource: """
+            struct DashboardController {
+                func index(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+
+                internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container) throws {
+                    container.register(Self.self, scope: .singleton) { c in
+                        try Self(_flight: c)
+                    }
+                    container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
+                        let controller = try c.resolve(Self.self)
+                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: ["metrics"]) { context in
+                            let result = controller.index(context)
+                            return try FlightWeb.encodeResponse(result, for: context)
+                        }
+                    }
+                }
+            }
+
+            extension DashboardController: FlightCore._FlightRegistrable {
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: """
+                        'index' replaces its controller's pipelines and drops .authenticated, so this route runs without authentication. A route's 'pipelines:' replaces the controller's rather than adding to it. If that is intended, say 'pipelines: [.public]' — that is how a deliberately public route records the decision.
+                        """,
+                    line: 3, column: 5, severity: .warning
+                )
+            ],
+            macroSpecs: testMacros
+        )
+    }
+
+    /// Swapping one security lane for another is a change, not a drop — no
+    /// warning, because authentication still runs.
+    @Test("swapping one security lane for another does not warn")
+    func swappingSecurityLanesDoesNotWarn() {
+        assertMacroExpansion(
+            """
+            @Controller("/dashboard", pipelines: [.authenticated])
+            struct DashboardController {
+                @GetRoute("/", pipelines: [.authentication])
+                func index(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+            }
+            """,
+            expandedSource: """
+            struct DashboardController {
+                func index(_ context: RequestContext) -> Response {
+                    .noContent
+                }
+
+                internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container) throws {
+                    container.register(Self.self, scope: .singleton) { c in
+                        try Self(_flight: c)
+                    }
+                    container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
+                        let controller = try c.resolve(Self.self)
+                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: [.authentication]) { context in
+                            let result = controller.index(context)
+                            return try FlightWeb.encodeResponse(result, for: context)
+                        }
+                    }
+                }
+            }
+
+            extension DashboardController: FlightCore._FlightRegistrable {
+            }
+            """,
+            macroSpecs: testMacros
+        )
+    }
 }

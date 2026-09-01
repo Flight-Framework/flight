@@ -35,6 +35,12 @@ struct ScannedRoute {
     /// The `maxBodyBytes:` argument's source text, verbatim — nil means
     /// the transport default.
     let maxBodyBytesText: String?
+    /// The route's own `pipelines:` argument, verbatim. nil means the route
+    /// said nothing and inherits the controller's lanes; non-nil *replaces*
+    /// them.
+    let pipelinesText: String?
+    /// Where to point a diagnostic about this route's lanes.
+    let attribute: AttributeSyntax
     /// A `body: RequestBodyStream` parameter — the route is
     /// streaming-bodied and the transport must not buffer it.
     var isStreamingBody: Bool {
@@ -55,8 +61,11 @@ enum RouteScanning {
     static func mappingAttributes(
         of function: FunctionDeclSyntax,
         in context: some MacroExpansionContext
-    ) -> [(kind: RouteKind, path: String, maxBodyBytes: String?, attribute: AttributeSyntax)] {
-        var found: [(RouteKind, String, String?, AttributeSyntax)] = []
+    ) -> [(
+        kind: RouteKind, path: String, maxBodyBytes: String?, pipelines: String?,
+        attribute: AttributeSyntax
+    )] {
+        var found: [(RouteKind, String, String?, String?, AttributeSyntax)] = []
         for element in function.attributes {
             guard let attribute = element.as(AttributeSyntax.self),
                   let name = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text,
@@ -70,7 +79,11 @@ enum RouteScanning {
                 )
                 continue
             }
-            found.append((kind, path, labeledArgumentText(of: attribute, named: "maxBodyBytes"), attribute))
+            found.append((
+                kind, path,
+                labeledArgumentText(of: attribute, named: "maxBodyBytes"),
+                labeledArgumentText(of: attribute, named: "pipelines"),
+                attribute))
         }
         return found
     }
@@ -231,13 +244,15 @@ enum RouteScanning {
             }
         }
 
-        return mappings.map { kind, path, maxBodyBytes, _ in
+        return mappings.map { kind, path, maxBodyBytes, pipelines, attribute in
             ScannedRoute(
                 kind: kind,
                 path: path,
                 methodName: name,
                 bodyTypeText: bodyTypeText,
                 maxBodyBytesText: maxBodyBytes,
+                pipelinesText: pipelines,
+                attribute: attribute,
                 isAsync: effects?.asyncSpecifier != nil,
                 isThrows: effects?.throwsClause != nil,
                 returnTypeText: returnType,

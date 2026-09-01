@@ -11,3 +11,8 @@
 
 # Exploration scratch, not part of the shipped package
 spikes/
+
+# Working spec for the container -> composition refactor. Deliberately
+# untracked: it was removed from history once already, and a bare
+# `git add -A` will otherwise keep pulling it back in.
+COMPOSITION-MIGRATION.md

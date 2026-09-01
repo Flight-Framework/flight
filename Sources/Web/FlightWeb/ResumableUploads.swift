@@ -64,7 +64,7 @@ extension Container {
     public func uploads(
         at prefix: String,
         store: any UploadStore,
-        pipelines: [String] = [MiddlewareRegistration.defaultLane],
+        pipelines: [PipelineLane] = [.default],
         _ configure: (inout UploadMountOptions) -> Void = { _ in }
     ) {
         var options = UploadMountOptions()

@@ -63,7 +63,7 @@ public enum DispatchBuilder {
     /// deliberately: the alternative is a route that 500s (or silently runs
     /// with the wrong stack) on its first request.
     public struct UndeclaredLaneError: Error, CustomStringConvertible {
-        public let lane: String
+        public let lane: PipelineLane
         public let route: String
         public var description: String {
             "Route \(route) runs through pipeline lane '\(lane)', but no container.pipeline(\"\(lane)\") { } declared it. Declare the lane (an empty block is legal), or remove it from the route's pipelines."
@@ -95,12 +95,18 @@ public enum DispatchBuilder {
         // Lane validation: the default lane exists even when empty (an app
         // with no middleware is legal); anything else must be declared.
         let declaredLanes = try container.declaredMiddlewareLanes()
-        var chainsByLane: [String: [MiddlewareRegistration]] = [:]
+        var chainsByLane: [PipelineLane: [MiddlewareRegistration]] = [:]
         for lane in declaredLanes {
             chainsByLane[lane] = try container.collectMiddleware(lane: lane)
         }
-        if chainsByLane[MiddlewareRegistration.defaultLane] == nil {
-            chainsByLane[MiddlewareRegistration.defaultLane] = []
+        if chainsByLane[.default] == nil {
+            chainsByLane[.default] = []
+        }
+        // `.public` means "explicitly no lanes", so the framework declares it
+        // empty rather than asking every application to write
+        // `container.pipeline("public") { }` for a block that does nothing.
+        if chainsByLane[.public] == nil {
+            chainsByLane[.public] = []
         }
 
         // One composed responder per route, keyed by the same string that is
@@ -140,7 +146,7 @@ public enum DispatchBuilder {
                 "method": "\(route.method.rawValue)",
                 "path": "\(route.path)",
                 "kind": route.kind.isUpgrade ? "upgrade" : "http",
-                "pipelines": .array(route.pipelines.map { .string($0) }),
+                "pipelines": .array(route.pipelines.map { .string($0.name) }),
                 "source": "\(route.source)",
             ])
         }
@@ -173,11 +179,11 @@ public enum DispatchBuilder {
             logger.debug("asset mount registered", metadata: [
                 "prefix": "\(mount.prefix)",
                 "root": "\(mount.root)",
-                "pipelines": .array(mount.pipelines.map { .string($0) }),
+                "pipelines": .array(mount.pipelines.map { .string($0.name) }),
             ])
         }
 
-        let defaultChain = chainsByLane[MiddlewareRegistration.defaultLane] ?? []
+        let defaultChain = chainsByLane[.default] ?? []
         let noMatchResponder: Next = compose(
             defaultChain,
             around: { context in
@@ -189,7 +195,9 @@ public enum DispatchBuilder {
         logger.info("flight web dispatch assembled", metadata: [
             "routes": .stringConvertible(router.routes.count),
             "lanes": .dictionary(
-                chainsByLane.mapValues { .array($0.map { .string($0.name) }) }),
+                .init(uniqueKeysWithValues: chainsByLane.map { lane, chain in
+                    (lane.name, Logger.MetadataValue.array(chain.map { .string($0.name) }))
+                })),
         ])
 
         let responders = respondersByRoute

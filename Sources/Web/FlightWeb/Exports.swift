@@ -26,7 +26,7 @@ extension RouteRegistration {
         path: String,
         kind: Kind = .http,
         source: String = "<direct>",
-        pipelines: [String] = [MiddlewareRegistration.defaultLane],
+        pipelines: [PipelineLane] = [.default],
         bodyMode: BodyMode = .buffered(maxBytes: nil),
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {

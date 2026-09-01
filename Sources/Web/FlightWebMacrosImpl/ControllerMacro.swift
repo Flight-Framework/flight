@@ -100,8 +100,20 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
             "    try Self(_flight: c)",
             "}",
         ]
+        // A route's own `pipelines:` replaces the controller's rather than
+        // adding to it — the only rule that can express both "public
+        // controller, one authenticated route" and "authenticated
+        // controller, one public route". Saying nothing inherits.
+        let controllerPipelines = parsePipelines(node)
         for (route, path) in combinedRoutes {
-            thunkLines.append(contentsOf: routeRegistrationLines(for: route, path: path, pipelines: parsePipelines(node)))
+            let pipelines = route.pipelinesText ?? controllerPipelines
+            if let routePipelines = route.pipelinesText {
+                diagnoseSecurityNarrowing(
+                    controller: controllerPipelines, route: routePipelines,
+                    at: route.attribute, method: route.methodName, in: context)
+            }
+            thunkLines.append(
+                contentsOf: routeRegistrationLines(for: route, path: path, pipelines: pipelines))
         }
         let thunkBody = thunkLines.map { "    \($0)" }.joined(separator: "\n")
         let thunk: DeclSyntax = """
@@ -230,6 +242,84 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
             return argument.expression.trimmedDescription
         }
         return nil
+    }
+
+    /// The canonical security lanes, in every spelling a declaration site can
+    /// use. A macro sees source text and nothing else — it cannot resolve
+    /// `.authenticated` to a value — so recognizing a security lane means
+    /// recognizing how it is written. This is why the lanes are canonical
+    /// names on `PipelineLane` rather than free-form strings: with arbitrary
+    /// strings there is nothing here to match, and the warning below cannot
+    /// exist.
+    private static let securityLaneSpellings: Set<String> = [
+        ".authentication", ".authenticated",
+        "PipelineLane.authentication", "PipelineLane.authenticated",
+        "\"authentication\"", "\"authenticated\"",
+    ]
+
+    private static let publicLaneSpellings: Set<String> = [
+        ".public", "PipelineLane.public", "\"public\"",
+    ]
+
+    /// Warns when a route replaces its controller's lanes with a set that
+    /// drops the controller's authentication, without saying `.public`.
+    ///
+    /// A warning rather than an error, deliberately: narrowing is legitimate,
+    /// and the build should not fail on a judgment the author is entitled to
+    /// make. But dropping authentication silently is the mistake worth
+    /// catching, and naming `.public` *is* the acknowledgment — it records
+    /// the intent in the declaration instead of a comment beside it, and
+    /// makes "every deliberately-public route under an authenticated
+    /// controller" greppable. This mirrors the warn-vs-error discipline
+    /// already in `flight-registration-gen`.
+    private static func diagnoseSecurityNarrowing(
+        controller: String?, route: String, at attribute: AttributeSyntax,
+        method: String, in context: some MacroExpansionContext
+    ) {
+        guard let controller else { return }
+        let controllerLanes = laneSpellings(in: controller)
+        let routeLanes = laneSpellings(in: route)
+
+        let dropped = controllerLanes
+            .filter(securityLaneSpellings.contains)
+            .filter { !routeLanes.contains($0) }
+        guard !dropped.isEmpty else { return }
+        // `.public` is the acknowledgment; having said it, the author is done.
+        guard routeLanes.isDisjoint(with: publicLaneSpellings) else { return }
+        // Still running some other security lane is a swap, not a drop.
+        guard routeLanes.isDisjoint(with: securityLaneSpellings) else { return }
+
+        context.diagnoseWarning(
+            "route.pipelines.narrowing",
+            """
+            '\(method)' replaces its controller's pipelines and drops \
+            \(dropped.sorted().joined(separator: ", ")), so this route runs without \
+            authentication. A route's 'pipelines:' replaces the controller's rather than \
+            adding to it. If that is intended, say 'pipelines: [.public]' — that is how a \
+            deliberately public route records the decision.
+            """,
+            at: attribute
+        )
+    }
+
+    /// The lane spellings in a `pipelines:` argument's source text, split on
+    /// the array literal's commas. Text-level by necessity, and only ever
+    /// used to compare against the canonical spellings above.
+    private static func laneSpellings(in text: String) -> Set<String> {
+        func trimmed(_ s: Substring) -> String {
+            var slice = s
+            while let first = slice.first, first.isWhitespace || first == "[" {
+                slice = slice.dropFirst()
+            }
+            while let last = slice.last, last.isWhitespace || last == "]" {
+                slice = slice.dropLast()
+            }
+            return String(slice)
+        }
+        return Set(
+            text.split(separator: ",")
+                .map(trimmed)
+                .filter { !$0.isEmpty })
     }
 
     /// `@Controller`'s own base-path argument (Spring-style combination — see

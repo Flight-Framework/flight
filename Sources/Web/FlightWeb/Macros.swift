@@ -45,7 +45,7 @@ import FlightCore
 @attached(extension, conformances: _FlightRegistrable)
 public macro Controller(
     _ path: String? = nil,
-    pipelines: [String] = [MiddlewareRegistration.defaultLane]
+    pipelines: [PipelineLane] = [.default]
 ) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "ControllerMacro")
 
@@ -102,25 +102,55 @@ public macro Middleware() =
 // without arguing for a gigabyte global cap. On a route whose handler
 // takes `body: RequestBodyStream` it caps the cumulative stream instead,
 // enforced as bytes arrive.
+//
+// `pipelines` overrides the controller's lanes for this one route, and
+// **replaces** rather than appends: the route's list is the whole stack.
+// Replacement is what expresses both directions — a public controller with
+// one authenticated route, and an authenticated controller with one public
+// route — where appending can only ever add. Omitted, the route inherits
+// whatever the controller declared.
+//
+//     @Controller("/dashboard", pipelines: [.authenticated])
+//     final class DashboardController {
+//         @GetRoute("/", pipelines: [.public])   // deliberate, and says so
+//         func index(_ context: RequestContext) -> Response { ... }
+//
+//         @GetRoute("/admin")                    // inherits [.authenticated]
+//         func admin(_ context: RequestContext) -> Response { ... }
+//     }
+//
+// Narrowing away a security lane without naming `.public` is a build
+// warning: dropping authentication by accident is the mistake worth
+// catching, and `.public` is how you say you meant it.
 
 @attached(peer)
-public macro GetRoute(_ path: String, maxBodyBytes: Int? = nil) =
+public macro GetRoute(
+    _ path: String, maxBodyBytes: Int? = nil, pipelines: [PipelineLane]? = nil
+) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro PostRoute(_ path: String, maxBodyBytes: Int? = nil) =
+public macro PostRoute(
+    _ path: String, maxBodyBytes: Int? = nil, pipelines: [PipelineLane]? = nil
+) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro PutRoute(_ path: String, maxBodyBytes: Int? = nil) =
+public macro PutRoute(
+    _ path: String, maxBodyBytes: Int? = nil, pipelines: [PipelineLane]? = nil
+) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro PatchRoute(_ path: String, maxBodyBytes: Int? = nil) =
+public macro PatchRoute(
+    _ path: String, maxBodyBytes: Int? = nil, pipelines: [PipelineLane]? = nil
+) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro DeleteRoute(_ path: String, maxBodyBytes: Int? = nil) =
+public macro DeleteRoute(
+    _ path: String, maxBodyBytes: Int? = nil, pipelines: [PipelineLane]? = nil
+) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 /// A WebSocket upgrade route (§6.1). The method must return a
@@ -130,5 +160,5 @@ public macro DeleteRoute(_ path: String, maxBodyBytes: Int? = nil) =
 /// `Response.upgrade`; the active transport performs the HTTP 101 handshake
 /// and hands the frame stream to the handler.
 @attached(peer)
-public macro WebSocketRoute(_ path: String) =
+public macro WebSocketRoute(_ path: String, pipelines: [PipelineLane]? = nil) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")

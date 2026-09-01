@@ -43,7 +43,7 @@ public struct RouteRegistration: Sendable {
     /// as before lanes existed unless it says otherwise. Referencing a lane
     /// nobody declared fails when dispatch is built — bootstrap, not the
     /// first request.
-    public let pipelines: [String]
+    public let pipelines: [PipelineLane]
 
     /// How the transport delivers this route's body — asked from the route
     /// table before any bytes are read, exactly like `acceptsUpgrade`.
@@ -68,7 +68,7 @@ public struct RouteRegistration: Sendable {
         path: String,
         kind: Kind = .http,
         source: String = "<direct>",
-        pipelines: [String] = [MiddlewareRegistration.defaultLane],
+        pipelines: [PipelineLane] = [.default],
         bodyMode: BodyMode = .buffered(maxBytes: nil),
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
@@ -100,15 +100,14 @@ public struct MiddlewareRegistration: Sendable {
     }
 
     /// The lane every route runs through unless it names others — and the
-    /// one `container.pipeline { }` (no name) feeds. Its name is spellable
-    /// so a route can *combine* it with extras: `pipelines: [.defaultLane,
-    /// "admin"]` means "everything the app normally does, then the admin
-    /// stack".
-    public static let defaultLane = "default"
+    /// one `container.pipeline { }` (no name) feeds. Spelled
+    /// ``PipelineLane/default`` at a declaration site; kept here because
+    /// this is where the chain-assembly code reaches for it.
+    public static let defaultLane = PipelineLane.default
 
     public let name: String
     /// Which named lane this layer belongs to.
-    public let lane: String
+    public let lane: PipelineLane
     public let order: Int
     let generation: Generation
     /// A placeholder recording that a lane was declared, carrying no
@@ -121,7 +120,7 @@ public struct MiddlewareRegistration: Sendable {
     let handle: @Sendable (RequestContext, Next) async throws -> Response
 
     init(
-        name: String, lane: String, order: Int, generation: Generation,
+        name: String, lane: PipelineLane, order: Int, generation: Generation,
         isLaneMarker: Bool = false,
         handle: @escaping @Sendable (RequestContext, Next) async throws -> Response
     ) {
@@ -167,7 +166,7 @@ extension Container {
         _ path: String,
         kind: RouteRegistration.Kind = .http,
         source: String = "<direct>",
-        pipelines: [String] = [MiddlewareRegistration.defaultLane],
+        pipelines: [PipelineLane] = [.default],
         bodyMode: RouteRegistration.BodyMode = .buffered(maxBytes: nil),
         handler: @escaping @Sendable (RequestContext) async throws -> Response
     ) {
@@ -229,14 +228,14 @@ extension Container {
     /// exactly how a static-asset route avoids paying for transaction
     /// binding and authentication it can never use. Routes that want the
     /// default behavior *plus* extras concatenate:
-    /// `pipelines: [MiddlewareRegistration.defaultLane, "admin"]`.
+    /// `pipelines: [.default, "admin"]`.
     ///
     /// Declaring a lane and never referencing it is legal (dead but
     /// harmless, like an unlisted `@Middleware`); *referencing* a lane
     /// nobody declared fails when dispatch is built — at bootstrap, naming
     /// the route and the lane, never as a 500.
     public func pipeline(
-        _ name: String, @MiddlewarePipelineBuilder _ build: () -> [any Middleware.Type]
+        _ name: PipelineLane, @MiddlewarePipelineBuilder _ build: () -> [any Middleware.Type]
     ) {
         // Declared before the loop, so a lane with an empty block is still
         // a lane. Without this the block registers nothing, the lane leaves
@@ -346,7 +345,7 @@ extension Container {
     /// only, since the deprecated API predates lanes — every
     /// `registerMiddleware` closure sorted by `(order, registration
     /// sequence)`. See `MiddlewareRegistration.Generation`.
-    public func collectMiddleware(lane: String) throws -> [MiddlewareRegistration] {
+    public func collectMiddleware(lane: PipelineLane) throws -> [MiddlewareRegistration] {
         try collect(MiddlewareRegistration.self)
             .enumerated()
             .filter { $0.element.lane == lane && !$0.element.isLaneMarker }
@@ -359,7 +358,7 @@ extension Container {
 
     /// Every lane that has at least one declared entry — what dispatch
     /// validates route references against.
-    public func declaredMiddlewareLanes() throws -> Set<String> {
+    public func declaredMiddlewareLanes() throws -> Set<PipelineLane> {
         Set(try collect(MiddlewareRegistration.self).map(\.lane))
     }
 

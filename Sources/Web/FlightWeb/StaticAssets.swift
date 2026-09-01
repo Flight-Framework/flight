@@ -118,7 +118,7 @@ public struct AssetMountOptions: Sendable {
 public struct AssetMountRegistration: Sendable {
     public let prefix: String
     public let root: String
-    public let pipelines: [String]
+    public let pipelines: [PipelineLane]
     public let options: AssetMountOptions
     /// Present exactly when `options.etag == .contentHash` — constructed
     /// with the mount, so "declared but never initialized" cannot happen.
@@ -148,7 +148,7 @@ extension Container {
     public func assets(
         at prefix: String = "/",
         root: String,
-        pipelines: [String] = [MiddlewareRegistration.defaultLane],
+        pipelines: [PipelineLane] = [.default],
         _ configure: (inout AssetMountOptions) -> Void = { _ in }
     ) {
         var options = AssetMountOptions()

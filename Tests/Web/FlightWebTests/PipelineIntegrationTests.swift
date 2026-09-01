@@ -266,10 +266,25 @@ struct BareLaneController {
 }
 
 /// The default stack plus an extra lane, concatenated in that order.
-@Controller(pipelines: [MiddlewareRegistration.defaultLane, "admin"])
+@Controller(pipelines: [.default, "admin"])
 struct AdminController {
     @GetRoute("/admin")
     func admin(_ context: RequestContext) -> String { "admin" }
+}
+
+/// Route-level lanes (§2.7): a controller declares one stack, and individual
+/// routes replace it. The dashboard shape from the design — the parent needs
+/// no auth, the nested admin route does.
+@Controller("/dash", pipelines: ["admin"])
+struct RouteLaneController {
+    @GetRoute("/inherits")
+    func inherits(_ context: RequestContext) -> String { "inherits" }
+
+    @GetRoute("/replaced", pipelines: ["bare"])
+    func replaced(_ context: RequestContext) -> String { "replaced" }
+
+    @GetRoute("/public", pipelines: [.public])
+    func explicitlyPublic(_ context: RequestContext) -> String { "public" }
 }
 
 private struct LanesModule: FlightModule {
@@ -279,6 +294,7 @@ private struct LanesModule: FlightModule {
         try AdminLaneMarker._flightRegister(container)
         try BareLaneController._flightRegister(container)
         try AdminController._flightRegister(container)
+        try RouteLaneController._flightRegister(container)
         try PingController.register(container)
         container.pipeline {
             DefaultLaneMarker.self
@@ -323,6 +339,41 @@ struct PipelineLaneTests {
         let response = await client.get("/admin")
         #expect(response.status == .ok)
         #expect(laneTrace.entries == ["default-lane", "admin-lane"])
+    }
+
+    // MARK: Route-level lanes (§2.7)
+
+    @Test("a route with no lanes of its own inherits the controller's")
+    func routeInheritsControllerLane() async throws {
+        laneTrace.reset()
+        let client = try TestClient(container: TestContainer.build { LanesModule() })
+        let response = await client.get("/dash/inherits")
+        #expect(response.status == .ok)
+        #expect(laneTrace.entries == ["admin-lane"])
+    }
+
+    @Test("a route's own lanes replace the controller's, they do not add to them")
+    func routeLanesReplaceControllerLanes() async throws {
+        // The property that makes replacement worth having: "admin" is gone,
+        // not joined by "bare". Appending could not express this.
+        laneTrace.reset()
+        let client = try TestClient(container: TestContainer.build { LanesModule() })
+        let response = await client.get("/dash/replaced")
+        #expect(response.status == .ok)
+        #expect(laneTrace.entries == ["bare-lane"])
+        #expect(!laneTrace.entries.contains("admin-lane"))
+    }
+
+    @Test(".public runs no middleware at all, and needs no lane declaration")
+    func publicLaneRunsNothing() async throws {
+        // The framework declares `.public` empty, so this route needs no
+        // container.pipeline("public") { } anywhere — note LanesModule
+        // declares only default, bare and admin.
+        laneTrace.reset()
+        let client = try TestClient(container: TestContainer.build { LanesModule() })
+        let response = await client.get("/dash/public")
+        #expect(response.status == .ok)
+        #expect(laneTrace.entries.isEmpty, "a public route runs no lane")
     }
 
     @Test("a 404 runs the default lane, so logging still sees every miss")
