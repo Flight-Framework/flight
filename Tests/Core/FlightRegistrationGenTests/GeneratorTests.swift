@@ -182,6 +182,52 @@ struct GeneratorTests {
                 """)
     }
 
+    // MARK: - Module-registered types (registration gating)
+
+    @Test("a `flight:module-registered` type is scanned but not registered")
+    func moduleRegisteredTypeIsNotEmitted() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            @Component final class Ordinary: Sendable { init() {} }
+            // flight:module-registered — its own module registers it.
+            @Component final class Gated: Sendable { init() {} }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("try Ordinary._flightRegister(container)"))
+        #expect(
+            !result.generated.contains("try Gated._flightRegister(container)"),
+            "a module-registered type must not be registered by the scan")
+        // Named rather than silently dropped: "why is my type not registered"
+        // has to be answerable by reading the generated file.
+        #expect(result.generated.contains("Gated"))
+        #expect(result.generated.contains("flight:module-registered"))
+    }
+
+    /// The hazard the marker exists for, in miniature: `freeze()` builds every
+    /// singleton eagerly, so registering a type whose dependency only a module
+    /// provides breaks any app that merely links the package. A bridge to it
+    /// would assert the same thing, so it must not be generated either.
+    @Test("a module-registered type is not used as an existential bridge conformer")
+    func moduleRegisteredTypeIsNotBridged() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            protocol Validator {}
+            // flight:module-registered
+            @Service struct GatedValidator: Validator {}
+            @Component final class Consumer {
+                @Inject var validator: (any Validator)
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            !result.generated.contains("container.register((any Validator).self"),
+            "bridging to a conditionally-present type reintroduces the freeze failure")
+    }
+
     @Test("registration order is deterministic across runs")
     func deterministicOutput() throws {
         let sources = [

@@ -89,7 +89,6 @@ struct EndToEndTests {
             InMemoryOIDCModule(source: source, clock: clock)
             FlightSecurityModule()
             RoutesModule()
-            MiddlewareScannerStandIn()
         }
         return try TestClient(container: container)
     }

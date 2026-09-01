@@ -44,6 +44,14 @@ public final class FlightSecurityModule: FlightModule {
             PrincipalHolder()
         }
 
+        // Both middleware types are marked `flight:module-registered`, so the
+        // application's generated `flightRegisterAll` skips them and this is
+        // the only place they are registered. That is the point: whether they
+        // exist is a property of "did this app include a security module",
+        // which no build-time scan can decide.
+        try Authentication._flightRegister(container)
+        try RequireAuthentication._flightRegister(container)
+
         container.pipeline {
             Authentication.self
         }

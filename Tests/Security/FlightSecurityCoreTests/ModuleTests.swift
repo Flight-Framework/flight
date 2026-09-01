@@ -21,7 +21,6 @@ struct ModuleTests {
         let container = try TestContainer.build {
             module
             CustomValidatorModule(validator: StubValidator(principalsByToken: [:]))
-            MiddlewareScannerStandIn()
         }
 
         // The scoped holder resolves per scope — same instance within one,
@@ -44,7 +43,6 @@ struct ModuleTests {
         let oidc = FlightOIDCModule()
         let container = try TestContainer.build(configuration: minimalConfig) {
             oidc
-            MiddlewareScannerStandIn()
         }
 
         let validator = try container.resolve((any TokenValidator).self)
@@ -84,7 +82,6 @@ struct ModuleTests {
         let container = try TestContainer.build {
             FlightSecurityModule()
             CustomValidatorModule(validator: stub)
-            MiddlewareScannerStandIn()
         }
 
         #expect(try container.resolve((any TokenValidator).self) is StubValidator)
@@ -100,7 +97,6 @@ struct ModuleTests {
         #expect(throws: (any Error).self) {
             try TestContainer.build {
                 FlightSecurityModule()
-                MiddlewareScannerStandIn()
             }
         }
     }

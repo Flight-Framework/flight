@@ -105,6 +105,34 @@ and silence:
 @Inject var external: SomethingFromAnotherLibrary
 ```
 
+### Types their own module registers
+
+The scan covers your target *and every Flight-based package it links*. That is
+usually what you want, but some types must not be registered just because a
+package is linked: whether they should exist at all is a runtime question —
+a configuration gate, or an optional subsystem the app may not have included.
+
+Mark those with `flight:module-registered`, above the declaration:
+
+```swift
+// flight:module-registered — FlightSecurityModule registers this.
+@Middleware
+public struct Authentication: Sendable {
+    @Inject var validator: (any TokenValidator)
+}
+```
+
+The type is still scanned — its dependencies are still checked, and `@Inject`
+of it still resolves without a warning — but `flightRegisterAll` does not
+register it, and it is never chosen as an existential bridge conformer. Its
+module does both jobs instead. The generated file names every type it skipped
+for this reason, so nothing disappears silently.
+
+Why it matters: `freeze()` builds every singleton eagerly. `Authentication`
+injects `(any TokenValidator)`, which only a security module provides, so
+without the marker any app that merely *linked* the security package failed
+its freeze and never booted.
+
 > The plugin is a `BuildToolPlugin` and runs under SwiftPM. Xcode projects do
 > not run it, so an Xcode-only target needs its registrations written by hand.
 

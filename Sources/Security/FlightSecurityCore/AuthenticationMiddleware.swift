@@ -16,6 +16,12 @@ import HTTPTypes
 /// tests" entry point, because that entry point existed only to work around
 /// a closure's inability to hold one. `Authentication(validator: someMock)`
 /// is now the same call for both cases.
+// flight:module-registered — `FlightSecurityModule` registers this, not the
+// application's generated `flightRegisterAll`. It injects `(any
+// TokenValidator)`, which only a security module provides, and `freeze()`
+// builds every singleton eagerly: scanned into an app that links this package
+// without including a security module, it failed the freeze and the app never
+// booted.
 @Middleware
 public struct Authentication: Sendable {
     // Parenthesized: the macro's generated `init(_flight:)` resolves this by
@@ -89,6 +95,10 @@ public struct Authentication: Sendable {
 /// Responses carry an RFC 6750 `WWW-Authenticate: Bearer` challenge;
 /// `error="invalid_token"` distinguishes a rejected credential from an
 /// absent one — and nothing more (design: no detail reaches the wire).
+// flight:module-registered — registered by `FlightSecurityModule` alongside
+// `Authentication`. It has no dependencies of its own, so scanning it was
+// harmless; it travels with `Authentication` because the two are one
+// decision, and a half-registered pair is a confusing thing to debug.
 @Middleware
 public struct RequireAuthentication: Sendable {
     public init() {}
