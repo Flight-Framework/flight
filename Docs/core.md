@@ -9,7 +9,7 @@ once, freezes it, and runs your services under a `ServiceGroup`.
 ```swift
 @Service
 final class UserService: Sendable {
-    @Autowired var repository: any UserRepository
+    @Inject var repository: any UserRepository
     @ConfigValue("features.signup_enabled", default: true) var signupEnabled: Bool
 }
 
@@ -102,7 +102,7 @@ and silence:
 
 ```swift
 // flight:hand-registered
-@Autowired var external: SomethingFromAnotherLibrary
+@Inject var external: SomethingFromAnotherLibrary
 ```
 
 > The plugin is a `BuildToolPlugin` and runs under SwiftPM. Xcode projects do

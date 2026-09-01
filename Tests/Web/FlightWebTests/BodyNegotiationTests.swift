@@ -19,19 +19,19 @@ struct SignupForm: Codable, Equatable, ResponseEncodable {
 struct NegotiationFixtureController {
     /// One Decodable route serves both JSON and form clients — that is the
     /// entire point of negotiating in the framework.
-    @PostMapping("/signup")
+    @PostRoute("/signup")
     func signup(_ context: RequestContext, body: SignupForm) -> SignupForm {
         body
     }
 
     /// Raw bytes: any Content-Type, no negotiation, returned verbatim.
-    @PostMapping("/bytes")
+    @PostRoute("/bytes")
     func bytes(_ context: RequestContext, body: Data) -> Response {
         .fixed(status: .ok, headers: [:], body: body)
     }
 
     /// Plain text: strict UTF-8 in, echoed back.
-    @PostMapping("/note")
+    @PostRoute("/note")
     func note(_ context: RequestContext, body: String) -> String {
         "note:\(body)"
     }

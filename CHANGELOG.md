@@ -4,6 +4,28 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking
+
+- **`@Autowired` is renamed `@Inject`.** Every property injection site across
+  every product (`FlightCore`, `FlightWeb`, `FlightScheduler`,
+  `FlightSecurityCore`, and any application code) must update. No deprecated
+  alias — a straight rename, hard cutover.
+- **The route-mapping macros drop the `Mapping` suffix and gain a `Route`
+  one:** `@GetMapping` → `@GetRoute`, `@PostMapping` → `@PostRoute`,
+  `@PutMapping` → `@PutRoute`, `@PatchMapping` → `@PatchRoute`,
+  `@DeleteMapping` → `@DeleteRoute`, `@WebSocketMapping` → `@WebSocketRoute`.
+  `@Controller` is unchanged. Both renames exist to stop reading as Spring's
+  own naming convention (`@Autowired`, `@GetMapping` are Spring Framework's
+  literal names) — Flight's DI and routing are its own design, not a port,
+  and the names should say so.
+
+  Internal-only, alongside the public rename: `AutowiredMacro` →
+  `InjectMacro`, `RouteMappingMacro` → `RouteMacro` (file renamed to match),
+  `MappingKind` → `RouteKind`, and every `autowired.*`/`mapping.*` diagnostic
+  ID becomes `inject.*`/`route.*`.
+
 ## [0.11.0] - 2026-08-29
 
 The six findings the 0.10.0 audit deliberately left open, closed. Three were

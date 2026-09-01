@@ -15,7 +15,7 @@ private let settingsMacros: [String: MacroSpec] = [
         conformances: ["FlightCore._FlightRegistrable", "CustomStringConvertible"]),
     "ConfigValue": MacroSpec(type: ConfigValueMacro.self),
     "Secret": MacroSpec(type: SecretMacro.self),
-    "Autowired": MacroSpec(type: AutowiredMacro.self),
+    "Inject": MacroSpec(type: InjectMacro.self),
 ]
 
 @Suite("@Settings expansion")
@@ -337,13 +337,13 @@ struct SettingsMacroDiagnosticTests {
         )
     }
 
-    @Test("@Autowired inside @Settings is refused")
-    func autowiredRefused() {
+    @Test("@Inject inside @Settings is refused")
+    func injectRefused() {
         assertMacroExpansion(
             """
             @Settings("auth")
             struct AuthSettings {
-                @Autowired var logger: AppLogger
+                @Inject var logger: AppLogger
             }
             """,
             expandedSource: """
@@ -365,7 +365,7 @@ struct SettingsMacroDiagnosticTests {
                 """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "@Autowired is not valid inside @Settings — settings hold configuration only. Put dependencies in a @Service or @Component instead.",
+                    message: "@Inject is not valid inside @Settings — settings hold configuration only. Put dependencies in a @Service or @Component instead.",
                     line: 3, column: 5)
             ],
             macroSpecs: settingsMacros

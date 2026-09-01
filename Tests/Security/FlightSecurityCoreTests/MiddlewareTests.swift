@@ -100,7 +100,7 @@ struct MiddlewareTests {
 
     @Test("a missing TokenValidator dependency fails at construction, not at request time")
     func missingValidator() throws {
-        // Not a per-request 500 any more: @Autowired makes the validator a
+        // Not a per-request 500 any more: @Inject makes the validator a
         // hard constructor dependency, so an application missing this wiring
         // finds out at freeze() — before its first real request — rather
         // than from whichever request happens to be first to authenticate.

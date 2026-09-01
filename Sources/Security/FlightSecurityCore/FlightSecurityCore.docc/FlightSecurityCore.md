@@ -53,7 +53,7 @@ thread-locals and no argument threading:
 ```swift
 @Service
 final class OrderService: Sendable {
-    @Autowired var identity: PrincipalHolder
+    @Inject var identity: PrincipalHolder
 
     func placeOrder(...) async throws {
         guard let principal = identity.principal else { throw SecurityError.unauthenticated }

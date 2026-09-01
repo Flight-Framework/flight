@@ -311,7 +311,7 @@ public final class Container: @unchecked Sendable {
             case .scoped:
                 // Delta 12: plain resolve rides the ambient scope when one is
                 // bound (by resolve(_:in:), which covers the whole resolution
-                // synchronously). This is what lets @Autowired — which always
+                // synchronously). This is what lets @Inject — which always
                 // expands to plain resolve — wire a scoped component into another
                 // scoped component: the outer resolution binds the scope, the
                 // generated init's resolve lands here, and both instances

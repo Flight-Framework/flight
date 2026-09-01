@@ -114,11 +114,11 @@ Recorded here the same way sibling packages record theirs:
    `flight-channels`, `flight-data-postgres`) avoids this the same way: none
    of them put `@Component`/`@Controller` on their own infrastructure.
    `ActuatorModule.configure` registers the controller and its routes by hand (`registerRoute`, the
-   escape hatch `@GetMapping` sits beside).
+   escape hatch `@GetRoute` sits beside).
 2. **The container is no longer a registered bean at all.** A consequence
    of (1): `ActuatorController` now holds `container` as a plain stored
    property, captured directly from `configure(_:)`'s own parameter — no
-   `@Autowired`, so nothing needs `Container` to be resolvable, and the
+   `@Inject`, so nothing needs `Container` to be resolvable, and the
    guarded self-registration (and its duplicate-registration-avoidance
    dance) is gone.
 3. **The gate's environment is a qualified bean.** The dashboard reports

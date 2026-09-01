@@ -14,7 +14,7 @@ import Testing
 struct StreamFixtureController {
     /// The single macro change of the phase, exercised: this route must be
     /// recorded as streaming-bodied with its cap.
-    @PostMapping("/ingest", maxBodyBytes: 1_000_000)
+    @PostRoute("/ingest", maxBodyBytes: 1_000_000)
     func ingest(_ context: RequestContext, body: RequestBodyStream) async throws -> String {
         var total = 0
         var chunks = 0
@@ -26,7 +26,7 @@ struct StreamFixtureController {
     }
 
     /// A buffered route with only a cap override — no streaming.
-    @PostMapping("/bounded", maxBodyBytes: 16)
+    @PostRoute("/bounded", maxBodyBytes: 16)
     func bounded(_ context: RequestContext, body: Data) -> String {
         "got:\(body.count)"
     }

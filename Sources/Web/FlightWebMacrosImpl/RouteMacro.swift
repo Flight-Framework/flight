@@ -1,30 +1,30 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@GetMapping`/`@PostMapping`/…/`@WebSocketMapping` (§4, §6.1). Pure
+/// `@GetRoute`/`@PostRoute`/…/`@WebSocketRoute` (§4, §6.1). Pure
 /// markers, one implementation for the whole family: all generated code
 /// lives in `@Controller`'s expansion, which reads these attributes off the
 /// methods. This macro's own expansion is empty; its job is validating the
 /// attachment site so misuse fails at the method, not somewhere inside the
 /// enclosing type's expansion.
-public struct RouteMappingMacro: PeerMacro {
+public struct RouteMacro: PeerMacro {
     public static func expansion(
         of node: AttributeSyntax,
         providingPeersOf declaration: some DeclSyntaxProtocol,
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        let name = node.attributeName.as(IdentifierTypeSyntax.self)?.name.text ?? "RouteMapping"
+        let name = node.attributeName.as(IdentifierTypeSyntax.self)?.name.text ?? "Route"
 
         guard let function = declaration.as(FunctionDeclSyntax.self) else {
             context.diagnoseError(
-                "mapping.notfunction",
+                "route.notfunction",
                 "@\(name) can only be attached to a controller method.",
                 at: node
             )
             return []
         }
 
-        // A mapping attribute on a method of a type that is not @Controller
+        // A route attribute on a method of a type that is not @Controller
         // compiles cleanly and registers nothing. Every line of generated
         // code lives in @Controller's expansion, which is what reads these
         // attributes off the members — so without it the route silently does
@@ -43,7 +43,7 @@ public struct RouteMappingMacro: PeerMacro {
             hasControllerAttribute(enclosing)
         else {
             context.diagnoseError(
-                "mapping.nocontroller",
+                "route.nocontroller",
                 """
                 @\(name) registers a route only on a method of a type annotated @Controller, \
                 which is what reads these attributes. This method's enclosing type is not \

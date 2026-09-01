@@ -36,7 +36,7 @@ struct OverriddenKeyFixtureSettings: Sendable {
 
 @Component
 struct NeedsSettingsFixture: Sendable {
-    @Autowired var server: ServerFixtureSettings
+    @Inject var server: ServerFixtureSettings
 }
 
 @Suite("@Settings integration — generated code against a live container")
@@ -87,7 +87,7 @@ struct SettingsIntegrationTests {
         }
     }
 
-    @Test("resolvable anywhere @Autowired works, like any other component")
+    @Test("resolvable anywhere @Inject works, like any other component")
     func resolvableByAutowiring() throws {
         let container = Container()
         container.register(Configuration.self, scope: .singleton) { _ in

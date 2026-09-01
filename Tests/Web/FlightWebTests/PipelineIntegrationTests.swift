@@ -261,14 +261,14 @@ struct AdminLaneMarker: Sendable {
 /// default stack (transactions, auth, logging) must never run for it.
 @Controller(pipelines: ["bare"])
 struct BareLaneController {
-    @GetMapping("/bare")
+    @GetRoute("/bare")
     func bare(_ context: RequestContext) -> String { "bare" }
 }
 
 /// The default stack plus an extra lane, concatenated in that order.
 @Controller(pipelines: [MiddlewareRegistration.defaultLane, "admin"])
 struct AdminController {
-    @GetMapping("/admin")
+    @GetRoute("/admin")
     func admin(_ context: RequestContext) -> String { "admin" }
 }
 

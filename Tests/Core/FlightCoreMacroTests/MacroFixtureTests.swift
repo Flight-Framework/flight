@@ -5,11 +5,11 @@
 // normative. Design decisions they pin (recorded in SPIKE-FINDINGS.md):
 //
 //  M-1  The resolving initializer is `init(_flight:)`, macro-generated.
-//       The doc's `init() {}` alongside non-optional @Autowired stored
+//       The doc's `init() {}` alongside non-optional @Inject stored
 //       properties cannot compile in real Swift — exactly the kind of
 //       looks-obvious-doesn't-compile gap this fixture process exists to
 //       catch. Component types should not declare their own initializers.
-//  F-6  Two @Autowired properties of one type without distinct explicit
+//  F-6  Two @Inject properties of one type without distinct explicit
 //       qualifiers are a compile error (fixture 6a) — Flight refuses to
 //       guess positionally. With qualifiers, resolution is explicit (6b).
 //  T-1  @Transactional requires `throws`; the body is wrapped in an
@@ -40,7 +40,7 @@ private let testMacros: [String: MacroSpec] = [
     "Service": MacroSpec(type: ServiceMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
     "Repository": MacroSpec(
         type: RepositoryMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
-    "Autowired": MacroSpec(type: AutowiredMacro.self),
+    "Inject": MacroSpec(type: InjectMacro.self),
     "ConfigValue": MacroSpec(type: ConfigValueMacro.self),
     "Transactional": MacroSpec(type: TransactionalMacro.self),
     "Settings": MacroSpec(
@@ -84,7 +84,7 @@ struct MacroFixtureTests {
         )
     }
 
-    // MARK: Fixture 2 — a component with @Autowired dependencies
+    // MARK: Fixture 2 — a component with @Inject dependencies
     // (public type, so the registration thunk is access-matched)
 
     @Test("component with dependencies")
@@ -93,8 +93,8 @@ struct MacroFixtureTests {
             """
             @Component
             public final class UserService {
-                @Autowired let repository: UserRepository
-                @Autowired let logger: AppLogger
+                @Inject let repository: UserRepository
+                @Inject let logger: AppLogger
             }
             """,
             expandedSource: """
@@ -129,7 +129,7 @@ struct MacroFixtureTests {
             """
             @Service
             final class BillingService {
-                @Autowired let repository: InvoiceRepository
+                @Inject let repository: InvoiceRepository
             }
             """,
             expandedSource: """
@@ -315,16 +315,16 @@ struct MacroFixtureTests {
         )
     }
 
-    // MARK: Fixture 6a — two @Autowired of one type, no qualifiers: refuse
+    // MARK: Fixture 6a — two @Inject of one type, no qualifiers: refuse
 
-    @Test("ambiguous autowired is compile error")
-    func ambiguousAutowiredIsCompileError() {
+    @Test("ambiguous inject is compile error")
+    func ambiguousInjectIsCompileError() {
         assertMacroExpansion(
             """
             @Component
             final class ReportService {
-                @Autowired var primary: DataSource
-                @Autowired var replica: DataSource
+                @Inject var primary: DataSource
+                @Inject var replica: DataSource
             }
             """,
             expandedSource: """
@@ -339,7 +339,7 @@ struct MacroFixtureTests {
             diagnostics: [
                 DiagnosticSpec(
                     message:
-                        "Two @Autowired properties of type 'DataSource' require distinct explicit qualifiers, e.g. @Autowired(\"primary\").",
+                        "Two @Inject properties of type 'DataSource' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
                     line: 4,
                     column: 5
                 )
@@ -350,14 +350,14 @@ struct MacroFixtureTests {
 
     // MARK: Fixture 6b — the qualified resolution
 
-    @Test("qualified autowired")
-    func qualifiedAutowired() {
+    @Test("qualified inject")
+    func qualifiedInject() {
         assertMacroExpansion(
             """
             @Component
             final class ReportService {
-                @Autowired("primary") var primary: DataSource
-                @Autowired("replica") var replica: DataSource
+                @Inject("primary") var primary: DataSource
+                @Inject("replica") var replica: DataSource
             }
             """,
             expandedSource: """
@@ -538,7 +538,7 @@ struct MacroFixtureTests {
             diagnostics: [
                 DiagnosticSpec(
                     message:
-                        "Stored property 'id' of a @Component type needs a default value — the generated init(_flight:) assigns only @Autowired/@ConfigValue properties.",
+                        "Stored property 'id' of a @Component type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
                     line: 3,
                     column: 5
                 )

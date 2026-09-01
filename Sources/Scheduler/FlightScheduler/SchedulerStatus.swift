@@ -10,9 +10,9 @@ import Synchronization
 /// ```swift
 /// @Controller("/jobs")
 /// struct JobsController {
-///     @Autowired var scheduler: SchedulerStatus
+///     @Inject var scheduler: SchedulerStatus
 ///
-///     @GetMapping("/")
+///     @GetRoute("/")
 ///     func index(_ context: RequestContext) -> [JobStatus] {
 ///         scheduler.snapshot()
 ///     }

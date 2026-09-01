@@ -87,7 +87,7 @@ struct ScheduledDiagnosticTests {
                 func run(now: Date) {}
             }
             """,
-            "@Autowired")
+            "@Inject")
     }
 
     @Test("a job returning a value is refused, because nothing reads it")

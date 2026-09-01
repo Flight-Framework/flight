@@ -5,7 +5,7 @@ import SwiftSyntaxMacros
 /// `@Scheduler` — the type-level half, mirroring `@Controller`.
 ///
 /// A `@Scheduler` type is an ordinary singleton component: it may inject
-/// dependencies with `@Autowired` exactly as any other component does. What
+/// dependencies with `@Inject` exactly as any other component does. What
 /// this macro adds is one `ScheduledJobRegistration` per `@Scheduled` method,
 /// registered into the same container as everything else. Scheduling is not a
 /// separate system from dependency injection.
@@ -57,7 +57,7 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
 
         // A @Scheduler type is an ordinary component: it injects what its
         // jobs need, exactly as @Controller and @Component do. Without the
-        // resolving initializer, @Autowired in a scheduler would not compile
+        // resolving initializer, @Inject in a scheduler would not compile
         // — which the compiled doc snippet caught.
         let properties = Injection.scan(declaration.memberBlock.members)
         let initLines = Injection.initializerLines(for: properties)

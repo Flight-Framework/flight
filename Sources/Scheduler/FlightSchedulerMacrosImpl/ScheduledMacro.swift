@@ -1,7 +1,7 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@Scheduled` — a pure marker, mirroring `@GetMapping`.
+/// `@Scheduled` — a pure marker, mirroring `@GetRoute`.
 ///
 /// All generated code lives in `@Scheduler`'s expansion, which reads these
 /// attributes off the methods. This macro's own expansion is empty; its job

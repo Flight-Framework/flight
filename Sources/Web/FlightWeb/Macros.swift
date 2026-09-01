@@ -3,7 +3,7 @@ import FlightCore
 /// Marks a type as a routing controller (§4). Expands exactly like
 /// `@Component` (Flight Core §5.1) — resolving `init(_flight:)`, a
 /// `_flightRegister(_:)` thunk, `_FlightRegistrable` conformance — plus one
-/// `RouteRegistration` component per `@GetMapping`/`@PostMapping`/… method. One
+/// `RouteRegistration` component per `@GetRoute`/`@PostRoute`/… method. One
 /// registration pipeline in all of Flight; routes are just one kind of thing
 /// it registers (§4).
 ///
@@ -12,7 +12,7 @@ import FlightCore
 /// so the generated `flightRegisterAll(_:)` covers controllers too — route
 /// existence is information the build has before the binary exists.
 ///
-/// `@Autowired` and `@ConfigValue` properties work exactly as on
+/// `@Inject` and `@ConfigValue` properties work exactly as on
 /// `@Component` types. Controllers are singleton components.
 ///
 /// `path` is an optional base path, combined with every mapped method's own
@@ -23,10 +23,10 @@ import FlightCore
 ///
 ///     @Controller("/users")
 ///     struct UserController {
-///         @GetMapping("/")          // → GET /users
+///         @GetRoute("/")          // → GET /users
 ///         func index(_ context: RequestContext) -> [User] { ... }
 ///
-///         @GetMapping("/:id")       // → GET /users/:id
+///         @GetRoute("/:id")       // → GET /users/:id
 ///         func show(_ context: RequestContext) -> User { ... }
 ///     }
 ///
@@ -66,7 +66,7 @@ public macro Controller(
 /// }
 /// ```
 ///
-/// `@Autowired` and `@ConfigValue` properties work exactly as on `@Component`
+/// `@Inject` and `@ConfigValue` properties work exactly as on `@Component`
 /// types. Always `.singleton` — there is no `scope:` argument — because a
 /// `container.pipeline { }` resolves each type exactly once, when the chain
 /// is first assembled; a `.scoped` instance resolved there would be
@@ -85,7 +85,7 @@ public macro Middleware() =
 
 // MARK: - Route mappings (§4)
 //
-// Pure markers, same family as `@Autowired`: the generated code lives in
+// Pure markers, same family as `@Inject`: the generated code lives in
 // `@Controller`'s expansion, which reads these attributes off the methods.
 // Each validates its attachment site so misuse fails at the method.
 //
@@ -104,24 +104,24 @@ public macro Middleware() =
 // enforced as bytes arrive.
 
 @attached(peer)
-public macro GetMapping(_ path: String, maxBodyBytes: Int? = nil) =
-    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
+public macro GetRoute(_ path: String, maxBodyBytes: Int? = nil) =
+    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro PostMapping(_ path: String, maxBodyBytes: Int? = nil) =
-    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
+public macro PostRoute(_ path: String, maxBodyBytes: Int? = nil) =
+    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro PutMapping(_ path: String, maxBodyBytes: Int? = nil) =
-    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
+public macro PutRoute(_ path: String, maxBodyBytes: Int? = nil) =
+    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro PatchMapping(_ path: String, maxBodyBytes: Int? = nil) =
-    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
+public macro PatchRoute(_ path: String, maxBodyBytes: Int? = nil) =
+    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 @attached(peer)
-public macro DeleteMapping(_ path: String, maxBodyBytes: Int? = nil) =
-    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
+public macro DeleteRoute(_ path: String, maxBodyBytes: Int? = nil) =
+    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")
 
 /// A WebSocket upgrade route (§6.1). The method must return a
 /// `WebSocketUpgradeHandler` (or `any WebSocketUpgradeHandler`); the build
@@ -130,5 +130,5 @@ public macro DeleteMapping(_ path: String, maxBodyBytes: Int? = nil) =
 /// `Response.upgrade`; the active transport performs the HTTP 101 handshake
 /// and hands the frame stream to the handler.
 @attached(peer)
-public macro WebSocketMapping(_ path: String) =
-    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMappingMacro")
+public macro WebSocketRoute(_ path: String) =
+    #externalMacro(module: "FlightWebMacrosImpl", type: "RouteMacro")

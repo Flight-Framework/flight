@@ -154,7 +154,7 @@ struct GeneratorTests {
             struct EnglishGreeter: Greeter {}
             @Component
             final class Welcomer {
-                @Autowired var greeter: (any Greeter)
+                @Inject var greeter: (any Greeter)
             }
             """
         ])
@@ -170,7 +170,7 @@ struct GeneratorTests {
                     try EnglishGreeter._flightRegister(container)
                     try Welcomer._flightRegister(container)
 
-                    // Existential bridges (demand-driven): each `@Autowired var _: (any P)`
+                    // Existential bridges (demand-driven): each `@Inject var _: (any P)`
                     // with exactly one scanned conformer resolves through that conformer,
                     // mirroring its scope. A `// flight:hand-registered` marker on the
                     // demanding property suppresses the bridge.
@@ -343,7 +343,7 @@ struct GeneratorTests {
             init() {}
             }
             @Service final class UserService: Sendable {
-            @Autowired var repository: any UserRepositoryProtocol
+            @Inject var repository: any UserRepositoryProtocol
             init() {}
             }
             """
@@ -397,7 +397,7 @@ struct GeneratorTests {
             "Needy.swift": """
             import FlightCore
             @Service final class Needy: Sendable {
-            @Autowired var missing: NoSuchComponent
+            @Inject var missing: NoSuchComponent
             init() {}
             }
             """
@@ -414,11 +414,11 @@ struct GeneratorTests {
             "Cycle.swift": """
             import FlightCore
             @Component final class Ping: Sendable {
-            @Autowired var pong: Pong
+            @Inject var pong: Pong
             init() {}
             }
             @Component final class Pong: Sendable {
-            @Autowired var ping: Ping
+            @Inject var ping: Ping
             init() {}
             }
             """
@@ -434,7 +434,7 @@ struct GeneratorTests {
             import FlightCore
             @Service final class Marked: Sendable {
             // flight:hand-registered
-            @Autowired var external: SomethingRegisteredByHand
+            @Inject var external: SomethingRegisteredByHand
             init() {}
             }
             """

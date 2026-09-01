@@ -180,7 +180,7 @@ extension Response {
 
     // MARK: - Upgrade (§6.1)
 
-    /// Built by the routing layer for `@WebSocketMapping` handlers; also
+    /// Built by the routing layer for `@WebSocketRoute` handlers; also
     /// callable directly from a plain handler that constructed its own
     /// `WebSocketUpgradeHandler`.
     public static func upgrade(

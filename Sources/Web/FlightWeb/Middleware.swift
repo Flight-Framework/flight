@@ -49,7 +49,7 @@ public typealias Next = @Sendable (RequestContext) async throws -> Response
 /// ```
 ///
 /// `@Middleware` registers the type as an ordinary singleton component —
-/// resolvable with `@Autowired`, constructible and testable on its own, its
+/// resolvable with `@Inject`, constructible and testable on its own, its
 /// dependencies and settings arriving through its initializer the same way
 /// any other component's do. It does **not** enroll the type in any
 /// pipeline: a `@Middleware` type that appears in no `container.pipeline { }`

@@ -42,7 +42,7 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
         var initLines: [String] = []
         for property in properties {
             switch property.kind {
-            case .autowired(let qualifier):
+            case .inject(let qualifier):
                 if let qualifier {
                     initLines.append(
                         "self.\(property.name) = try container.resolve(\(property.typeText).self, qualifier: \(qualifier))"
@@ -115,7 +115,7 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
 
     private struct InjectedProperty {
         enum Kind {
-            case autowired(qualifier: String?)
+            case inject(qualifier: String?)
             case configValue(key: String, defaultValue: String?)
         }
         let name: String
@@ -138,7 +138,7 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
             guard let typeAnnotation = binding.typeAnnotation else {
                 context.diagnoseError(
                     "middleware.untyped",
-                    "@Autowired/@ConfigValue properties need an explicit type annotation — injection resolves by static type.",
+                    "@Inject/@ConfigValue properties need an explicit type annotation — injection resolves by static type.",
                     at: variable
                 )
                 continue
@@ -164,8 +164,8 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
                 let name = attr.attributeName.as(IdentifierTypeSyntax.self)?.name.text
             else { continue }
             switch name {
-            case "Autowired":
-                return .autowired(qualifier: firstArgumentSource(of: attr))
+            case "Inject":
+                return .inject(qualifier: firstArgumentSource(of: attr))
             case "ConfigValue":
                 guard let key = firstArgumentSource(of: attr) else {
                     context.diagnoseError(
@@ -239,13 +239,13 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
         var seenPairs: Set<String> = []
         var valid = true
         for property in properties {
-            guard case .autowired(let qualifier) = property.kind else { continue }
+            guard case .inject(let qualifier) = property.kind else { continue }
             let pairKey = "\(property.typeText)|\(qualifier ?? "<nil>")"
             if let first = seen[property.typeText] {
                 if qualifier == nil || first == nil || seenPairs.contains(pairKey) {
                     context.diagnoseError(
-                        "autowired.ambiguous",
-                        "Two @Autowired properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Autowired(\"primary\").",
+                        "inject.ambiguous",
+                        "Two @Inject properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
                         at: property.node
                     )
                     valid = false
@@ -285,7 +285,7 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
                 }
                 context.diagnoseError(
                     "middleware.uninitialized",
-                    "Stored property '\(pattern.identifier.text)' of a @Middleware type needs a default value — the generated init(_flight:) assigns only @Autowired/@ConfigValue properties.",
+                    "Stored property '\(pattern.identifier.text)' of a @Middleware type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
                     at: variable
                 )
                 valid = false

@@ -13,7 +13,7 @@ Core's `Container`/`FlightModule`/`Scope` — through exactly one channel,
 
 | Product | Contents |
 |---|---|
-| `FlightWeb` | `RequestContext`, `Request`/`Response`, middleware lanes, `Router`, `@Controller`/`@GetMapping`/…/`@WebSocketMapping` macros, `ResponseEncodable`, cookies, SSE, streaming bodies, multipart, resumable uploads, static assets, `serveContent`'s conditional/range engine, `WebSocketUpgradeHandler`/`WebSocketConnection`, `ServerTransport` protocol, `FlightWebModule` |
+| `FlightWeb` | `RequestContext`, `Request`/`Response`, middleware lanes, `Router`, `@Controller`/`@GetRoute`/…/`@WebSocketRoute` macros, `ResponseEncodable`, cookies, SSE, streaming bodies, multipart, resumable uploads, static assets, `serveContent`'s conditional/range engine, `WebSocketUpgradeHandler`/`WebSocketConnection`, `ServerTransport` protocol, `FlightWebModule` |
 | `FlightTransport` | The default transport (§5.2): wraps **HummingbirdCore** — a mature, versioned low-level HTTP transport — for HTTP/1.1 (keep-alive, pipelining, 100-continue), streaming bodies, and WebSocket protocol handling. The only target in all of Flight that knows what it wraps (§5.6) |
 | `FlightWebTesting` | `TestContainer`, `RequestContext.mock`, `TestClient` (in-process dispatch + in-process WebSocket), `InMemoryTransport` (§5.4's socket-free transport) |
 
@@ -26,9 +26,9 @@ import FlightTransport
 
 @Controller
 struct UserController {
-    @Autowired var userService: UserService          // Flight Core DI, unchanged
+    @Inject var userService: UserService          // Flight Core DI, unchanged
 
-    @GetMapping("/users/:id")
+    @GetRoute("/users/:id")
     func getUser(_ context: RequestContext) async throws -> UserResponse {
         guard let id = context.pathParam("id") else {
             throw HTTPError(.badRequest, "missing id")
@@ -36,17 +36,17 @@ struct UserController {
         return try await userService.find(id)        // UserResponse: Codable + ResponseEncodable
     }
 
-    @PostMapping("/users")
+    @PostRoute("/users")
     func createUser(_ context: RequestContext, body: CreateUserRequest) async throws -> UserResponse {
         try await userService.create(body)
     }
 
-    @WebSocketMapping("/chat/:roomId")               // §6.1 — same route table
+    @WebSocketRoute("/chat/:roomId")               // §6.1 — same route table
     func chat(_ context: RequestContext) throws -> any WebSocketUpgradeHandler {
         ChatRoomHandler(roomId: context.pathParam("roomId")!)
     }
 
-    @GetMapping("/events")                           // §6.2 — SSE is a response shape
+    @GetRoute("/events")                           // §6.2 — SSE is a response shape
     func events(_ context: RequestContext) -> Response {
         .serverSentEvents { events in
             // `send` suspends until the event has gone out, and answers
@@ -129,7 +129,7 @@ already asks `acceptsUpgrade` — pulls chunks through with real backpressure
 instead:
 
 ```swift
-@PostMapping("/import", maxBodyBytes: 2 << 30)
+@PostRoute("/import", maxBodyBytes: 2 << 30)
 func importArchive(_ context: RequestContext, body: RequestBodyStream) async throws -> Response {
     for try await chunk in body.chunks { try await ingest(chunk) }
     return .noContent
@@ -256,7 +256,7 @@ upgrades ride whatever the listener is doing, so `wss://` needs no separate
 configuration.
 
 Controllers must be `Sendable` — one instance serves concurrent requests.
-An internal struct whose `@Autowired`/`@ConfigValue` dependencies are
+An internal struct whose `@Inject`/`@ConfigValue` dependencies are
 Sendable gets the conformance implicitly; `public` controllers declare it
 (`public struct UserController: Sendable`). A non-Sendable controller is a
 compile error at the generated registration, not a runtime race.
@@ -288,7 +288,7 @@ The build plugin side is Flight Core's existing `FlightRegistrationPlugin`,
 generalized by one word: its scanner now recognizes `@Controller` alongside
 `@Component` (a name-level change — Core references no Flight Web types), so
 the generated `flightRegisterAll(_:)` covers controllers, and route
-existence + path-pattern validity are compile-time information (`@GetMapping`
+existence + path-pattern validity are compile-time information (`@GetRoute`
 rejects non-literal and malformed paths at the declaration site).
 
 ### Base paths (`@Controller("/users")`)
@@ -296,16 +296,16 @@ rejects non-literal and malformed paths at the declaration site).
 `@Controller` takes an optional base path, combined with every mapped
 method's own path the same way Spring combines a class-level
 `@RequestMapping` with its method-level mappings — concatenated, collapsing
-a doubled `/` at the seam, with a bare `@GetMapping("/")` resolving to the
+a doubled `/` at the seam, with a bare `@GetRoute("/")` resolving to the
 base path itself rather than a trailing-slash variant of it:
 
 ```swift
 @Controller("/users")
 struct UserController {
-    @GetMapping("/")          // → GET /users
+    @GetRoute("/")          // → GET /users
     func index(_ context: RequestContext) -> [User] { ... }
 
-    @GetMapping("/:id")       // → GET /users/:id
+    @GetRoute("/:id")       // → GET /users/:id
     func show(_ context: RequestContext) -> User { ... }
 }
 ```

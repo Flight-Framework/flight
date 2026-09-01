@@ -9,7 +9,7 @@ struct FlightCoreMacrosPlugin: CompilerPlugin {
         ComponentMacro.self,
         ServiceMacro.self,
         RepositoryMacro.self,
-        AutowiredMacro.self,
+        InjectMacro.self,
         ConfigValueMacro.self,
         TransactionalMacro.self,
         SettingsMacro.self,

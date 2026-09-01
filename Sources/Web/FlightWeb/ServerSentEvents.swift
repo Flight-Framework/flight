@@ -2,7 +2,7 @@ import Foundation
 
 /// One Server-Sent Event, encoded per the WHATWG EventSource format. SSE is
 /// just a response shape, not a routing concern (§6.2) — an SSE endpoint is
-/// an ordinary `@GetMapping` handler returning
+/// an ordinary `@GetRoute` handler returning
 /// `Response.serverSentEvents { … }` (or `.streaming(contentType:
 /// .eventStream)` with hand-formatted chunks).
 public struct ServerSentEvent: Sendable, Equatable {

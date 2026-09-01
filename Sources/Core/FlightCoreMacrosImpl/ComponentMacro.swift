@@ -4,7 +4,7 @@ import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
 /// The shared expansion behind `@Component` and its stereotypes. Each conforming macro generates:
-/// - `init(_flight:)` — constructs the type with every `@Autowired` property
+/// - `init(_flight:)` — constructs the type with every `@Inject` property
 /// container-resolved and every `@ConfigValue` property config-resolved;
 /// - `_flightRegister(_:)` — the registration thunk the build plugin's
 /// generated `_registerAll` calls;
@@ -47,7 +47,7 @@ public struct RepositoryMacro: RegistrationMacro {
 
 struct InjectedProperty {
     enum Kind {
-        case autowired(qualifier: String?)
+        case inject(qualifier: String?)
         /// `defaultValue` is the `default:` argument's source text,
         /// re-embedded verbatim in the expansion (nil = required key).
         case configValue(key: String, defaultValue: String?)
@@ -84,7 +84,7 @@ extension RegistrationMacro {
         var initLines: [String] = []
         for property in properties {
             switch property.kind {
-            case .autowired(let qualifier):
+            case .inject(let qualifier):
                 if let qualifier {
                     initLines.append(
                         "self.\(property.name) = try container.resolve(\(property.typeText).self, qualifier: \(qualifier))"
@@ -191,7 +191,7 @@ extension RegistrationMacro {
         return false
     }
 
-    /// the fixture 6 decision: two `@Autowired` properties of the same type
+    /// the fixture 6 decision: two `@Inject` properties of the same type
     /// are a compile error unless each carries a distinct explicit qualifier.
     private static func validateQualifierDisambiguation(
         _ properties: [InjectedProperty],
@@ -201,13 +201,13 @@ extension RegistrationMacro {
         var seenPairs: Set<String> = []
         var valid = true
         for property in properties {
-            guard case .autowired(let qualifier) = property.kind else { continue }
+            guard case .inject(let qualifier) = property.kind else { continue }
             let pairKey = "\(property.typeText)|\(qualifier ?? "<nil>")"
             if let first = seen[property.typeText] {
                 if qualifier == nil || first == nil || seenPairs.contains(pairKey) {
                     context.diagnoseError(
-                        "autowired.ambiguous",
-                        "Two @Autowired properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Autowired(\"primary\").",
+                        "inject.ambiguous",
+                        "Two @Inject properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
                         at: property.node
                     )
                     valid = false
@@ -254,7 +254,7 @@ extension RegistrationMacro {
                 }
                 context.diagnoseError(
                     "component.uninitialized",
-                    "Stored property '\(pattern.identifier.text)' of a \(displayName) type needs a default value — the generated init(_flight:) assigns only @Autowired/@ConfigValue properties.",
+                    "Stored property '\(pattern.identifier.text)' of a \(displayName) type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
                     at: variable
                 )
                 valid = false
@@ -298,7 +298,7 @@ extension RegistrationMacro {
             guard let typeAnnotation = binding.typeAnnotation else {
                 context.diagnoseError(
                     "injected.untyped",
-                    "@Autowired/@ConfigValue properties need an explicit type annotation — injection resolves by static type.",
+                    "@Inject/@ConfigValue properties need an explicit type annotation — injection resolves by static type.",
                     at: variable
                 )
                 continue
@@ -324,8 +324,8 @@ extension RegistrationMacro {
                 let name = attr.attributeName.as(IdentifierTypeSyntax.self)?.name.text
             else { continue }
             switch name {
-            case "Autowired":
-                return .autowired(qualifier: firstArgumentSource(of: attr))
+            case "Inject":
+                return .inject(qualifier: firstArgumentSource(of: attr))
             case "ConfigValue":
                 guard let key = firstArgumentSource(of: attr) else {
                     context.diagnoseError(

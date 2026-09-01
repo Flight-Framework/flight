@@ -49,7 +49,7 @@ discovery (`{issuer}/.well-known/openid-configuration`); set
 ### Reading the current user
 
 ```swift
-@GetMapping("/documents")
+@GetRoute("/documents")
 func documents(_ context: RequestContext) async throws -> Response {
     let principal = try context.requirePrincipal()          // 401 when absent
     return .json(try await repository.documents(ownedBy: principal.subject))
@@ -64,7 +64,7 @@ For service code that shouldn't take a principal parameter, bind the
 task-local around the call:
 
 ```swift
-@GetMapping("/documents")
+@GetRoute("/documents")
 func documents(_ context: RequestContext) async throws -> Response {
     try await context.withPrincipal {
         .json(try await documentService.currentUsersDocuments())
@@ -96,7 +96,7 @@ public routes stay public. Reject where you choose to:
 container.registerMiddleware("app.require-auth", order: -50, requireAuthentication)
 
 // Or per route, in the handler:
-@PostMapping("/admin/users")
+@PostRoute("/admin/users")
 func createUser(_ context: RequestContext) async throws -> Response {
     guard context.principal?.hasRole("admin") == true else {
         throw SecurityError.forbidden

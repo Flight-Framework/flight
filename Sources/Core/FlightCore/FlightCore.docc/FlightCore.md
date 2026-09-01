@@ -15,7 +15,7 @@ surprise:
 ```swift
 @Service
 final class UserService: Sendable {
-    @Autowired var repository: any UserRepository
+    @Inject var repository: any UserRepository
     @ConfigValue("features.signup_enabled", default: true) var signupEnabled: Bool
 }
 ```

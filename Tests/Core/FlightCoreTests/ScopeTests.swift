@@ -178,11 +178,11 @@ struct ActiveScopeTests {
 
 // MARK: - Ambient fallback
 
-/// Plain `resolve` — the call `@Autowired` expands to — rides the ambient
+/// Plain `resolve` — the call `@Inject` expands to — rides the ambient
 /// scope for `.scoped` registrations. This is the general form of delta 11:
 /// `resolveInActiveScope` made scoped dependencies *reachable* from
 /// hand-written factories; the fallback makes them reachable from the
-/// macro-generated path too, so `@Service(scope: .scoped)` can `@Autowired`
+/// macro-generated path too, so `@Service(scope: .scoped)` can `@Inject`
 /// a `.scoped` repository. The captive-dependency guarantee is untouched —
 /// no ambient scope (in particular: eager singleton construction at
 /// `freeze()`) still fails loudly.
@@ -190,7 +190,7 @@ struct ActiveScopeTests {
 struct AmbientFallbackTests {
 
     /// Depends on Gamma through PLAIN resolve — exactly the assignment an
-    /// `@Autowired` property's generated `init(_flight:)` produces.
+    /// `@Inject` property's generated `init(_flight:)` produces.
     final class Zeta: Sendable {
         let gamma: Gamma
         init(gamma: Gamma) { self.gamma = gamma }
@@ -200,14 +200,14 @@ struct AmbientFallbackTests {
         let container = Container()
         container.register(Gamma.self, scope: .scoped) { _ in Gamma() }
         container.register(Zeta.self, scope: .scoped) { c in
-            Zeta(gamma: try c.resolve(Gamma.self))  // plain resolve — the @Autowired shape
+            Zeta(gamma: try c.resolve(Gamma.self))  // plain resolve — the @Inject shape
         }
         try container.freeze()
         return container
     }
 
     @Test("plain resolve of a scoped component inside a scoped resolution lands in that scope")
-    func autowiredShape() throws {
+    func injectShape() throws {
         let container = try makeContainer()
         try container.withScope { scope in
             let zeta = try container.resolve(Zeta.self, in: scope)

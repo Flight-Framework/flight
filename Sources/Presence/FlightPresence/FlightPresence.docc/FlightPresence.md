@@ -11,7 +11,7 @@ sockets come and go and nodes occasionally stop answering, is the actual
 problem:
 
 ```swift
-@Autowired var presence: any Presence
+@Inject var presence: any Presence
 
 await presence.track(topic: "room:42", key: user.id, payload: ["name": user.name], socket: socket)
 let here = await presence.list(topic: "room:42")     // [PresenceEntry]

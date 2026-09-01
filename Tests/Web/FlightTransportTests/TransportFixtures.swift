@@ -10,17 +10,17 @@ import Testing
 
 @Controller
 struct WireController {
-    @GetMapping("/hello")
+    @GetRoute("/hello")
     func hello(_ context: RequestContext) -> String {
         "hello"
     }
 
-    @PostMapping("/echo")
+    @PostRoute("/echo")
     func echo(_ context: RequestContext, body: EchoBody) throws -> EchoBody {
         body
     }
 
-    @GetMapping("/sse")
+    @GetRoute("/sse")
     func sse(_ context: RequestContext) -> Response {
         .serverSentEvents { events in
             await events.send(data: "first", event: "tick")
@@ -31,7 +31,7 @@ struct WireController {
 
     /// Records that its body ran. An upgrade-shaped request at this ordinary
     /// HTTP route must leave the counter at zero.
-    @GetMapping("/counted")
+    @GetRoute("/counted")
     func counted(_ context: RequestContext) -> String {
         WireSideEffect.count.withLock { $0 += 1 }
         return "counted"
@@ -40,7 +40,7 @@ struct WireController {
     /// A `.file`-shaped response over the wire: 26 fixed bytes served
     /// through serveContent, so the socket tests can assert the transport's
     /// chunked write of a sized source, HEAD stripping, and 206 slicing.
-    @GetMapping("/alphabet")
+    @GetRoute("/alphabet")
     func alphabet(_ context: RequestContext) -> Response {
         serveContent(
             for: context.request,
@@ -55,7 +55,7 @@ struct WireController {
     /// Streaming-bodied: the transport must hand chunks through live, and
     /// this route's cap (far above the wire tests' tiny global cap) must be
     /// the one that governs.
-    @PostMapping("/upload-stream", maxBodyBytes: 100_000)
+    @PostRoute("/upload-stream", maxBodyBytes: 100_000)
     func uploadStream(_ context: RequestContext, body: RequestBodyStream) async throws -> String {
         var total = 0
         for try await chunk in body.chunks { total += chunk.count }
@@ -64,14 +64,14 @@ struct WireController {
 
     /// Reads one chunk and returns — the transport must still keep the
     /// connection serviceable for the next request.
-    @PostMapping("/upload-impatient", maxBodyBytes: 100_000)
+    @PostRoute("/upload-impatient", maxBodyBytes: 100_000)
     func uploadImpatient(_ context: RequestContext, body: RequestBodyStream) async throws -> String {
         var iterator = body.chunks.makeAsyncIterator()
         _ = try await iterator.next()
         return "impatient"
     }
 
-    @WebSocketMapping("/ws/:room")
+    @WebSocketRoute("/ws/:room")
     func socket(_ context: RequestContext) -> any WebSocketUpgradeHandler {
         WireEchoHandler(room: context.pathParam("room") ?? "?")
     }

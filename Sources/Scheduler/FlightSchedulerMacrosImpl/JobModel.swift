@@ -81,7 +81,7 @@ enum JobScanning {
                 """
                 @Scheduled method '\(name)' must take no parameters. A scheduled job has \
                 no caller to supply them — inject what it needs into the enclosing type \
-                with @Autowired instead.
+                with @Inject instead.
                 """,
                 at: function.signature.parameterClause)
             return nil

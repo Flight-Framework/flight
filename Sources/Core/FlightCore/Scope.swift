@@ -108,7 +108,7 @@ extension Container {
     ///
     /// Now plain `resolve` performs the same fallback for
     /// `.scoped` registrations (throwing `scopeRequired` with no scope
-    /// bound), so `@Autowired` covers this shape too. This method remains as
+    /// bound), so `@Inject` covers this shape too. This method remains as
     /// the *explicit* spelling: it declares "I expect an ambient scope", and
     /// its distinct `noActiveScope` error names the captive-dependency case
     /// precisely.

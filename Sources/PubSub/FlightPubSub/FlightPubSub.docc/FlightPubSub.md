@@ -9,7 +9,7 @@ configured.
 subscribe to one. Everything else is which implementation is registered.
 
 ```swift
-@Autowired var pubsub: any PubSub
+@Inject var pubsub: any PubSub
 
 await pubsub.publish(Message(topic: "orders", payload: data))
 

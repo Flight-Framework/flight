@@ -23,7 +23,7 @@ extension RequestContext {
     ///:
     ///
     /// ```swift
-    /// @GetMapping("/documents")
+    /// @GetRoute("/documents")
     /// func documents(_ context: RequestContext) async throws -> Response {
     ///     try await context.withPrincipal {
     ///         .json(try await documentService.currentUsersDocuments())

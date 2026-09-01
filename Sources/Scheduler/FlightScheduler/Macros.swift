@@ -4,12 +4,12 @@ import Foundation
 /// Marks a type whose `@Scheduled` methods should run on a schedule.
 ///
 /// A `@Scheduler` type is an ordinary singleton component — inject what it
-/// needs with `@Autowired`, exactly as anywhere else:
+/// needs with `@Inject`, exactly as anywhere else:
 ///
 /// ```swift
 /// @Scheduler
 /// struct ReportJobs {
-///     @Autowired var reports: ReportService
+///     @Inject var reports: ReportService
 ///
 ///     @Scheduled("0 0 3 * * *")
 ///     func nightlyRollup() async throws {

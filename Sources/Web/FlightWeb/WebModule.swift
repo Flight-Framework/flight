@@ -14,7 +14,7 @@ import ServiceLifecycle
 /// their routes) through the ordinary pipeline from any module. Its service
 /// slots into bootstrap step 8, and request serving begins only once step
 /// 9's ServiceGroup runs — which is what guarantees every handler's
-/// `@Autowired` dependencies are fully resolved before the first request
+/// `@Inject` dependencies are fully resolved before the first request
 /// arrives (§8).
 ///
 /// A class, because it stashes the container during `configure` for the

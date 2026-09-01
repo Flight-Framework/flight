@@ -10,7 +10,7 @@ public protocol _FlightRegistrable {
 
 /// Marks a type as container-managed. Expansion:
 /// 1. a memberwise resolving initializer `init(_flight:)` that constructs the
-/// type with every `@Autowired` property resolved against the container
+/// type with every `@Inject` property resolved against the container
 /// and every `@ConfigValue` property resolved against `Configuration`;
 /// 2. a static registration thunk `_flightRegister(_:)`;
 /// 3. conformance to `_FlightRegistrable`.
@@ -54,8 +54,8 @@ public macro Repository(
 /// When two properties share a type, explicit qualifiers are *required* —
 /// `@Component` emits a compile error otherwise.
 @attached(peer)
-public macro Autowired(_ qualifier: String? = nil) =
-    #externalMacro(module: "FlightCoreMacrosImpl", type: "AutowiredMacro")
+public macro Inject(_ qualifier: String? = nil) =
+    #externalMacro(module: "FlightCoreMacrosImpl", type: "InjectMacro")
 
 /// Marks a property as config-resolved instead. Same macro family,
 /// same registration thunk.
@@ -105,7 +105,7 @@ public macro ConfigValue<T: ConfigDecodable>(_ key: String, default: T) =
 /// ```
 ///
 /// The type is registered as an ordinary `.singleton` component — resolve it
-/// with `@Autowired var settings: AuthSettings` anywhere, exactly like any
+/// with `@Inject var settings: AuthSettings` anywhere, exactly like any
 /// other dependency. A `validate()` method with no parameters, if the type
 /// declares one, runs once, right after construction, at bootstrap: the
 /// place a bad value should fail, not the first request that reads it.

@@ -14,7 +14,7 @@
 // outputs are not visible across plugin work directories anyway.
 //
 // Besides the per-component thunk calls, flightRegisterAll also carries
-// synthesized *existential bridges*: for every `@Autowired var x: (any P)`
+// synthesized *existential bridges*: for every `@Inject var x: (any P)`
 // demand whose protocol has exactly one scanned conformer, a registration of
 // the existential key routing to that conformer (see the synthesis section
 // below for the exact rules and escape hatches).
@@ -63,8 +63,8 @@ struct ScannedComponent {
     /// extensions are the part of the conformance picture an attached macro
     /// can never see).
     var conformanceNames: [String]
-    let autowiredTypeNames: [String]
-    /// `@Autowired` types whose property carries a `flight:hand-registered`
+    let injectTypeNames: [String]
+    /// `@Inject` types whose property carries a `flight:hand-registered`
     /// marker comment — the author's acknowledgment that the type is
     /// registered by hand in a module's `configure(_:)` (invisible to this
     /// scanner, P-2) and the missing-registration warning should not fire.
@@ -195,12 +195,12 @@ final class ComponentVisitor: SyntaxVisitor {
             registrable.attributeName.as(IdentifierTypeSyntax.self)?.name.text == "Settings"
         let settingsNamespace = isSettingsType ? literalKey(of: registrable) : nil
 
-        var autowired: [String] = []
+        var inject: [String] = []
         var acknowledged: [String] = []
         var configValues: [ScannedConfigValue] = []
         for member in members.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
-            if hasAttribute(variable.attributes, named: "Autowired"),
+            if hasAttribute(variable.attributes, named: "Inject"),
                 let type = variable.bindings.first?.typeAnnotation?.type.trimmedDescription
             {
                 // `member.description` spans the member's leading trivia
@@ -210,7 +210,7 @@ final class ComponentVisitor: SyntaxVisitor {
                 if member.description.contains("flight:hand-registered") {
                     acknowledged.append(type)
                 } else {
-                    autowired.append(type)
+                    inject.append(type)
                 }
             }
             if let attribute = attribute(of: variable.attributes, named: "ConfigValue") {
@@ -235,7 +235,7 @@ final class ComponentVisitor: SyntaxVisitor {
             }
 
             if let namespace = settingsNamespace,
-                !hasAttribute(variable.attributes, named: "Autowired")
+                !hasAttribute(variable.attributes, named: "Inject")
             {
                 for binding in variable.bindings {
                     guard binding.accessorBlock == nil,
@@ -266,7 +266,7 @@ final class ComponentVisitor: SyntaxVisitor {
                 conformanceNames: inheritanceClause?.inheritedTypes.map {
                     $0.type.trimmedDescription
                 } ?? [],
-                autowiredTypeNames: autowired,
+                injectTypeNames: inject,
                 acknowledgedTypeNames: acknowledged,
                 configValues: configValues,
                 file: file,
@@ -412,15 +412,15 @@ if !extensionConformances.isEmpty {
 // MARK: - Existential bridge synthesis
 //
 // The stereotype macros register a component under its CONCRETE type key;
-// `@Autowired var x: (any P)` resolves the EXISTENTIAL key. Nothing used to
+// `@Inject var x: (any P)` resolves the EXISTENTIAL key. Nothing used to
 // populate that key, so every protocol seam cost a hand-written bridge in a
 // module's configure(_:) plus a marker comment silencing the warning below.
-// The scanner sees both sides of the seam — the demand in @Autowired type
+// The scanner sees both sides of the seam — the demand in @Inject type
 // text, the supply in inheritance clauses and extensions — so when a demanded
 // protocol has exactly one scanned conformer, the bridge is generated into
 // flightRegisterAll instead.
 //
-// Demand-driven on purpose: binding only what some @Autowired actually asks
+// Demand-driven on purpose: binding only what some @Inject actually asks
 // for means marker conformances (Sendable, Codable, a superclass) never
 // produce registrations — nobody autowires `(any Sendable)`.
 //
@@ -471,7 +471,7 @@ func synthesizeBridges() -> [SynthesizedBridge] {
     // type however it is spelled.
     var demands: [String: (protocolName: String, demandedBy: ScannedComponent)] = [:]
     for component in components {
-        for dependency in component.autowiredTypeNames {
+        for dependency in component.injectTypeNames {
             guard let name = existentialProtocolName(dependency) else { continue }
             let base = baseName(name)
             if demands[base] == nil { demands[base] = (name, component) }
@@ -494,7 +494,7 @@ func synthesizeBridges() -> [SynthesizedBridge] {
         default:
             emit(
                 "warning",
-                "@Autowired type '(any \(demand.protocolName))' in \(demand.demandedBy.typeName) has \(conformers.count) scanned conformers (\(conformers.map(\.typeName).sorted().joined(separator: ", "))) — no bridge was generated. Register the existential by hand in a module's configure(_:) and acknowledge the property with a `// flight:hand-registered` comment.",
+                "@Inject type '(any \(demand.protocolName))' in \(demand.demandedBy.typeName) has \(conformers.count) scanned conformers (\(conformers.map(\.typeName).sorted().joined(separator: ", "))) — no bridge was generated. Register the existential by hand in a module's configure(_:) and acknowledge the property with a `// flight:hand-registered` comment.",
                 file: demand.demandedBy.file, line: demand.demandedBy.line
             )
         }
@@ -524,7 +524,7 @@ let alwaysAvailable: Set<String> = [
 ]
 
 for component in components {
-    for dependency in component.autowiredTypeNames {
+    for dependency in component.injectTypeNames {
         // Demands satisfied by a synthesized bridge are no longer suspicious.
         if let name = existentialProtocolName(dependency),
             bridgedProtocolBaseNames.contains(baseName(name))
@@ -541,7 +541,7 @@ for component in components {
             emit(
                 "error",
                 """
-                @Autowired does not support optional types: '\(written)' in \
+                @Inject does not support optional types: '\(written)' in \
                 \(component.typeName) would resolve Optional<\
                 \(written.dropLast())>, which nothing registers. Drop the '?' if the \
                 dependency is required, or resolve it by hand where absence is \
@@ -554,7 +554,7 @@ for component in components {
         let base = written
         // Compared on the base name, as the bridge check above already does.
         // Comparing the written text against bare scanned names warned on
-        // every correctly-qualified `@Autowired var x: MyLib.Foo` — an
+        // every correctly-qualified `@Inject var x: MyLib.Foo` — an
         // always-on false positive, which is how a warning teaches people to
         // stop reading warnings.
         let known =
@@ -564,14 +564,14 @@ for component in components {
         if !known {
             emit(
                 "warning",
-                "@Autowired type '\(base)' in \(component.typeName) is not a scanned @Component. If it is hand-registered in a module's configure(_:), acknowledge it with a `// flight:hand-registered` comment on the property; otherwise resolution will fail at startup.",
+                "@Inject type '\(base)' in \(component.typeName) is not a scanned @Component. If it is hand-registered in a module's configure(_:), acknowledge it with a `// flight:hand-registered` comment on the property; otherwise resolution will fail at startup.",
                 file: component.file, line: component.line
             )
         }
     }
 }
 
-// Static cycle detection over the @Autowired edges (name-level, qualifier-blind).
+// Static cycle detection over the @Inject edges (name-level, qualifier-blind).
 @MainActor
 func detectCycles() {
     let byName = Dictionary(components.map { ($0.typeName, $0) }, uniquingKeysWith: { a, _ in a })
@@ -593,7 +593,7 @@ func detectCycles() {
         // Acknowledged (marker-carrying) dependencies keep their edges here:
         // the marker silences the missing-registration warning, never cycle
         // detection.
-        for dependency in (component.autowiredTypeNames + component.acknowledgedTypeNames)
+        for dependency in (component.injectTypeNames + component.acknowledgedTypeNames)
         where byName[dependency] != nil {
             visit(dependency, stack: stack + [name])
         }
@@ -731,7 +731,7 @@ if !bridges.isEmpty {
     // formatter that re-indents the block silently changes the emitted text.
     // These carry their indentation explicitly and cannot drift.
     out += "\n"
-    out += "    // Existential bridges (demand-driven): each `@Autowired var _: (any P)`\n"
+    out += "    // Existential bridges (demand-driven): each `@Inject var _: (any P)`\n"
     out += "    // with exactly one scanned conformer resolves through that conformer,\n"
     out += "    // mirroring its scope. A `// flight:hand-registered` marker on the\n"
     out += "    // demanding property suppresses the bridge.\n"

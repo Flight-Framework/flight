@@ -25,9 +25,9 @@ public struct Authentication: Sendable {
     // metatype.
     // flight:hand-registered — the validator is registered by
     // FlightSecurityModule (or the application's own module), never scanned.
-    @Autowired var validator: (any TokenValidator)
+    @Inject var validator: (any TokenValidator)
 
-    /// For manual wiring or tests, where `@Autowired` has nothing to
+    /// For manual wiring or tests, where `@Inject` has nothing to
     /// resolve from.
     public init(validator: any TokenValidator) {
         self.validator = validator
@@ -41,7 +41,7 @@ public struct Authentication: Sendable {
         guard let holder = try? context.resolve(PrincipalHolder.self) else {
             // A wiring bug, not a client error: fail closed, say nothing
             // token-specific to the wire. `PrincipalHolder` is request-scoped
-            // and so cannot be an `@Autowired` dependency of this singleton
+            // and so cannot be an `@Inject` dependency of this singleton
             // (that would be the captive-dependency mistake Flight Core's
             // scope check exists to catch) — it is only absent at all if
             // this type is running without `FlightSecurityModule`, which is

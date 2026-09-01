@@ -7,7 +7,7 @@ import SwiftSyntaxMacros
 struct FlightWebMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ControllerMacro.self,
-        RouteMappingMacro.self,
+        RouteMacro.self,
         MiddlewareMacro.self,
     ]
 }

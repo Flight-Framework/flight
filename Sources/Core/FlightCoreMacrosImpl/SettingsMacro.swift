@@ -171,10 +171,10 @@ public struct SettingsMacro: MemberMacro, ExtensionMacro {
                     let pattern = binding.pattern.as(IdentifierPatternSyntax.self)
                 else { continue }
 
-                if hasAttribute(variable, named: "Autowired") {
+                if hasAttribute(variable, named: "Inject") {
                     context.diagnoseError(
-                        "settings.autowired",
-                        "@Autowired is not valid inside @Settings — settings hold configuration only. Put dependencies in a @Service or @Component instead.",
+                        "settings.inject",
+                        "@Inject is not valid inside @Settings — settings hold configuration only. Put dependencies in a @Service or @Component instead.",
                         at: variable
                     )
                     continue

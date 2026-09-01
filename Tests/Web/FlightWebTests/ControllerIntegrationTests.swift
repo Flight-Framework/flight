@@ -56,9 +56,9 @@ final class RequestTracer: Sendable {
 
 @Controller
 struct UserController {
-    @Autowired var userService: UserService
+    @Inject var userService: UserService
 
-    @GetMapping("/users/:id")
+    @GetRoute("/users/:id")
     func getUser(_ context: RequestContext) async throws -> User {
         guard let id = context.pathParam("id").flatMap(Int.init) else {
             throw HTTPError(.badRequest, "user id must be an integer")
@@ -69,12 +69,12 @@ struct UserController {
         return user
     }
 
-    @PostMapping("/users")
+    @PostRoute("/users")
     func createUser(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
         try .json(userService.create(body), status: .created)
     }
 
-    @DeleteMapping("/users/:id")
+    @DeleteRoute("/users/:id")
     func deleteUser(_ context: RequestContext) throws {
         guard let id = context.pathParam("id").flatMap(Int.init) else {
             throw HTTPError(.badRequest, "user id must be an integer")
@@ -82,7 +82,7 @@ struct UserController {
         userService.delete(id)
     }
 
-    @PatchMapping("/users/:id")
+    @PatchRoute("/users/:id")
     func renameUser(_ context: RequestContext, body: CreateUserRequest) async throws -> User {
         guard let id = context.pathParam("id").flatMap(Int.init) else {
             throw HTTPError(.badRequest, "user id must be an integer")
@@ -95,17 +95,17 @@ struct UserController {
         return renamed
     }
 
-    @GetMapping("/users")
+    @GetRoute("/users")
     func listUsers(_ context: RequestContext) -> [String: Int] {
         ["count": userService.count]
     }
 
-    @GetMapping("/whoami/:name")
+    @GetRoute("/whoami/:name")
     func whoami(_ context: RequestContext) -> String {
         "you are \(context.pathParam("name") ?? "unknown")"
     }
 
-    @GetMapping("/scoped-pair")
+    @GetRoute("/scoped-pair")
     func scopedPair(_ context: RequestContext) throws -> [String: Int] {
         // Two resolutions inside one request must agree (§2, §3 of Core).
         let first = try context.resolve(RequestTracer.self)
@@ -113,7 +113,7 @@ struct UserController {
         return ["first": first.id, "second": second.id]
     }
 
-    @GetMapping("/events")
+    @GetRoute("/events")
     func events(_ context: RequestContext) -> Response {
         .serverSentEvents { events in
             await events.send(data: "one", event: "tick")
@@ -124,7 +124,7 @@ struct UserController {
 
 @Controller
 struct EchoSocketController {
-    @WebSocketMapping("/echo/:room")
+    @WebSocketRoute("/echo/:room")
     func echo(_ context: RequestContext) throws -> any WebSocketUpgradeHandler {
         EchoHandler(room: context.pathParam("room") ?? "?")
     }
@@ -157,7 +157,7 @@ enum SideEffect {
 
 @Controller
 struct SideEffectController {
-    @GetMapping("/side-effect")
+    @GetRoute("/side-effect")
     func run(_ context: RequestContext) -> Response {
         SideEffect.ran.withLock { $0 = true }
         return .text("ran")
@@ -425,15 +425,15 @@ struct WebSocketIntegrationTests {
 /// and a nested `:` parameter that combines with the base's own path.
 @Controller("/api/v1/widgets")
 struct WidgetController {
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> String { "widget index" }
 
-    @GetMapping("/:id")
+    @GetRoute("/:id")
     func show(_ context: RequestContext) -> String {
         "widget \(context.pathParam("id") ?? "?")"
     }
 
-    @PostMapping("/")
+    @PostRoute("/")
     func create(_ context: RequestContext) -> Response { .status(.created) }
 }
 
@@ -441,7 +441,7 @@ struct WidgetController {
 /// path that also starts with "/".
 @Controller("/api/v1/gadgets/")
 struct GadgetController {
-    @GetMapping("/:id")
+    @GetRoute("/:id")
     func show(_ context: RequestContext) -> String {
         "gadget \(context.pathParam("id") ?? "?")"
     }

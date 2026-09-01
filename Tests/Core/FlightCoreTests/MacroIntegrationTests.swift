@@ -22,7 +22,7 @@ final class MacroClock: Sendable {
 
 @Component
 final class MacroConsumer: Sendable {
-    @Autowired let clock: MacroClock
+    @Inject let clock: MacroClock
 }
 
 @Component(scope: .transient)
@@ -35,7 +35,7 @@ final class MacroRepository: Sendable {
 
 @Service
 final class MacroService: Sendable {
-    @Autowired let repository: MacroRepository
+    @Inject let repository: MacroRepository
 }
 
 @Component
@@ -51,8 +51,8 @@ final class MacroDefaulted: Sendable {
 
 @Component
 struct MacroQualified: Sendable {
-    @Autowired("primary") let primary: MacroClock
-    @Autowired("replica") let replica: MacroClock
+    @Inject("primary") let primary: MacroClock
+    @Inject("replica") let replica: MacroClock
 }
 
 // MARK: - Recording transaction coordinator
@@ -113,7 +113,7 @@ final class MacroLedger: Sendable {
 @Suite("Macro integration — generated code against a live container")
 struct MacroIntegrationTests {
 
-    @Test("@Component registration + @Autowired resolution round-trip")
+    @Test("@Component registration + @Inject resolution round-trip")
     func componentRoundTrip() throws {
         let container = Container()
         try MacroClock._flightRegister(container)
@@ -140,7 +140,7 @@ struct MacroIntegrationTests {
         try MacroService._flightRegister(container)
         try container.freeze()
 
-        // Same wiring semantics as @Component — @Autowired across stereotypes.
+        // Same wiring semantics as @Component — @Inject across stereotypes.
         let service = try container.resolve(MacroService.self)
         let repository = try container.resolve(MacroRepository.self)
         #expect(service.repository === repository)
@@ -204,7 +204,7 @@ struct MacroIntegrationTests {
         }
     }
 
-    @Test("@Autowired qualifiers resolve distinct components of one type")
+    @Test("@Inject qualifiers resolve distinct components of one type")
     func qualifiedInjection() throws {
         let container = Container()
         // M-2 : the generated init(_flight:) suppresses the

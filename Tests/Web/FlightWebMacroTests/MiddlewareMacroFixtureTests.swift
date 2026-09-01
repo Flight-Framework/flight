@@ -14,7 +14,7 @@ private let testMacros: [String: MacroSpec] = [
     "Middleware": MacroSpec(
         type: MiddlewareMacro.self,
         conformances: ["FlightCore._FlightRegistrable", "FlightWeb.Middleware"]),
-    "Autowired": MacroSpec(type: AutowiredMacro.self),
+    "Inject": MacroSpec(type: InjectMacro.self),
 ]
 
 @Suite("@Middleware expansion")
@@ -53,14 +53,14 @@ struct MiddlewareMacroFixtureTests {
         )
     }
 
-    @Test("@Autowired dependencies resolve exactly like @Component")
+    @Test("@Inject dependencies resolve exactly like @Component")
     func withDependencies() {
         assertMacroExpansion(
             """
             @Middleware
             public struct Transactions {
-                @Autowired var container: Container
-                @Autowired var settings: WebSettings
+                @Inject var container: Container
+                @Inject var settings: WebSettings
                 func handle(_ context: RequestContext, next: Next) async throws -> Response { try await next(context) }
             }
             """,
@@ -182,21 +182,21 @@ struct MiddlewareMacroDiagnosticTests {
                 """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "Stored property 'label' of a @Middleware type needs a default value — the generated init(_flight:) assigns only @Autowired/@ConfigValue properties.",
+                    message: "Stored property 'label' of a @Middleware type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
                     line: 3, column: 5)
             ],
             macroSpecs: testMacros
         )
     }
 
-    @Test("two @Autowired properties of the same type need distinct qualifiers")
-    func ambiguousAutowiredIsRejected() {
+    @Test("two @Inject properties of the same type need distinct qualifiers")
+    func ambiguousInjectIsRejected() {
         assertMacroExpansion(
             """
             @Middleware
             struct Fanout {
-                @Autowired var primary: Backend
-                @Autowired var secondary: Backend
+                @Inject var primary: Backend
+                @Inject var secondary: Backend
                 func handle(_ context: RequestContext, next: Next) async throws -> Response { try await next(context) }
             }
             """,
@@ -215,7 +215,7 @@ struct MiddlewareMacroDiagnosticTests {
                 """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "Two @Autowired properties of type 'Backend' require distinct explicit qualifiers, e.g. @Autowired(\"primary\").",
+                    message: "Two @Inject properties of type 'Backend' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
                     line: 4, column: 5)
             ],
             macroSpecs: testMacros

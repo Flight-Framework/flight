@@ -3,7 +3,7 @@ import Foundation
 /// The WebSocket upgrade hook (§6.1): a module that wants to own a
 /// long-lived WebSocket connection implements this, without Flight Web
 /// needing to know *why* — Channels is one consumer, a raw
-/// `@WebSocketMapping` handler is another.
+/// `@WebSocketRoute` handler is another.
 ///
 /// Named for the protocol it hands you, deliberately. An upgrade is not one
 /// thing: RFC 8441 generalizes HTTP/2's CONNECT into a family (`websocket`,

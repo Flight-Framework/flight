@@ -19,7 +19,7 @@ noticed — become build errors.
 
 ## What it checks
 
-**Missing registrations.** An `@Autowired` property whose type is not a
+**Missing registrations.** An `@Inject` property whose type is not a
 scanned component is reported, naming the type.
 
 **Dependency cycles.** Reported with the cycle spelled out, so you can see
@@ -39,7 +39,7 @@ final class PostgresUserRepository: UserRepository, Sendable {}
 
 @Service
 final class UserService: Sendable {
-    @Autowired var repository: any UserRepository   // wired automatically
+    @Inject var repository: any UserRepository   // wired automatically
 }
 ```
 
@@ -56,7 +56,7 @@ Acknowledge it, and the check stays quiet:
 
 ```swift
 // flight:hand-registered
-@Autowired var external: SomethingFromAnotherLibrary
+@Inject var external: SomethingFromAnotherLibrary
 ```
 
 The comment goes on the **property**, not the type. It is deliberately a

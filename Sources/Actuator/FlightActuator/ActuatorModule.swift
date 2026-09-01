@@ -118,7 +118,7 @@ public struct ActuatorModule: FlightModule {
             return ActuatorController(container: c, environment: environment, format: format)
         }
 
-        // The route itself, through the same escape hatch @GetMapping sits
+        // The route itself, through the same escape hatch @GetRoute sits
         // beside (Flight Web's registerRoute). Resolving the controller
         // here is a lock-free singleton lookup, not reconstruction — the
         // factory above already ran at freeze(), before any request.

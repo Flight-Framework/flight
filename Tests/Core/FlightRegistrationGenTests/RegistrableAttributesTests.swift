@@ -117,7 +117,7 @@ extension String {
 /// actually answers for.
 ///
 /// Same failure shape as the attribute list above, one layer over: the
-/// generator warns about any `@Autowired` type it cannot see a registration
+/// generator warns about any `@Inject` type it cannot see a registration
 /// for, and two types need no registration at all. A demand for one of those
 /// is correct code, so a warning on it is noise on every build — and a
 /// warning that is noise on every build is one nobody reads when it is real.

@@ -1,7 +1,7 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@Secret`. A pure marker, exactly like `@Autowired`: the redaction it
+/// `@Secret`. A pure marker, exactly like `@Inject`: the redaction it
 /// enables lives in `@Settings`'s expansion, which reads this attribute off
 /// each property.
 ///

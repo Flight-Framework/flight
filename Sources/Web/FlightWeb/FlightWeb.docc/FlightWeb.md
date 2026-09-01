@@ -11,9 +11,9 @@ a closure captured on an application object:
 ```swift
 @Controller("/orders")
 final class OrderController: Sendable {
-    @Autowired var orders: OrderService
+    @Inject var orders: OrderService
 
-    @GetMapping("/:id")
+    @GetRoute("/:id")
     func show(_ request: Request) async throws -> Response {
         guard let id = request.pathParam("id").flatMap(UUID.init) else {
             throw HTTPError(status: .badRequest, detail: "id must be a UUID")
@@ -80,7 +80,7 @@ registerMiddleware(order: 10) { request, next in
 
 ## WebSockets and streaming
 
-``WebSocketMapping(_:)`` upgrades a route; the handler receives a
+``WebSocketRoute(_:)`` upgrades a route; the handler receives a
 ``WebSocketConnection`` and owns it for the connection's lifetime.
 ``ServerSentEvent`` and ``ServerSentEventWriter`` cover the one-directional
 case, which is usually what a dashboard actually needs.
@@ -101,12 +101,12 @@ whole application without binding a port.
 ### Controllers and routes
 
 - ``Controller(_:pipelines:)``
-- ``GetMapping(_:maxBodyBytes:)``
-- ``PostMapping(_:maxBodyBytes:)``
-- ``PutMapping(_:maxBodyBytes:)``
-- ``PatchMapping(_:maxBodyBytes:)``
-- ``DeleteMapping(_:maxBodyBytes:)``
-- ``WebSocketMapping(_:)``
+- ``GetRoute(_:maxBodyBytes:)``
+- ``PostRoute(_:maxBodyBytes:)``
+- ``PutRoute(_:maxBodyBytes:)``
+- ``PatchRoute(_:maxBodyBytes:)``
+- ``DeleteRoute(_:maxBodyBytes:)``
+- ``WebSocketRoute(_:)``
 
 ### Requests and responses
 

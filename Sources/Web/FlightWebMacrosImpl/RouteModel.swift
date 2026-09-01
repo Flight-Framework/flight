@@ -1,14 +1,14 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// The mapping attributes `@Controller` consumes, and what each means.
-enum MappingKind: String, CaseIterable {
-    case get = "GetMapping"
-    case post = "PostMapping"
-    case put = "PutMapping"
-    case patch = "PatchMapping"
-    case delete = "DeleteMapping"
-    case webSocket = "WebSocketMapping"
+/// The route attributes `@Controller` consumes, and what each means.
+enum RouteKind: String, CaseIterable {
+    case get = "GetRoute"
+    case post = "PostRoute"
+    case put = "PutRoute"
+    case patch = "PatchRoute"
+    case delete = "DeleteRoute"
+    case webSocket = "WebSocketRoute"
 
     var httpMethod: String {
         switch self {
@@ -26,7 +26,7 @@ enum MappingKind: String, CaseIterable {
 
 /// One mapped handler method, as scanned from the controller body.
 struct ScannedRoute {
-    let kind: MappingKind
+    let kind: RouteKind
     /// The path pattern's literal content ("/users/:id").
     let path: String
     let methodName: String
@@ -49,22 +49,22 @@ struct ScannedRoute {
 
 enum RouteScanning {
 
-    /// The mapping attributes attached to `function`, with their literal
+    /// The route attributes attached to `function`, with their literal
     /// paths. Diagnoses (and skips) non-literal paths — the route table is
     /// compile-time information (§4), so a computed path is a build error.
     static func mappingAttributes(
         of function: FunctionDeclSyntax,
         in context: some MacroExpansionContext
-    ) -> [(kind: MappingKind, path: String, maxBodyBytes: String?, attribute: AttributeSyntax)] {
-        var found: [(MappingKind, String, String?, AttributeSyntax)] = []
+    ) -> [(kind: RouteKind, path: String, maxBodyBytes: String?, attribute: AttributeSyntax)] {
+        var found: [(RouteKind, String, String?, AttributeSyntax)] = []
         for element in function.attributes {
             guard let attribute = element.as(AttributeSyntax.self),
                   let name = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text,
-                  let kind = MappingKind(rawValue: name)
+                  let kind = RouteKind(rawValue: name)
             else { continue }
             guard let path = literalPath(of: attribute) else {
                 context.diagnoseError(
-                    "mapping.nonliteral",
+                    "route.nonliteral",
                     "@\(name) requires a string-literal path — the route table is built at compile time (§4).",
                     at: attribute
                 )
@@ -130,7 +130,7 @@ enum RouteScanning {
             // Neither belongs in a URL path anyway.
             if mapping.path.contains("\"") || mapping.path.contains("\\") {
                 context.diagnoseError(
-                    "mapping.path",
+                    "route.path",
                     """
                     @\(mapping.kind.rawValue) path "\(mapping.path)" contains a quote or a \
                     backslash. Neither is legal unescaped in a URL path; percent-encode it \
@@ -149,7 +149,7 @@ enum RouteScanning {
         }
         if isTypeLevel {
             context.diagnoseError(
-                "mapping.static",
+                "route.static",
                 "Route handler '\(name)' must be an instance method — the container resolves the controller instance per registration.",
                 at: function
             )
@@ -157,7 +157,7 @@ enum RouteScanning {
         }
         if function.modifiers.contains(where: { $0.name.tokenKind == .keyword(.mutating) }) {
             context.diagnoseError(
-                "mapping.mutating",
+                "route.mutating",
                 "Route handler '\(name)' must not be mutating — the controller component is shared across requests.",
                 at: function
             )
@@ -170,7 +170,7 @@ enum RouteScanning {
               typeName(first.type).hasSuffix("RequestContext")
         else {
             context.diagnoseError(
-                "mapping.signature",
+                "route.signature",
                 "Route handler '\(name)' must take '_ context: RequestContext' as its first parameter.",
                 at: function
             )
@@ -182,7 +182,7 @@ enum RouteScanning {
             let second = parameters[1]
             guard parameters.count == 2, second.firstName.text == "body" else {
                 context.diagnoseError(
-                    "mapping.signature",
+                    "route.signature",
                     "Route handler '\(name)' may take at most one extra parameter, labeled 'body:', decoded from the request body.",
                     at: function
                 )
@@ -201,7 +201,7 @@ enum RouteScanning {
         for mapping in mappings where mapping.kind.isUpgrade {
             if bodyTypeText != nil {
                 context.diagnoseError(
-                    "mapping.upgradebody",
+                    "route.upgradebody",
                     """
                     A @\(mapping.kind.rawValue) handler cannot take a 'body:' parameter: an \
                     upgrade request has an empty body by construction (RFC 6455 §4.1), so \
@@ -218,7 +218,7 @@ enum RouteScanning {
             // expansion rather than at the handler.
             guard returnType != nil else {
                 context.diagnoseError(
-                    "mapping.upgradereturn",
+                    "route.upgradereturn",
                     """
                     A @\(mapping.kind.rawValue) handler must return something conforming to \
                     WebSocketUpgradeHandler — that is what the generated route hands the \
@@ -295,7 +295,7 @@ enum RouteScanning {
     ) {
         guard path.hasPrefix("/") else {
             context.diagnoseError(
-                "mapping.path",
+                "route.path",
                 "@\(name) path '\(path)' must start with '/'.",
                 at: node
             )
@@ -307,7 +307,7 @@ enum RouteScanning {
             if segment == "**" {
                 if index != segments.count - 1 {
                     context.diagnoseError(
-                        "mapping.path",
+                        "route.path",
                         "@\(name) path '\(path)': '**' is only allowed as the final segment.",
                         at: node
                     )
@@ -316,13 +316,13 @@ enum RouteScanning {
                 let parameter = String(segment.dropFirst())
                 if parameter.isEmpty {
                     context.diagnoseError(
-                        "mapping.path",
+                        "route.path",
                         "@\(name) path '\(path)' has a ':' segment with no parameter name.",
                         at: node
                     )
                 } else if !seenParameters.insert(parameter).inserted {
                     context.diagnoseError(
-                        "mapping.path",
+                        "route.path",
                         "@\(name) path '\(path)' binds ':\(parameter)' more than once.",
                         at: node
                     )

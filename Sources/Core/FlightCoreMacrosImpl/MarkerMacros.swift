@@ -1,23 +1,23 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@Autowired`. A pure marker: all generated code lives in
+/// `@Inject`. A pure marker: all generated code lives in
 /// `@Component`'s expansion (which reads this attribute off the property).
 /// Its own expansion is empty; its job is validating the attachment site at
 /// the point of use so misuse fails on the property, not somewhere in the
 /// enclosing type's expansion.
-public struct AutowiredMacro: PeerMacro {
+public struct InjectMacro: PeerMacro {
     public static func expansion(
         of node: AttributeSyntax,
         providingPeersOf declaration: some DeclSyntaxProtocol,
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        validateInjectedProperty(node, declaration, name: "@Autowired", in: context)
+        validateInjectedProperty(node, declaration, name: "@Inject", in: context)
         return []
     }
 }
 
-/// `@ConfigValue`. Same marker pattern as `@Autowired`; the key
+/// `@ConfigValue`. Same marker pattern as `@Inject`; the key
 /// argument is consumed by `@Component`'s expansion.
 public struct ConfigValueMacro: PeerMacro {
     public static func expansion(

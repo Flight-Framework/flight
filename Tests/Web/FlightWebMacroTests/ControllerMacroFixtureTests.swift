@@ -15,10 +15,10 @@ import Testing
 
 private let testMacros: [String: MacroSpec] = [
     "Controller": MacroSpec(type: ControllerMacro.self, conformances: ["FlightCore._FlightRegistrable"]),
-    "GetMapping": MacroSpec(type: RouteMappingMacro.self),
-    "PostMapping": MacroSpec(type: RouteMappingMacro.self),
-    "DeleteMapping": MacroSpec(type: RouteMappingMacro.self),
-    "WebSocketMapping": MacroSpec(type: RouteMappingMacro.self),
+    "GetRoute": MacroSpec(type: RouteMacro.self),
+    "PostRoute": MacroSpec(type: RouteMacro.self),
+    "DeleteRoute": MacroSpec(type: RouteMacro.self),
+    "WebSocketRoute": MacroSpec(type: RouteMacro.self),
 ]
 
 @Suite("controller macro fixture tests")
@@ -32,7 +32,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct HealthController {
-                @GetMapping("/health")
+                @GetRoute("/health")
                 func health(_ context: RequestContext) async throws -> String {
                     "ok"
                 }
@@ -68,7 +68,7 @@ struct ControllerMacroFixtureTests {
         )
     }
 
-    // MARK: Fixture 2 — body-decoding POST + @Autowired + Void DELETE
+    // MARK: Fixture 2 — body-decoding POST + @Inject + Void DELETE
 
     @Test("body and void handlers")
     func bodyAndVoidHandlers() {
@@ -76,14 +76,14 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             public struct UserController {
-                @Autowired var userService: UserService
+                @Inject var userService: UserService
 
-                @PostMapping("/users")
+                @PostRoute("/users")
                 func createUser(_ context: RequestContext, body: CreateUserRequest) async throws -> UserResponse {
                     try await userService.create(body)
                 }
 
-                @DeleteMapping("/users/:id")
+                @DeleteRoute("/users/:id")
                 func deleteUser(_ context: RequestContext) throws {
                     try userService.delete(context.pathParam("id"))
                 }
@@ -91,7 +91,7 @@ struct ControllerMacroFixtureTests {
             """,
             expandedSource: """
             public struct UserController {
-                @Autowired var userService: UserService
+                @Inject var userService: UserService
                 func createUser(_ context: RequestContext, body: CreateUserRequest) async throws -> UserResponse {
                     try await userService.create(body)
                 }
@@ -140,7 +140,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct ChatController {
-                @WebSocketMapping("/chat/:roomId")
+                @WebSocketRoute("/chat/:roomId")
                 func chat(_ context: RequestContext) async throws -> any WebSocketUpgradeHandler {
                     ChatRoomHandler(roomId: context.pathParam("roomId")!)
                 }
@@ -184,7 +184,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct BadController {
-                @GetMapping(somePath)
+                @GetRoute(somePath)
                 func handler(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -209,7 +209,7 @@ struct ControllerMacroFixtureTests {
                 // Once. It used to be twice — @Controller's scan and the peer
                 // marker both validated, at the identical line and column.
                 DiagnosticSpec(
-                    message: "@GetMapping requires a string-literal path — the route table is built at compile time (§4).",
+                    message: "@GetRoute requires a string-literal path — the route table is built at compile time (§4).",
                     line: 3, column: 5
                 )
             ],
@@ -223,7 +223,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct BadController {
-                @GetMapping("/x")
+                @GetRoute("/x")
                 static func handler(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -262,7 +262,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct BadController {
-                @GetMapping("/x")
+                @GetRoute("/x")
                 func handler() -> String { "x" }
             }
             """,
@@ -301,9 +301,9 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct BadController {
-                @GetMapping("/same")
+                @GetRoute("/same")
                 func one(_ context: RequestContext) -> String { "1" }
-                @GetMapping("/same")
+                @GetRoute("/same")
                 func two(_ context: RequestContext) -> String { "2" }
             }
             """,
@@ -357,7 +357,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct BadController {
-                @GetMapping("users")
+                @GetRoute("users")
                 func handler(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -387,7 +387,7 @@ struct ControllerMacroFixtureTests {
             """,
             diagnostics: [
                 DiagnosticSpec(
-                    message: "@GetMapping path 'users' must start with '/'.",
+                    message: "@GetRoute path 'users' must start with '/'.",
                     line: 3, column: 5
                 )
             ],
@@ -403,10 +403,10 @@ struct ControllerMacroFixtureTests {
             """
             @Controller("/users")
             struct UserController {
-                @GetMapping("/")
+                @GetRoute("/")
                 func index(_ context: RequestContext) -> String { "x" }
 
-                @GetMapping("/:id")
+                @GetRoute("/:id")
                 func show(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -453,7 +453,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller("/users/")
             struct UserController {
-                @GetMapping("/:id")
+                @GetRoute("/:id")
                 func show(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -493,7 +493,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct HealthController {
-                @GetMapping("/health")
+                @GetRoute("/health")
                 func health(_ context: RequestContext) -> String { "ok" }
             }
             """,
@@ -531,7 +531,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller("users")
             struct BadController {
-                @GetMapping("/:id")
+                @GetRoute("/:id")
                 func show(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -575,7 +575,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller(somePath)
             struct BadController {
-                @GetMapping("/x")
+                @GetRoute("/x")
                 func handler(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -625,9 +625,9 @@ struct ControllerMacroFixtureTests {
             """
             @Controller("/users")
             struct BadController {
-                @GetMapping("/:id")
+                @GetRoute("/:id")
                 func one(_ context: RequestContext) -> String { "1" }
-                @GetMapping("/:id")
+                @GetRoute("/:id")
                 func two(_ context: RequestContext) -> String { "2" }
             }
             """,
@@ -661,7 +661,7 @@ struct ControllerMacroFixtureTests {
         assertMacroExpansion(
             """
             struct NotAController {
-                @GetMapping("/users")
+                @GetRoute("/users")
                 func list(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -673,7 +673,7 @@ struct ControllerMacroFixtureTests {
             diagnostics: [
                 DiagnosticSpec(
                     message: """
-                        @GetMapping registers a route only on a method of a type annotated \
+                        @GetRoute registers a route only on a method of a type annotated \
                         @Controller, which is what reads these attributes. This method's \
                         enclosing type is not annotated @Controller — nor is a method in an \
                         extension of one scanned — so the route would silently never exist. \
@@ -694,7 +694,7 @@ struct ControllerMacroFixtureTests {
         assertMacroExpansion(
             """
             extension SomeController {
-                @PostMapping("/users")
+                @PostRoute("/users")
                 func create(_ context: RequestContext) -> String { "x" }
             }
             """,
@@ -706,7 +706,7 @@ struct ControllerMacroFixtureTests {
             diagnostics: [
                 DiagnosticSpec(
                     message: """
-                        @PostMapping registers a route only on a method of a type annotated \
+                        @PostRoute registers a route only on a method of a type annotated \
                         @Controller, which is what reads these attributes. This method's \
                         enclosing type is not annotated @Controller — nor is a method in an \
                         extension of one scanned — so the route would silently never exist. \
@@ -730,7 +730,7 @@ struct ControllerMacroFixtureTests {
             """
             @Controller
             struct ChatController {
-                @WebSocketMapping("/chat")
+                @WebSocketRoute("/chat")
                 func chat(_ context: RequestContext, body: Hello) -> any WebSocketUpgradeHandler {
                     Handler()
                 }
@@ -758,7 +758,7 @@ struct ControllerMacroFixtureTests {
             diagnostics: [
                 DiagnosticSpec(
                     message: """
-                        A @WebSocketMapping handler cannot take a 'body:' parameter: an upgrade \
+                        A @WebSocketRoute handler cannot take a 'body:' parameter: an upgrade \
                         request has an empty body by construction (RFC 6455 §4.1), so decoding \
                         one always fails and the upgrade is always refused at runtime. Read \
                         what you need from the request's headers or query.
@@ -778,7 +778,7 @@ struct ControllerMacroFixtureTests {
             #"""
             @Controller
             struct BadController {
-                @GetMapping("/a\b")
+                @GetRoute("/a\b")
                 func handler(_ context: RequestContext) -> String { "x" }
             }
             """#,
@@ -802,7 +802,7 @@ struct ControllerMacroFixtureTests {
             diagnostics: [
                 DiagnosticSpec(
                     message: #"""
-                        @GetMapping path "/a\b" contains a quote or a backslash. Neither is legal unescaped in a URL path; percent-encode it if it is genuinely part of the path.
+                        @GetRoute path "/a\b" contains a quote or a backslash. Neither is legal unescaped in a URL path; percent-encode it if it is genuinely part of the path.
                         """#,
                     line: 3, column: 5
                 )

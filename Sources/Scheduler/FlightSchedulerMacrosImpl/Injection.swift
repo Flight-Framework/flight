@@ -1,7 +1,7 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@Autowired` / `@ConfigValue` scanning, so a `@Scheduler` type is an
+/// `@Inject` / `@ConfigValue` scanning, so a `@Scheduler` type is an
 /// ordinary component that can inject what its jobs need.
 ///
 /// This is the **third** copy of this logic — ComponentMacro has it, and
@@ -15,7 +15,7 @@ enum Injection {
 
     struct Property {
         enum Kind {
-            case autowired(qualifier: String?)
+            case inject(qualifier: String?)
             case configValue(key: String, defaultValue: String?)
         }
         let name: String
@@ -49,7 +49,7 @@ enum Injection {
     static func initializerLines(for properties: [Property]) -> [String] {
         properties.map { property in
             switch property.kind {
-            case .autowired(let qualifier):
+            case .inject(let qualifier):
                 if let qualifier {
                     return
                         "self.\(property.name) = try container.resolve(\(property.typeText).self, qualifier: \(qualifier))"
@@ -72,8 +72,8 @@ enum Injection {
                 let name = attr.attributeName.as(IdentifierTypeSyntax.self)?.name.text
             else { continue }
             switch name {
-            case "Autowired":
-                return .autowired(qualifier: firstArgument(of: attr))
+            case "Inject":
+                return .inject(qualifier: firstArgument(of: attr))
             case "ConfigValue":
                 guard let key = firstArgument(of: attr) else { return nil }
                 return .configValue(key: key, defaultValue: labeledArgument(of: attr, label: "default"))

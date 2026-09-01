@@ -12,7 +12,7 @@ import Logging
 /// One instance per connection: the route handler constructs it during the
 /// upgrade request, which is where per-connection identity (the principal,
 ///) enters. Constructed for you by `Container.registerChannelSocket`, or
-/// directly from a `@WebSocketMapping` method via `init(context:principal:)`.
+/// directly from a `@WebSocketRoute` method via `init(context:principal:)`.
 public struct ChannelSocketHandler: WebSocketUpgradeHandler {
     private let router: ChannelRouter
     private let pubsub: any PubSub
@@ -32,9 +32,9 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
     }
 
     /// Resolves the channels components from the request's context — the
-    /// convenience for a hand-written `@WebSocketMapping` method:
+    /// convenience for a hand-written `@WebSocketRoute` method:
     ///
-    ///     @WebSocketMapping("/socket")
+    ///     @WebSocketRoute("/socket")
     ///     func socket(_ context: RequestContext) throws -> any WebSocketUpgradeHandler {
     ///         try ChannelSocketHandler(context: context, principal: myPrincipal(context))
     ///     }

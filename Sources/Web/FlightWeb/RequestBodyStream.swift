@@ -12,7 +12,7 @@ import HTTPTypes
 /// `Request.body` unchanged.
 ///
 /// ```swift
-/// @PostMapping("/import", maxBodyBytes: 2 << 30)
+/// @PostRoute("/import", maxBodyBytes: 2 << 30)
 /// func importArchive(_ context: RequestContext, body: RequestBodyStream) async throws -> Response {
 ///     for try await chunk in body.chunks { try await ingest(chunk) }
 ///     ...

@@ -22,7 +22,7 @@ import Foundation
 ///
 /// Internal deliberately: `ActuatorModule` constructs and registers it (as
 /// an ordinary route via `registerRoute`, the same escape hatch
-/// `@GetMapping` sits beside); nothing outside this package touches it
+/// `@GetRoute` sits beside); nothing outside this package touches it
 /// directly.
 struct ActuatorController {
     let container: Container

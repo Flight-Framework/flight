@@ -6,7 +6,7 @@ build.
 ```swift
 @Scheduler
 struct ReportJobs {
-    @Autowired var reports: ReportService
+    @Inject var reports: ReportService
 
     @Scheduled("0 0 3 * * *")
     func nightlyRollup() async throws {
@@ -141,9 +141,9 @@ firing, run and failure counts:
 ```swift
 @Controller("/jobs")
 struct JobsController {
-    @Autowired var scheduler: SchedulerStatus
+    @Inject var scheduler: SchedulerStatus
 
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> [JobStatus] {
         scheduler.snapshot()
     }
