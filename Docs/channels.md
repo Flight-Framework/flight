@@ -26,8 +26,8 @@ join/leave, routing to handlers, replies, heartbeats, reconnection.
 | `FlightChannelsTesting` | `InMemoryChannelTransport` (client ↔ in-process server, no socket), `ChannelWireClient` (raw-envelope driver) | the above + WebTesting |
 
 The JS/TS reference client is
-[flight-channels-js](https://github.com/Swift-Flight/flight-channels-js)
-(`@swift-flight/channels` on npm) — same protocol, same versioning.
+[flight-channels-js](https://github.com/Flight-Framework/flight-channels-js)
+(`@flight-framework/channels` on npm) — same protocol, same versioning.
 
 ## Backpressure and blast radius
 
