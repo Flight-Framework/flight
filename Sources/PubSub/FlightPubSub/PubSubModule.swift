@@ -21,45 +21,26 @@ import class Foundation.ProcessInfo
 /// as its `service`. See `Docs/pubsub.md`, "Writing an adapter module".
 public struct FlightPubSubModule: FlightModule {
 
-    /// How each subscriber's pending messages buffer.
+    /// Buffering, node identity and the broadcast timeout are read from
+    /// `flight.yaml` (`pubsub.buffering`, `pubsub.node_id`,
+    /// `pubsub.broadcast_timeout`) — see ``PubSubSettings``.
     ///
-    /// The module used to hardcode `LocalPubSub()`, so the bounded policies
-    /// `Docs/pubsub.md` advertises were unreachable to anyone who bootstrapped
-    /// through it: the container's first registration wins, a second one
-    /// fails `freeze()`, and `override` is documented as existing for tests.
-    /// The knob had to be here or it did not exist.
-    public var bufferingPolicy: LocalPubSub.BufferingPolicy
-
-    /// A human-meaningful name for this node, surfaced in cluster
-    /// diagnostics. Defaulting it to a random UUID — which is what happened —
-    /// defeats the point of it being human-meaningful.
-    public var nodeID: String?
-
-    /// How long a clustered `publish` waits on the adapter before giving up
-    /// on the remote hop. Local delivery has already happened by then.
-    public var broadcastTimeout: Duration?
-
-    /// The bootstrap path — `modules: [FlightPubSubModule.self]` instantiates
-    /// through this. Configure by passing an instance instead.
-    public init() {
-        self.init(bufferingPolicy: .unbounded)
-    }
-
-    public init(
-        bufferingPolicy: LocalPubSub.BufferingPolicy = .unbounded,
-        nodeID: String? = nil,
-        broadcastTimeout: Duration? = .seconds(5)
-    ) {
-        self.bufferingPolicy = bufferingPolicy
-        self.nodeID = nodeID
-        self.broadcastTimeout = broadcastTimeout
-    }
+    /// They used to be `init` parameters here, which meant they did not
+    /// exist: both public entry points take `[any FlightModule.Type]` and
+    /// instantiate with `init()`, so nothing a deployment wrote could reach
+    /// them.
+    public init() {}
 
     public func configure(_ container: Container) throws {
-        container.register(LocalPubSub.self, scope: .singleton) { [bufferingPolicy] _ in
-            LocalPubSub(bufferingPolicy: bufferingPolicy)
+        // Registered here, built at freeze() — reading configuration during
+        // the registration phase trips Core's "resolution begins at freeze()"
+        // precondition, the same reason FlightWebModule defers its coders.
+        container.register(LocalPubSub.self, scope: .singleton) { container in
+            let settings = try PubSubSettings(configuration: container.resolve(Configuration.self))
+            return LocalPubSub(bufferingPolicy: settings.bufferingPolicy.streamPolicy)
         }
-        container.register((any PubSub).self, scope: .singleton) { [nodeID, broadcastTimeout] container in
+        container.register((any PubSub).self, scope: .singleton) { container in
+            let settings = try PubSubSettings(configuration: container.resolve(Configuration.self))
             let local = try container.resolve(LocalPubSub.self)
             let adapter: (any DistributedPubSubAdapter)?
             do {
@@ -93,8 +74,8 @@ public struct FlightPubSubModule: FlightModule {
             guard let adapter else { return local }
             return ClusteredPubSub(
                 local: local, adapter: adapter,
-                nodeID: nodeID ?? ProcessInfo.processInfo.hostName,
-                broadcastTimeout: broadcastTimeout)
+                nodeID: settings.nodeID ?? ProcessInfo.processInfo.hostName,
+                broadcastTimeout: settings.broadcastTimeout.duration)
         }
     }
 }

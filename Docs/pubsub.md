@@ -91,19 +91,25 @@ bookkeeping, and never sees a caller's imitation of it.
 `.bufferingOldest(n)` / `.bufferingNewest(n)` for a memory ceiling at the
 price of drops, which at-most-once semantics already permit.
 
-Through the module, that and the cluster knobs are constructor arguments:
+Through the module, that and the cluster knobs are configuration:
 
-```swift
-try await Flight.bootstrap(
-    configuration: .load(),
-    modules: [FlightPubSubModule(bufferingPolicy: .bufferingNewest(1024), nodeID: "api-3")]
-)
+```yaml
+pubsub:
+  buffering: newest:1024      # or oldest:1024, or unbounded (the default)
+  node_id: api-3              # defaults to the host name
+  broadcast_timeout: 5s       # or `never` to wait for the adapter indefinitely
 ```
 
-They had to be, or they did not exist: the module used to hardcode
-`LocalPubSub()`, the container's first registration wins, and a second one
-fails `freeze()` — so an app bootstrapped through the module could not reach
-a bounded policy at all.
+They were constructor arguments until 0.13.0, which meant they did not
+exist: `Flight.bootstrap` and `Flight.assemble` both take
+`[any FlightModule.Type]` and instantiate with `init()`, so nothing a
+deployment wrote could reach them — the example here passed a module instance
+and did not compile. They are deployment knobs, so they live in `flight.yaml`
+with the other deployment knobs.
+
+A malformed value fails bootstrap rather than falling back: a node told to
+bound its buffers at 1024 and silently running unbounded is the bug the
+setting exists to prevent.
 
 ## Multi-node
 
