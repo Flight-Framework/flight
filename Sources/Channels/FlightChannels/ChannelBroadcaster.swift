@@ -127,6 +127,36 @@ public struct ChannelBroadcaster: Sendable {
         )
     }
 
+    /// The metadata that puts a framework-built **reserved** frame onto the
+    /// same encode-once path `broadcast` uses.
+    ///
+    /// `publish` below refuses `flight:`-namespaced events, because an
+    /// application must not be able to forge a lifecycle event. That left
+    /// the framework's own reserved publishers — Presence, which hand-builds
+    /// a `BroadcastFrame` and publishes it to the local bus — with no way
+    /// onto the fast path at all, so every presence diff was decoded and
+    /// re-encoded once per recipient socket. At 500 members that is 500
+    /// decodes and 500 re-encodes of bytes that are identical for everyone.
+    ///
+    /// This is the other half of the namespace: `publish` takes everything
+    /// that is *not* reserved, this takes only what *is*. Between them the
+    /// guard is unchanged — application code still cannot reach either the
+    /// reserved namespace or the token.
+    ///
+    /// Returns empty metadata if the event is not reserved or the envelope
+    /// will not encode; `SocketSession.pump` then takes the validating
+    /// decode path, exactly as before.
+    @_spi(FlightInternal)
+    public static func reservedFrameMetadata(
+        topic: String, event: String, payload: JSONValue
+    ) -> [String: String] {
+        guard event.hasPrefix(ReservedEvent.prefix),
+            let text = try? Envelope(ref: nil, topic: topic, event: event, payload: payload)
+                .encodedText()
+        else { return [:] }
+        return [precomputedFrameMetadataKey: text, frameTokenMetadataKey: frameToken]
+    }
+
     private func publish(topic: String, event: String, payload: JSONValue, metadata: [String: String]) async {
         // Dropped and logged rather than asserted: a `precondition` here took
         // the whole process down — every connected socket on this node —

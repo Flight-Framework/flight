@@ -114,6 +114,10 @@ public actor PresenceTracker: Presence {
     private struct QueuedDiff: Sendable {
         let topic: String
         let payload: Data
+        /// Carries the precomputed wire frame, so each recipient's pump
+        /// forwards one shared string instead of decoding and re-encoding
+        /// per socket. See `ChannelBroadcaster.reservedFrameMetadata`.
+        let metadata: [String: String]
     }
 
     /// Diffs computed but not yet on the bus, in computation order.
@@ -235,7 +239,19 @@ public actor PresenceTracker: Presence {
         // in between; overlap is normalized by the client helpers.
         socket.onTopicActivated(topic) { [weak self] in
             guard let self else { return }
-            Task { await self.pushState(topic: topic, to: socket) }
+            Task {
+                // Only the snapshot needs the actor. Building the JSON tree
+                // for an M-entry topic and encoding it are pure functions of
+                // that snapshot, and doing them here rather than inside the
+                // actor keeps every other client's presence change — which
+                // all serialize through it — from queueing behind one
+                // joiner's ~64 kB encode.
+                let entries = await self.visibleEntries(topic)
+                socket.pushReserved(
+                    topic: topic,
+                    event: PresenceEvent.state,
+                    payload: PresenceWire.json(entries: entries))
+            }
         }
     }
 
@@ -336,14 +352,6 @@ public actor PresenceTracker: Presence {
         }
     }
 
-    private func pushState(topic: String, to socket: some PresenceSocket) {
-        socket.pushReserved(
-            topic: topic,
-            event: PresenceEvent.state,
-            payload: PresenceWire.json(entries: visibleEntries(topic))
-        )
-    }
-
     private func sanitized(_ payload: [String: String]) -> [String: String] {
         var payload = payload
         if payload.removeValue(forKey: PresenceWire.refKey) != nil {
@@ -362,7 +370,9 @@ public actor PresenceTracker: Presence {
         peers[replica]?.downSince != nil
     }
 
-    private func visibleEntries(_ topic: String) -> [String: [PresenceMeta]] {
+    /// The topic's live entries, as a value. Reading actor state is all
+    /// this does; callers encode outside the actor — see `sendState`.
+    func visibleEntries(_ topic: String) -> [String: [PresenceMeta]] {
         var byKey: [String: [(PresenceDot, PresenceRecord)]] = [:]
         for dot in topicIndex[topic] ?? [] {
             guard !isDown(dot.replica), let record = state.entries[dot] else { continue }
@@ -698,15 +708,20 @@ public actor PresenceTracker: Presence {
         leaves: [String: [PresenceMeta]]
     ) {
         guard !joins.isEmpty || !leaves.isEmpty else { return }
-        let frame = BroadcastFrame(
-            event: PresenceEvent.diff,
-            payload: PresenceWire.diffJSON(joins: joins, leaves: leaves)
-        )
+        let payload = PresenceWire.diffJSON(joins: joins, leaves: leaves)
+        let frame = BroadcastFrame(event: PresenceEvent.diff, payload: payload)
         // One shared encoder, not one per diff: this runs on the actor that
         // serializes every client's presence change, and `JSONEncoder` is a
         // class with real setup cost.
         guard let data = try? Self.diffEncoder.encode(frame) else { return }
-        pendingDiffs.append(QueuedDiff(topic: topic, payload: data))
+        // Every recipient's envelope for one diff is byte-identical, so it
+        // is built once here rather than once per subscriber in each pump.
+        // `data` is still the real BroadcastFrame payload, so a subscriber
+        // that ignores the metadata — a clustered adapter, a future
+        // transport — decodes it exactly as before.
+        let metadata = ChannelBroadcaster.reservedFrameMetadata(
+            topic: topic, event: PresenceEvent.diff, payload: payload)
+        pendingDiffs.append(QueuedDiff(topic: topic, payload: data, metadata: metadata))
     }
 
     /// Sends every queued diff, oldest first.
@@ -731,7 +746,8 @@ public actor PresenceTracker: Presence {
                 pendingDiffs.removeAll(keepingCapacity: true)
                 pendingDiffsHead = 0
             }
-            await localBus.publish(Message(topic: queued.topic, payload: queued.payload))
+            await localBus.publish(
+                Message(topic: queued.topic, payload: queued.payload, metadata: queued.metadata))
         }
     }
 
