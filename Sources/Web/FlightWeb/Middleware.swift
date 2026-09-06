@@ -88,11 +88,19 @@ public func compose(_ chain: [MiddlewareRegistration], around responder: @escapi
 }
 
 /// Maps a thrown/failed error onto the wire:
+/// - a registered ``ErrorMapper`` answers first, for the error types this
+///   application does not own;
 /// - `HTTPErrorRepresentable` renders its own status and message;
 /// - everything else is an opaque 500 — details go to `context.logger`,
 ///   never to the client.
 public func errorResponse(for error: any Error, context: RequestContext) -> Response {
     let render = context.coders.renderError
+    if let mapped = context.errorMapper.map(error) {
+        if mapped.status.kind == .serverError {
+            context.logger.error("request failed: \(String(describing: error))")
+        }
+        return render(mapped.status, mapped.message)
+    }
     switch error {
     case let routing as RoutingError:
         context.logger.error("request failed: \(routing.logDescription)")

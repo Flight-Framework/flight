@@ -25,6 +25,56 @@ public struct HTTPError: HTTPErrorRepresentable, Sendable {
     }
 }
 
+/// Maps an error the application does not own onto an HTTP shape.
+///
+/// `HTTPErrorRepresentable` covers errors you can conform, and everything
+/// else renders as an opaque 500. That leaves the vocabularies an
+/// application actually meets — `DataSourceError.poolExhausted`,
+/// `HangarError.unknownFilterField`, `ChangesetValidationError`,
+/// `ChangesetConflictError` — with no HTTP shape at all: a retryable
+/// saturation reads as 500 rather than 503, a bad filter as 500 rather than
+/// 400, an invalid form as 500 rather than 422. Conforming those types is
+/// not open to the application (they belong to other packages, and the ones
+/// below `FlightWeb` in the stack cannot depend on it), and a middleware
+/// cannot do it either, because a handler's error is rendered by the router
+/// *inside* the chain — by the time a middleware sees anything it is a 500
+/// response with the error gone.
+///
+/// So an application registers one of these and maps what it knows:
+///
+/// ```swift
+/// container.register(ErrorMapper.self, scope: .singleton) { _ in
+///     ErrorMapper { error in
+///         switch error {
+///         case let validation as ChangesetValidationError:
+///             return (.unprocessableContent, validation.description)
+///         case DataSourceError.poolExhausted:
+///             return (.serviceUnavailable, "The service is busy. Retry shortly.")
+///         default:
+///             return nil          // leave it to the default rendering
+///         }
+///     }
+/// }
+/// ```
+///
+/// Returning `nil` declines: the error then follows the ordinary path
+/// (`HTTPErrorRepresentable`, else an opaque 500). The mapper is consulted
+/// first, so an application may also override how a framework error renders
+/// — its own call, in one visible place rather than at every call site.
+public struct ErrorMapper: Sendable {
+    /// The shape an error should take on the wire, or `nil` to decline.
+    public let map: @Sendable (any Error) -> (status: HTTPResponse.Status, message: String)?
+
+    public init(
+        _ map: @escaping @Sendable (any Error) -> (status: HTTPResponse.Status, message: String)?
+    ) {
+        self.map = map
+    }
+
+    /// Declines everything — what an application that registered none gets.
+    public static let none = ErrorMapper { _ in nil }
+}
+
 /// Routing-layer failures (§4).
 public enum RoutingError: HTTPErrorRepresentable, Sendable, Equatable {
     /// A handler asked for a path parameter its own pattern doesn't bind —
