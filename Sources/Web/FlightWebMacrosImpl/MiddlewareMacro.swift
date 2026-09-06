@@ -45,21 +45,21 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
             case .inject(let qualifier):
                 if let qualifier {
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.typeText).self, qualifier: \(qualifier))"
+                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self, qualifier: \(qualifier))"
                     )
                 } else {
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.typeText).self)"
+                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self)"
                     )
                 }
             case .configValue(let key, let defaultValue):
                 if let defaultValue {
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.typeText).self) ?? (\(defaultValue))"
+                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.metatypeBase).self) ?? (\(defaultValue))"
                     )
                 } else {
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.typeText).self)"
+                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.metatypeBase).self)"
                     )
                 }
             }
@@ -122,6 +122,19 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
         let typeText: String
         let kind: Kind
         let node: VariableDeclSyntax
+
+        /// The type as written, parenthesized where `.self` would otherwise
+        /// bind to the wrong thing — `any P.self` parses as `any (P.self)`.
+        /// Mirrors `ComponentMacro.InjectedProperty.metatypeBase`.
+        var metatypeBase: String {
+            if typeText.hasPrefix("(") && typeText.hasSuffix(")") { return typeText }
+            if typeText.hasPrefix("any ") || typeText.hasPrefix("some ")
+                || typeText.contains(" & ")
+            {
+                return "(\(typeText))"
+            }
+            return typeText
+        }
     }
 
     private static func collectInjectedProperties(

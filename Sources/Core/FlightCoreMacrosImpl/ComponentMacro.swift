@@ -56,6 +56,25 @@ struct InjectedProperty {
     let typeText: String
     let kind: Kind
     let node: VariableDeclSyntax
+
+    /// The type as written, parenthesized where `.self` would otherwise bind
+    /// to the wrong thing.
+    ///
+    /// `any P.self` parses as `any (P.self)`, so the expansion for
+    /// `@Inject var bus: any PubSub` — the spelling every doc page uses —
+    /// failed with "'self' is not a member type of protocol PubSub",
+    /// reported inside the macro expansion rather than at the property. The
+    /// parenthesized spelling `(any PubSub)` worked, which is why the
+    /// framework's own components are written that way; nothing said so.
+    var metatypeBase: String {
+        if typeText.hasPrefix("(") && typeText.hasSuffix(")") { return typeText }
+        if typeText.hasPrefix("any ") || typeText.hasPrefix("some ")
+            || typeText.contains(" & ")
+        {
+            return "(\(typeText))"
+        }
+        return typeText
+    }
 }
 
 extension RegistrationMacro {
@@ -87,11 +106,11 @@ extension RegistrationMacro {
             case .inject(let qualifier):
                 if let qualifier {
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.typeText).self, qualifier: \(qualifier))"
+                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self, qualifier: \(qualifier))"
                     )
                 } else {
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.typeText).self)"
+                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self)"
                     )
                 }
             case .configValue(let key, let defaultValue):
@@ -103,11 +122,11 @@ extension RegistrationMacro {
                     // low-precedence default expressions (ternaries) can't
                     // rebind against `??`.
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.typeText).self) ?? (\(defaultValue))"
+                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.metatypeBase).self) ?? (\(defaultValue))"
                     )
                 } else {
                     initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.typeText).self)"
+                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.metatypeBase).self)"
                     )
                 }
             }

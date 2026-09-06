@@ -95,7 +95,22 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
         // cancels the frame loop (AsyncStream iteration is
         // cancellation-aware), tears down idempotently, drains the writer,
         // and joins everything.
-        let (finished, finishedContinuation) = AsyncStream<Void>.makeStream()
+        //
+        // What travels on `finished` is the *close intent* — the code and
+        // reason the peer is owed — and the close frame is written by this
+        // function, once, after everything is joined. It used to be written
+        // by whichever task decided to close, and that task is the one this
+        // coordination then cancels: `writer` announcing its exit woke the
+        // handler, which cancelled `frameLoop` while `frameLoop` was inside
+        // `connection.close(…)`. The write threw `CancellationError` into a
+        // `try?`, but the transport's state machine had already moved to
+        // "closing" — so the later close was a no-op, no close frame ever
+        // reached the wire, and every server-initiated close (4000 heartbeat
+        // timeout, 4400 protocol violation, 1003 binary frame, and the 1000
+        // of a graceful `flight:close`) arrived at the client as an
+        // abnormal 1006. Deciding here, and closing from a task nothing
+        // cancels, is what makes the documented codes observable.
+        let (finished, finishedContinuation) = AsyncStream<CloseIntent>.makeStream()
 
         let writer = Task { [configuration] in
             for await text in outbound {
@@ -118,7 +133,7 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                     break  // connection gone; remaining outbound is undeliverable
                 }
             }
-            finishedContinuation.yield(())
+            finishedContinuation.yield(.normal)
         }
 
         let watchdog = Task { [configuration] in
@@ -133,21 +148,14 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                         "socket": "\(socket.id)",
                     ])
                     // Teardown finishes the outbound queue → the writer
-                    // drains and announces its exit → the handler unwinds.
+                    // drains and announces its exit → the handler unwinds,
+                    // and writes the close frame this intent names once the
+                    // drain is complete.
                     await session.teardown()
-                    // Awaited, like every graceful path: closing straight
-                    // after teardown left queued frames racing the close
-                    // frame, and ran `send` and `close` concurrently on a
-                    // transport that does not promise that is safe. Harmless
-                    // in practice — a peer this silent is not reading — but
-                    // the deterministic-drain claim did not hold on this one
-                    // path, which is the sort of exception that is true until
-                    // the day it is not.
-                    _ = await writer.value
-                    try? await connection.close(
-                        code: WebSocketCloseCode(ChannelCloseCode.heartbeatTimeout),
-                        reason: "heartbeat timeout"
-                    )
+                    finishedContinuation.yield(
+                        CloseIntent(
+                            code: WebSocketCloseCode(ChannelCloseCode.heartbeatTimeout),
+                            reason: "heartbeat timeout"))
                     return
                 }
             }
@@ -169,20 +177,18 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                             "socket": "\(socket.id)", "error": "\(error)",
                         ])
                         await session.teardown()
-                        await writer.value // flush anything already queued
-                        try? await connection.close(
-                            code: WebSocketCloseCode(ChannelCloseCode.protocolViolation),
-                            reason: "invalid envelope"
-                        )
+                        finishedContinuation.yield(
+                            CloseIntent(
+                                code: WebSocketCloseCode(ChannelCloseCode.protocolViolation),
+                                reason: "invalid envelope"))
                         break frames
                     }
                     if case .close(let code, let reason) = await session.handle(envelope) {
                         // Graceful close (flight:close): handle() already
-                        // tore down and finished the outbound queue. Let
-                        // the writer flush the close ack before the close
-                        // frame goes out.
-                        await writer.value
-                        try? await connection.close(code: code, reason: reason)
+                        // tore down and finished the outbound queue. The
+                        // writer is drained before the close frame goes out —
+                        // below, where the frame is written.
+                        finishedContinuation.yield(CloseIntent(code: code, reason: reason))
                         break frames
                     }
                 case .binary:
@@ -190,11 +196,10 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                     // documented later addition, negotiated, never
                     // sprung on a server.
                     await session.teardown()
-                    await writer.value
-                    try? await connection.close(
-                        code: .unacceptableData,
-                        reason: "binary frames are not part of protocol v1"
-                    )
+                    finishedContinuation.yield(
+                        CloseIntent(
+                            code: .unacceptableData,
+                            reason: "binary frames are not part of protocol v1"))
                     break frames
                 case .close:
                     break frames // peer closed; stream finishes right after
@@ -202,7 +207,7 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                     continue // transport already answered; counts as liveness
                 }
             }
-            finishedContinuation.yield(())
+            finishedContinuation.yield(.normal)
         }
 
         // First exit wins; then unwind deterministically. Teardown is
@@ -210,20 +215,37 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
         // violation, heartbeat timeout, task cancellation on server
         // shutdown — runs `leave` for each joined channel exactly once.
         var firstExit = finished.makeAsyncIterator()
-        _ = await firstExit.next()
+        let intent = await firstExit.next() ?? .normal
         frameLoop.cancel()
         await frameLoop.value
         await session.teardown()
         watchdog.cancel()
+        // The writer is joined *before* the close frame, so everything
+        // already queued — a `flight:close` ack, a last broadcast — is on the
+        // wire ahead of it.
         await writer.value
         await watchdog.value
-        try? await connection.close(code: .normalClosure, reason: "")
+        try? await connection.close(code: intent.code, reason: intent.reason)
         context.logger.debug("channel socket closed", metadata: ["socket": "\(socket.id)"])
     }
 }
 
 /// One outbound frame took longer than ``ChannelsConfiguration/writeTimeout``.
 struct WriteTimedOut: Error {}
+
+/// Why a session ended, and what the peer is owed on the way out.
+///
+/// Carried from whichever task decided to end the session to the one place
+/// that writes the close frame — the handler itself, after every task is
+/// joined. See the note in `handle(upgraded:context:)` for why the close
+/// cannot be written by the deciding task.
+struct CloseIntent: Sendable {
+    let code: WebSocketCloseCode
+    let reason: String
+
+    /// The ordinary end: the peer closed, or the session simply finished.
+    static let normal = CloseIntent(code: .normalClosure, reason: "")
+}
 
 extension ChannelSocketHandler {
     /// Sends one frame, giving up after `timeout`.
