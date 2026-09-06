@@ -2,6 +2,7 @@ import FlightChannelsProtocol
 import FlightPubSub
 import FlightWeb
 import Logging
+import Synchronization
 
 /// Per-socket protocol state: which topics are joined, which `Channel`
 /// instance and PubSub pump each holds, and liveness. An actor because
@@ -141,8 +142,7 @@ internal actor SocketSession {
                 await Self.pump(
                     subscription: subscription,
                     topic: topic,
-                    socketID: self.socket.id,
-                    outbound: self.outbound,
+                    socket: self.socket,
                     logger: self.logger
                 )
             }
@@ -169,12 +169,11 @@ internal actor SocketSession {
     private nonisolated static func pump(
         subscription: AsyncStream<Message>,
         topic: String,
-        socketID: String,
-        outbound: AsyncStream<String>.Continuation,
+        socket: Socket,
         logger: Logger
     ) async {
         for await message in subscription {
-            if message.metadata[ChannelBroadcaster.originMetadataKey] == socketID {
+            if message.metadata[ChannelBroadcaster.originMetadataKey] == socket.id {
                 continue // broadcast(..., excluding:) — this socket is the origin
             }
             // Only a frame this process's own broadcaster built is
@@ -186,13 +185,25 @@ internal actor SocketSession {
                 let token = message.metadata[ChannelBroadcaster.frameTokenMetadataKey],
                 token == ChannelBroadcaster.frameToken
             {
-                outbound.yield(precomputed)
+                socket.enqueueEncoded(precomputed, topic: topic, event: "<broadcast>")
                 continue
             }
             guard let frame = BroadcastFrame(message: message) else {
-                logger.warning("dropping non-broadcast payload on channel topic", metadata: [
-                    "topic": "\(topic)",
-                ])
+                // Rate-limited for the same reason the outbound queue's own
+                // drop log is: this fires once per *socket* per message, so
+                // an application that publishes its own messages to a topic
+                // its channels also use — the topic namespace is shared,
+                // nothing reserves it — turned one publish into one warning
+                // per connected socket, forever.
+                let total = foreignPayloads.wrappingAdd(1, ordering: .relaxed).oldValue + 1
+                if total == 1 || total % 100 == 0 {
+                    logger.warning(
+                        "dropping non-broadcast payload on channel topic",
+                        metadata: [
+                            "topic": "\(topic)",
+                            "dropped-total": "\(total)",
+                        ])
+                }
                 continue
             }
             guard
@@ -202,9 +213,14 @@ internal actor SocketSession {
                 logger.warning("broadcast envelope failed to encode", metadata: ["topic": "\(topic)"])
                 continue
             }
-            outbound.yield(text)
+            socket.enqueueEncoded(text, topic: topic, event: frame.event)
         }
     }
+
+    /// How many messages this process has seen on a channel topic that were
+    /// not channel broadcasts — the counter behind the rate-limited log
+    /// above.
+    private nonisolated static let foreignPayloads = Atomic<Int64>(0)
 
     // MARK: - Leave
 
