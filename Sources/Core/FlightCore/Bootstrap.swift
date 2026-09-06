@@ -17,6 +17,21 @@ public struct AssembledService: Sendable {
     public let moduleName: String
     public let service: any Service
     public let completion: ServiceCompletionPolicy
+    /// Where this service sits in the start/shutdown order — see
+    /// ``ServiceShutdownPhase``.
+    public let shutdownPhase: ServiceShutdownPhase
+
+    public init(
+        moduleName: String,
+        service: any Service,
+        completion: ServiceCompletionPolicy,
+        shutdownPhase: ServiceShutdownPhase = .standard
+    ) {
+        self.moduleName = moduleName
+        self.service = service
+        self.completion = completion
+        self.shutdownPhase = shutdownPhase
+    }
 }
 
 public enum BootstrapError: Error, CustomStringConvertible {
@@ -70,7 +85,10 @@ func _flightAssemble(
     let instances = ordered.map { $0.init() }
 
     var services:
-        [(moduleName: String, service: any Service, completion: ServiceCompletionPolicy)] = []
+        [(
+            moduleName: String, service: any Service, completion: ServiceCompletionPolicy,
+            phase: ServiceShutdownPhase
+        )] = []
     for (moduleType, module) in zip(ordered, instances) {  // step 6
         let name = moduleType.moduleName
         container.currentSourceModule = name
@@ -86,7 +104,7 @@ func _flightAssemble(
         // Service later terminates with an error (see HealthTrackingService).
         container.setHealth(name, .running)
         if let service = module.service {  // step 8 (collected here)
-            services.append((name, service, module.serviceCompletion))
+            services.append((name, service, module.serviceCompletion, module.serviceShutdownPhase))
         }
     }
     container.currentSourceModule = "<direct>"
@@ -97,14 +115,31 @@ func _flightAssemble(
         throw BootstrapError.singletonConstructionFailed(underlying: error)
     }
 
-    let wrapped = services.map {
-        AssembledService(
-            moduleName: $0.moduleName,
-            service: HealthTrackingService(
-                moduleName: $0.moduleName, inner: $0.service, container: container),
-            completion: $0.completion
-        )
-    }
+    // Sorted by phase, stably, so the DAG's order still decides within a
+    // phase. `ServiceGroup` starts in this order and shuts down in reverse,
+    // which is what puts infrastructure up first and down last, and the
+    // inbound transport up last and down first. Without this the order was
+    // whatever order the application listed its modules in, and the shape
+    // every example uses shut the database down underneath a server that was
+    // still serving — see `ServiceShutdownPhase`.
+    let wrapped =
+        services
+        .enumerated()
+        .sorted { left, right in
+            left.element.phase == right.element.phase
+                ? left.offset < right.offset
+                : left.element.phase < right.element.phase
+        }
+        .map { entry in
+            AssembledService(
+                moduleName: entry.element.moduleName,
+                service: HealthTrackingService(
+                    moduleName: entry.element.moduleName, inner: entry.element.service,
+                    container: container),
+                completion: entry.element.completion,
+                shutdownPhase: entry.element.phase
+            )
+        }
     return AssembledApplication(
         container: container,
         services: wrapped,
