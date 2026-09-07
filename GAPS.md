@@ -491,29 +491,28 @@ ones. Blocked on a flight release, since templates pin 0.1.2.
   benefit.
 - **Old per-package repos are archived**, with notices pointing at their
   replacements.
-- **A bound transaction scope pins a connection for the scope's whole life.**
-  `withPostgresTransactions(in:)` resolves the scope's `Repo` eagerly, to bind
-  Hangar's ambient repo, and resolving a `Repo` checks a connection out of the
-  pool. For an ordinary request that is the intended model — a request holds a
-  connection while it runs. For a **WebSocket upgrade it is a leak**: an
-  upgraded request's `Scope` lives as long as the socket, so every open
-  browser tab holds a Postgres connection until it closes, and a pool of ten
-  serves ten tabs and then nothing.
+- ✅ **A bound transaction scope pins a connection for the scope's whole life.**
+  *Closed by the composition migration.* `withPostgresTransactions(in:)`
+  resolved the scope's `Repo` eagerly, to bind Hangar's ambient repo, and
+  resolving a `Repo` checked a connection out of the pool. For an ordinary
+  request that was the intended model — a request holds a connection while it
+  runs. For a **WebSocket upgrade it was a leak**: an upgraded request's
+  `Scope` lives as long as the socket, so every open browser tab held a
+  Postgres connection until it closed, and a pool of ten served ten tabs and
+  then nothing.
 
   Found dogfooding, 2026-08-25, as `PostgresConnection deinitialized before
   being closed` at the end of a test run — a message about a connection rather
   than about the scope that never let go of it.
 
-  The application-level answer, which Flightdeck now uses, is not to bind
-  transactions on upgrade requests: the socket path opens its own short scopes
-  per membership check. That is correct for the application and does not close
-  the gap, because nothing warns an application that does bind them.
-
-  The real fix is making the ambient-repo binding lazy, so a scope that never
-  queries never checks a connection out. It needs a Hangar change —
-  `Repo.with` takes a concrete `Repo` — and is worth doing: it would also make
-  the `.waiting` acquisition unnecessary for request handlers that only
-  sometimes touch the database.
+  The entry proposed making the ambient-repo binding lazy. What shipped
+  instead removed the binding: `@Transactional`, `withPostgresScope`,
+  `withPostgresTransactions` and the transaction coordinators are gone, a
+  repository holds the pool as a singleton, and `withRepo` leases a
+  connection for one operation and returns it. A scope pins nothing, so
+  neither an upgrade nor a handler that never queries can hold a connection
+  open. See `COMPOSITION-MIGRATION.md` §2.3 (untracked, local to this
+  working copy).
 - ✅ **Flight Web has no static-file handling.** *Closed.* `container.assets(at:root:)`
   ships exactly what this entry asked for and more: containment by resolving
   the path and comparing against the root rather than pattern-matching for

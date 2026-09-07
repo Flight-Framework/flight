@@ -62,6 +62,9 @@ request, never shared between them.
 
 - ``Flight``
 - ``AssembledApplication``
+- ``AssembledService``
+- ``ServiceShutdownPhase``
+- ``ServiceCompletionPolicy``
 - ``BootstrapError``
 
 ### The container
@@ -81,11 +84,6 @@ request, never shared between them.
 
 - ``ComponentDescriptor``
 - ``Stereotype``
-
-### Transactions
-
-- ``FlightTransactions``
-- ``FlightTransactionToken``
 
 ### Guides
 

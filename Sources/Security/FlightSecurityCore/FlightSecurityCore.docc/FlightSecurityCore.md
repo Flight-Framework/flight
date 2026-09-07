@@ -12,13 +12,20 @@ and make the resulting identity available everywhere without ceremony.
 
 ``OIDCTokenValidator`` is the shipped validator, and for OIDC-compliant
 providers it is configuration rather than code — Descope, Keycloak, Auth0,
-Okta and Entra are all the same type with different values:
+Okta and Entra are all the same type with different values. List
+``FlightOIDCModule`` (which pulls ``FlightSecurityModule`` in with it) and
+name the issuer:
 
 ```yaml
 security:
-  issuer: https://example.eu.auth0.com/
-  audience: https://api.example.com
+  oidc:
+    issuer: https://example.eu.auth0.com/
+    audience: https://api.example.com
 ```
+
+Everything else — the JWKS endpoint, cache TTLs, the algorithm allowlist —
+has a default; ``OIDCSecurityConfiguration`` is the whole list. Missing
+`issuer` or `audience` fails at container freeze, not at the first request.
 
 JWTKit owns the cryptographic core — signature verification, JWS structure,
 JWK parsing. This module owns the orchestration around it: key fetching and
@@ -29,7 +36,8 @@ leeway, and `sub` is required.
 ## When your provider is not OIDC
 
 ``TokenValidator`` is one method — token in, ``Principal`` out. Conform to it
-and register your type instead:
+and register your type instead, listing ``FlightSecurityModule`` on its own
+rather than ``FlightOIDCModule``:
 
 ```swift
 struct OpaqueTokenValidator: TokenValidator {
@@ -65,6 +73,27 @@ final class OrderService: Sendable {
 ``AuthenticationState`` distinguishes *anonymous* from *authenticated*
 rather than collapsing both into a nil check, so a route that genuinely
 allows anonymous access says so.
+
+## Authentication is not enforcement
+
+``Authentication`` establishes identity and rejects nobody, so a public route
+stays public with the middleware in place. ``RequireAuthentication`` is the
+part that says no, and it runs where a route asks for it —
+``FlightSecurityModule`` declares the two canonical lanes and a controller or
+route names one:
+
+```swift
+@Controller("/admin", pipelines: [.authenticated])      // 401 for anonymous
+struct AdminController {
+    @GetRoute("/status", pipelines: [.public])          // deliberate, and says so
+    func status(_ context: RequestContext) -> Response { .text("ok") }
+}
+```
+
+`.authentication` is the other: identity established, nobody rejected, for a
+route that serves signed-in and anonymous callers differently. Authorization
+stays in the handler — `requireRole` and `requireScope` depend on a value, and
+no lane can describe that.
 
 ## Key rotation is a liveness concern
 
@@ -110,7 +139,13 @@ WebSocket's HTTP upgrade is what the channel's join sees.
 - ``PrincipalHolder``
 - ``AuthenticationState``
 
+### Enforcement
+
+- ``Authentication``
+- ``RequireAuthentication``
+- ``SecurityError``
+
 ### Hosting
 
 - ``FlightSecurityModule``
-- ``SecurityError``
+- ``FlightOIDCModule``

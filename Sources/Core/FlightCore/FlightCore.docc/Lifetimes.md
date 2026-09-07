@@ -31,15 +31,20 @@ Because a singleton is shared across every task in the process, it must be
 
 ## Scoped
 
-One instance per request. This is where per-request mutable state belongs: a
-database connection bound to a transaction, an authenticated principal, a
-request-scoped cache.
+One instance per request. This is where per-request mutable state belongs: an
+authenticated principal, a request-scoped cache, a correlation id that every
+log line in the request should carry.
 
 ```swift
-container.register(Connection.self, scope: .scoped) { c in
-    try c.resolve(DataSource.self).checkout()
+container.register(PrincipalHolder.self, scope: .scoped) { _ in
+    PrincipalHolder()
 }
 ```
+
+That is Flight Security's real registration, and it is the shape to copy. A
+pooled database connection is *not* on the list: Flight Data's repositories
+hold the pool and lease a connection per operation, precisely so that nothing
+has to keep one alive for the length of a request.
 
 Resolving a `.scoped` component with no active scope **throws**. It does not
 quietly fall back to a shared instance, because that is the captive-dependency
@@ -47,8 +52,8 @@ bug: a per-request object captured by a singleton, outliving the request it
 belonged to, serving the wrong user's data.
 
 ```swift
-try Scope.withScope { scope in
-    let connection = try container.resolve(Connection.self, in: scope)
+try container.withScope { scope in
+    let holder = try container.resolve(PrincipalHolder.self, in: scope)
     // …
 }   // scope ends; scoped instances are released
 ```

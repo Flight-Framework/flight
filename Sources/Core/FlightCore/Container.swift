@@ -125,7 +125,7 @@ public final class Container: @unchecked Sendable {
     ///     let container = try TestContainer.build {
     ///         AppModule()
     ///     } overriding: { container in
-    ///         container.override((any UserRepositoryProtocol).self, scope: .scoped) { _ in
+    ///         container.override((any UserRepositoryProtocol).self, scope: .singleton) { _ in
     ///             InMemoryUsers()
     ///         }
     ///     }

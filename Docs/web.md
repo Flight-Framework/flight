@@ -78,8 +78,8 @@ struct AppModule: FlightModule {
 }
 
 @main struct Main {
-    static func main() async throws {
-        try await bootstrap(
+    static func main() async {
+        await Flight.run(                             // prints why and exits 1 if it cannot start
             configuration: try Configuration.load(),
             modules: [FlightWebModule<FlightTransport>.self, AppModule.self]
         )

@@ -29,10 +29,16 @@ public enum AuthenticationState: Sendable {
 ///
 /// This is a reference type doing its own internal mutation because the
 /// request `Scope`'s component cache is get-or-create: the *instance* is fixed at
-/// first resolve, the *state* is set once the token is validated. It exists
-/// because Flight Web's middleware chain is flat — a task-local bound inside
-/// the authentication middleware would unwind before the handler runs, so
-/// the principal must travel on the request scope instead.
+/// first resolve, the *state* is set once the token is validated.
+///
+/// It exists because the middleware chain was a flat sequential loop when it
+/// was written, so a task-local bound inside the authentication middleware
+/// unwound before the handler ran. `compose(_:around:)` folds the chain into
+/// layers now — each middleware calls `next(context)` inside its own extent —
+/// so that constraint no longer holds, and neither does the reason for a
+/// mutable reference type here. The composition migration replaces this with
+/// a typed value on `RequestContext`, written by the authentication
+/// middleware and read by the constructor of whatever needs it.
 public final class PrincipalHolder: Sendable {
     private let storage = Mutex<AuthenticationState>(.anonymous)
 
