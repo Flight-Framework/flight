@@ -51,6 +51,11 @@ struct Manifest: Codable {
 struct ScannedComponent {
     let module: String
     let typeName: String
+    /// The registrable attribute's name — `Service`, `Repository`,
+    /// `Controller`, … — which is what decides the stereotype. Kept because
+    /// the generator delegates registration to the macro's `_flightRegister`
+    /// thunk and so never had to know it, while a static component list does.
+    let attributeName: String
     let isPublic: Bool
     /// Source text of the registrable attribute's `scope:` argument. Defaults
     /// to `.singleton`, exactly like the macro's parseComponentArguments —
@@ -690,6 +695,8 @@ final class ComponentVisitor: SyntaxVisitor {
             ScannedComponent(
                 module: module,
                 typeName: name,
+                attributeName: registrable.attributeName
+                    .as(IdentifierTypeSyntax.self)?.name.text ?? "Component",
                 isPublic: isPublic,
                 scopeText: labeledArgumentSource(of: registrable, label: "scope") ?? ".singleton",
                 qualifierText: labeledArgumentSource(of: registrable, label: "qualifier"),
@@ -1269,6 +1276,25 @@ func lanesInModuleOrder() -> [ScannedPipelineLane] {
     }.map(\.element)
 }
 
+
+/// The `Stereotype` a registrable attribute registers under.
+///
+/// Mirrors the macros' own mapping: `@Component` passes no `stereotype:` and
+/// takes the parameter's `.component` default, and so does anything without
+/// an explicit case here. `@Scheduler` is deliberately in that group —
+/// `Stereotype` has no scheduler case, and inventing one in a build tool
+/// would put the manifest and the runtime out of step.
+func stereotype(forAttribute name: String) -> String {
+    switch name {
+    case "Service": return "service"
+    case "Repository": return "repository"
+    case "Controller": return "controller"
+    case "Settings": return "settings"
+    case "Middleware": return "middleware"
+    default: return "component"
+    }
+}
+
 /// Escapes text being re-embedded in a generated Swift string literal. Route
 /// paths are already refused a quote or a backslash by the scanner, but the
 /// lane text is an arbitrary expression, so this is not decorative.
@@ -1378,7 +1404,13 @@ out += "}\n"
 //
 // Emitted only when the target actually declares routes, so a target with no
 // controllers gets a generated file of exactly the shape it had before.
-if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty {
+// The manifest exists when the target has any Flight surface at all. A
+// components-only target — a library of `@Service` types with no routes —
+// gets one too, since the component list is the part a composition function
+// is built from.
+if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
+    || !components.isEmpty
+{
     let sorted = routes.sorted {
         ($0.path, $0.httpMethod, $0.source) < ($1.path, $1.httpMethod, $1.source)
     }
@@ -1532,6 +1564,53 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty 
         let fileName = mount.file.split(separator: "/").last.map(String.init) ?? mount.file
         out += "file: \"\(escaped(fileName))\", "
         out += "line: \(mount.line)),\n"
+    }
+    out += "    ]\n"
+
+    // The component list. What `allRegistrations()` answers at runtime, known
+    // before the binary exists — and, unlike the runtime's answer, carrying
+    // the dependency edges, which is what a composition function is built
+    // from (COMPOSITION-MIGRATION.md §2.1).
+    out += "\n"
+    out += "    /// A registrable component, as scanned.\n"
+    out += "    public struct Component: Sendable {\n"
+    out += "        /// Qualified with its module when it comes from another\n"
+    out += "        /// one, matching how registration names it.\n"
+    out += "        public let typeName: String\n"
+    out += "        /// \"service\", \"repository\", \"controller\", …\n"
+    out += "        public let stereotype: String\n"
+    out += "        /// Source text of the `scope:` argument.\n"
+    out += "        public let scope: String\n"
+    out += "        public let qualifier: String?\n"
+    out += "        /// `@Inject` types, in declaration order — the edges a\n"
+    out += "        /// composition function orders construction by.\n"
+    out += "        public let dependencies: [String]\n"
+    out += "        /// Registered by its own module rather than by\n"
+    out += "        /// `flightRegisterAll`, because whether it exists in an\n"
+    out += "        /// application is a runtime question.\n"
+    out += "        public let isModuleRegistered: Bool\n"
+    out += "        public let module: String\n"
+    out += "    }\n"
+    out += "\n"
+    out += "    public static let components: [Component] = [\n"
+    for component in components.sorted(by: { ($0.module, $0.typeName) < ($1.module, $1.typeName) }) {
+        let qualified =
+            component.module == manifest.targetModuleName
+            ? component.typeName
+            : "\(component.module).\(component.typeName)"
+        let qualifier = component.qualifierText.map { "\"\(escaped($0))\"" } ?? "nil"
+        // Acknowledged edges are dependencies too — the marker says the type
+        // is registered by hand, not that nothing depends on it.
+        let dependencies = (component.injectTypeNames + component.acknowledgedTypeNames)
+            .map { "\"\(escaped($0))\"" }.joined(separator: ", ")
+        out += "        Component("
+        out += "typeName: \"\(escaped(qualified))\", "
+        out += "stereotype: \"\(stereotype(forAttribute: component.attributeName))\", "
+        out += "scope: \"\(escaped(component.scopeText))\", "
+        out += "qualifier: \(qualifier), "
+        out += "dependencies: [\(dependencies)], "
+        out += "isModuleRegistered: \(component.isModuleRegistered), "
+        out += "module: \"\(escaped(component.module))\"),\n"
     }
     out += "    ]\n"
     out += "}\n"

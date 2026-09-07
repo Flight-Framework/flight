@@ -160,12 +160,22 @@ struct GeneratorTests {
         ])
 
         #expect(result.exitCode == 0)
-        // The header carries a component count and the target name; the body
-        // below it is what this test pins.
+        // The header carries a component count and the target name; the
+        // registration function below it is what this test pins. The static
+        // manifest that follows has its own golden test — one assertion over
+        // both would fail on every manifest field, which is not what this is
+        // watching for.
         let marker = "public func flightRegisterAll"
         let start = try #require(result.generated.range(of: marker)).lowerBound
+        // The manifest's own doc comment precedes its declaration, so the
+        // boundary is that comment, not the `public enum`.
+        let end =
+            result.generated.range(of: "/// Every route this module declares")?.lowerBound
+            ?? result.generated.endIndex
+        let body = String(result.generated[start..<end])
+            .trimmingCharacters(in: .newlines)
         #expect(
-            String(result.generated[start...]) == """
+            body == """
                 public func flightRegisterAll(_ container: FlightCore.Container) throws {
                     try EnglishGreeter._flightRegister(container)
                     try Welcomer._flightRegister(container)
@@ -178,7 +188,6 @@ struct GeneratorTests {
                         try c.resolveInActiveScope(EnglishGreeter.self)
                     }
                 }
-
                 """)
     }
 
@@ -761,14 +770,33 @@ struct GeneratorTests {
         #expect(result.generated.contains(#"middleware: ["RequestLogging"], declaredIn: "AppModule""#))
     }
 
-    @Test("a target with neither routes nor lanes emits no manifest")
-    func noRoutesNoLanesNoManifest() throws {
+    @Test("a components-only target still gets a manifest, with empty route and lane lists")
+    func componentsOnlyTargetGetsManifest() throws {
+        // A library of @Service types has no routes and declares no lanes,
+        // and still needs its component list: that is the part a composition
+        // function is built from. Empty arrays are the honest answer, not a
+        // reason to emit nothing.
         let result = try generate([
             "UserService.swift": """
             import FlightCore
             @Service final class UserService: Sendable {
             init() {}
             }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("FlightRouteManifest"))
+        #expect(result.generated.contains("public static let routes: [Entry] = [\n    ]"))
+        #expect(
+            result.generated.contains(
+                #"Component(typeName: "UserService", stereotype: "service""#))
+    }
+
+    @Test("a target with no Flight surface at all emits no manifest")
+    func emptyTargetEmitsNoManifest() throws {
+        let result = try generate([
+            "Plain.swift": """
+            struct JustAStruct {}
             """
         ])
         #expect(result.exitCode == 0)
@@ -969,6 +997,96 @@ struct GeneratorTests {
         ])
         #expect(result.exitCode == 0)
         #expect(result.generated.contains("HandRegistered(path: nil"))
+    }
+
+    // MARK: - The component list
+
+    @Test("the manifest's data rows are exactly this — indentation included")
+    func manifestRowsAreGolden() throws {
+        // Same hazard the registration body's golden test exists for: the
+        // manifest is built by appending string literals, so a cleanup pass
+        // can collapse its indentation while every `contains` test still
+        // passes. This pins the rows rather than the whole block, so a
+        // doc-comment edit is not a failure but a shape regression is.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            @Controller("/users")
+            struct UserController {
+                @Inject var repo: UserRepository
+                @GetRoute("/:id")
+                func show(_ context: RequestContext) -> String { "x" }
+            }
+            @Repository
+            struct UserRepository {}
+            """
+        ])
+        #expect(result.exitCode == 0)
+
+        let start = try #require(
+            result.generated.range(of: "    public static let components: [Component] = [")
+        ).lowerBound
+        let rest = result.generated[start...]
+        let end = try #require(rest.range(of: "\n    ]")).upperBound
+        #expect(
+            String(result.generated[start..<end]) == """
+                    public static let components: [Component] = [
+                        Component(typeName: "UserController", stereotype: "controller", scope: ".singleton", qualifier: nil, dependencies: ["UserRepository"], isModuleRegistered: false, module: "AppModule"),
+                        Component(typeName: "UserRepository", stereotype: "repository", scope: ".singleton", qualifier: nil, dependencies: [], isModuleRegistered: false, module: "AppModule"),
+                    ]
+                """)
+    }
+
+    @Test("a component's stereotype follows its attribute")
+    func stereotypeFollowsAttribute() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            @Service struct A: Sendable {}
+            @Repository struct B: Sendable {}
+            @Component struct C: Sendable {}
+            @Middleware struct D: Sendable {}
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains(#"typeName: "A", stereotype: "service""#))
+        #expect(result.generated.contains(#"typeName: "B", stereotype: "repository""#))
+        // @Component passes no `stereotype:` and takes the parameter's
+        // default, so the manifest must say the same thing.
+        #expect(result.generated.contains(#"typeName: "C", stereotype: "component""#))
+        #expect(result.generated.contains(#"typeName: "D", stereotype: "middleware""#))
+    }
+
+    @Test("a module-registered component is listed, and flagged")
+    func moduleRegisteredComponentIsFlagged() throws {
+        // It is not in flightRegisterAll — that is what the marker means —
+        // but it is still part of the graph, and a composition function has
+        // to know it exists to order anything that depends on it.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            // flight:module-registered
+            @Middleware struct Authentication: Sendable {}
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(!result.generated.contains("try Authentication._flightRegister"))
+        #expect(
+            result.generated.contains(
+                #"typeName: "Authentication", stereotype: "middleware", scope: ".singleton", qualifier: nil, dependencies: [], isModuleRegistered: true"#
+            ))
+    }
+
+    @Test("a qualified component keeps its qualifier")
+    func qualifiedComponentKeepsQualifier() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            @Repository(qualifier: "primary") struct Pool: Sendable {}
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains(#"qualifier: "\"primary\"""#))
     }
 
     // MARK: - Failure modes
