@@ -61,6 +61,20 @@ private final class RoutesModule: FlightModule {
             }
             return .text("created")
         }
+        // The canonical security lanes, named exactly as `Docs/web.md` and
+        // `PipelineLane`'s own documentation spell them. Nothing here
+        // declares them, deliberately: the point of a canonical lane is that
+        // an application names it and it works.
+        container.registerRoute(
+            .get, "/lane/dashboard", source: "RoutesModule", pipelines: [.authenticated]
+        ) { context in
+            .text(try context.requirePrincipal().subject)
+        }
+        container.registerRoute(
+            .get, "/lane/profile", source: "RoutesModule", pipelines: [.authentication]
+        ) { context in
+            .text(context.principal?.subject ?? "anonymous")
+        }
         container.registerRoute(.get, "/documents", source: "RoutesModule") { context in
             //: handler binds the task-local; a "service" reads the
             // ambient principal without it being threaded through.
@@ -156,6 +170,37 @@ struct EndToEndTests {
 
         let anonymous = await client.post("/admin/users")
         #expect(anonymous.status == .forbidden, "no principal, no role — same generic outcome")
+    }
+
+    @Test("the .authenticated lane rejects anonymous requests, with no app wiring")
+    func authenticatedLane() async throws {
+        // `Docs/web.md` documents `pipelines: [.authenticated]` on a
+        // controller and never tells you to declare the lane, and the macro
+        // warns when a route drops it — so a security module that leaves the
+        // lane undeclared turns the documented spelling into an
+        // `UndeclaredLaneError` at bootstrap.
+        let client = try makeClient()
+        let token = try await identity.sign(standardClaims(now: clock.now))
+
+        let allowed = await client.get("/lane/dashboard", headers: bearer(token))
+        #expect(allowed.status == .ok)
+        #expect(allowed.bodyText == "user-123")
+
+        let denied = await client.get("/lane/dashboard")
+        #expect(denied.status == .unauthorized)
+        #expect(denied.headers[.wwwAuthenticate] == "Bearer")
+    }
+
+    @Test("the .authentication lane establishes identity and rejects nobody")
+    func authenticationLane() async throws {
+        let client = try makeClient()
+        let token = try await identity.sign(standardClaims(now: clock.now))
+
+        #expect(await client.get("/lane/profile", headers: bearer(token)).bodyText == "user-123")
+
+        let anonymous = await client.get("/lane/profile")
+        #expect(anonymous.status == .ok)
+        #expect(anonymous.bodyText == "anonymous")
     }
 
     @Test("withPrincipal carries the identity into service-style code")
