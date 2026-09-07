@@ -1,6 +1,12 @@
 import Logging
 import ServiceLifecycle
 
+#if canImport(Glibc)
+    import Glibc
+#elseif canImport(Darwin)
+    import Darwin
+#endif
+
 /// The namespace for Flight's top-level entry points.
 ///
 /// These were free functions once. `bootstrap` and `assemble` are useful
@@ -60,6 +66,80 @@ public enum Flight {
     ) async throws {
         try await _flightBootstrap(
             configuration: configuration, modules: modules, logger: logger)
+    }
+
+    /// The whole of `main`: run the application, and if it cannot start, say
+    /// why and exit non-zero.
+    ///
+    /// ```swift
+    /// @main
+    /// struct App {
+    ///     static func main() async {
+    ///         await Flight.run(
+    ///             configuration: try Configuration.load(),
+    ///             modules: [FlightWebModule<FlightTransport>.self, AppModule.self]
+    ///         )
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Same work as ``bootstrap(configuration:modules:logger:)``, and one
+    /// difference: it does not throw. A `main` that does is the difference
+    /// between
+    ///
+    /// ```
+    /// flight: could not start.
+    /// Configuration key 'datasource.primary.url' is not set in any source
+    /// (active environment: prod). Add it to flight.yaml or flight-prod.yaml,
+    /// or set the FLIGHT_DATASOURCE_PRIMARY_URL environment variable.
+    /// ```
+    ///
+    /// and the same message under `Swift/ErrorType.swift:254: Fatal error:
+    /// Error raised at top level:` followed by thirty lines of backtrace and
+    /// a `Signal 4` — which is what a thrown error out of `main` produces,
+    /// and what every deployment that mistypes a key currently sees. The
+    /// message was always good; the frame around it said "this program
+    /// crashed" about a configuration typo.
+    ///
+    /// The configuration is an autoclosure so that a *load* failure — a
+    /// missing file, a `${VAR}` with nothing behind it — is reported the same
+    /// way as a bootstrap failure rather than trapping at the call site.
+    ///
+    /// Exits `0` after a graceful shutdown, `1` on a startup failure. An
+    /// embedder that wants the error rather than the exit uses `bootstrap`.
+    public static func run(
+        configuration: @autoclosure @Sendable () throws -> Configuration,
+        modules: [any FlightModule.Type],
+        logger: Logger = Logger(label: "flight.bootstrap")
+    ) async -> Never {
+        do {
+            let configuration = try configuration()
+            try await bootstrap(configuration: configuration, modules: modules, logger: logger)
+            exit(0)
+        } catch {
+            // Written straight to file descriptor 2 rather than through
+            // Foundation: this file is in the module every other one imports,
+            // and a startup message is not worth a dependency. (`stderr`
+            // itself is a `var` in Glibc, which strict concurrency refuses.)
+            // `String(reflecting:)`, not plain interpolation: PostgresNIO's
+            // `description` is deliberately redacted ("Generic description to
+            // prevent accidental leakage of sensitive data"), and the
+            // reflected form names the host, the port and the errno — which
+            // is the whole content of "why did it not start". Safe here
+            // specifically: a startup failure has no user queries or bind
+            // values in it, and the process is about to exit.
+            let message = "flight: could not start.\n\(String(reflecting: error))\n"
+            let bytes = Array(message.utf8)
+            bytes.withUnsafeBufferPointer { buffer in
+                var written = 0
+                while written < buffer.count {
+                    let result = write(2, buffer.baseAddress! + written, buffer.count - written)
+                    if result <= 0 { break }
+                    written += result
+                }
+            }
+            exit(1)
+        }
     }
 
     /// The order modules must be configured in, resolved from their declared

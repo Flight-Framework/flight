@@ -15,8 +15,8 @@ final class UserService: Sendable {
 
 @main
 struct App {
-    static func main() async throws {
-        try await Flight.bootstrap(
+    static func main() async {
+        await Flight.run(
             configuration: try Configuration.load(),
             modules: [WebModule.self, DataModule.self]
         )
@@ -41,6 +41,13 @@ dependencies: [
 ```
 
 Requires Swift 6.2+. Linux and macOS 15+.
+
+`Flight.run` is `bootstrap` that does not throw: it starts the application,
+and if it *cannot* start it prints why and exits `1`. A `main` that throws
+instead reports the same message under `Fatal error: Error raised at top
+level`, a backtrace and a `Signal 4` — a configuration typo dressed as a
+crash. `bootstrap` remains for embedders that want the error rather than the
+exit.
 
 ## Two phases, and why it matters
 
