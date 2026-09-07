@@ -99,7 +99,11 @@ public func errorResponse(for error: any Error, context: RequestContext) -> Resp
         if mapped.status.kind == .serverError {
             context.logger.error("request failed: \(String(describing: error))")
         }
-        return render(mapped.status, mapped.message)
+        var response = render(mapped.status, mapped.message)
+        for field in mapped.headers where response.headers[field.name] == nil {
+            response = response.settingHeader(field.name, field.value)
+        }
+        return response
     }
     switch error {
     case let routing as RoutingError:

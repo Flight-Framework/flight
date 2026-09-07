@@ -47,9 +47,9 @@ public struct HTTPError: HTTPErrorRepresentable, Sendable {
 ///     ErrorMapper { error in
 ///         switch error {
 ///         case let validation as ChangesetValidationError:
-///             return (.unprocessableContent, validation.description)
+///             return .init(.unprocessableContent, validation.description)
 ///         case DataSourceError.poolExhausted:
-///             return (.serviceUnavailable, "The service is busy. Retry shortly.")
+///             return .init(.serviceUnavailable, "The service is busy.", headers: [.retryAfter: "1"])
 ///         default:
 ///             return nil          // leave it to the default rendering
 ///         }
@@ -62,12 +62,30 @@ public struct HTTPError: HTTPErrorRepresentable, Sendable {
 /// first, so an application may also override how a framework error renders
 /// — its own call, in one visible place rather than at every call site.
 public struct ErrorMapper: Sendable {
-    /// The shape an error should take on the wire, or `nil` to decline.
-    public let map: @Sendable (any Error) -> (status: HTTPResponse.Status, message: String)?
+    /// What an error becomes on the wire.
+    public struct Mapping: Sendable {
+        public var status: HTTPResponse.Status
+        /// Client-visible text. Rendered by the same `WebCoders.renderError`
+        /// every other error goes through, so the body shape stays uniform.
+        public var message: String
+        /// Merged into the rendered response — `Retry-After` on a 503 being
+        /// the case that earns the parameter. The rendered body's own headers
+        /// win on collision.
+        public var headers: HTTPFields
 
-    public init(
-        _ map: @escaping @Sendable (any Error) -> (status: HTTPResponse.Status, message: String)?
-    ) {
+        public init(
+            _ status: HTTPResponse.Status, _ message: String, headers: HTTPFields = [:]
+        ) {
+            self.status = status
+            self.message = message
+            self.headers = headers
+        }
+    }
+
+    /// The shape an error should take on the wire, or `nil` to decline.
+    public let map: @Sendable (any Error) -> Mapping?
+
+    public init(_ map: @escaping @Sendable (any Error) -> Mapping?) {
         self.map = map
     }
 
