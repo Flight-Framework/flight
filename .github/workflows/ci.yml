@@ -132,3 +132,16 @@ jobs:
 
       - name: Build
         run: swift build --enable-all-traits
+
+  # The starter templates are built against *this* commit, in flight-cli's own
+  # workflow. Its `workflow_call` trigger exists for this, and until now
+  # nothing called it: five renamed or removed APIs reached the templates
+  # unnoticed, and `flight new` emitted a project that did not compile against
+  # the versions it resolved. A breaking change here should fail on the pull
+  # request that causes it, not in a new user's first ten minutes.
+  templates:
+    name: Starter templates
+    uses: Flight-Framework/flight-cli/.github/workflows/ci.yml@main
+    with:
+      flight_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
