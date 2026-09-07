@@ -4,6 +4,113 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-09-07
+
+Everything here was found the same way: by building an application on this
+package and driving it from outside — curl, a raw WebSocket client speaking
+the handshake itself, a local OIDC provider issuing tokens no real one would,
+and two nodes clustered over one Valkey. Several of these are cases the test
+suite could not see, because the in-memory transport is kinder than a socket
+and a single process never restarts under load.
+
+### Breaking
+
+- **Channel traffic has its own namespace on the bus.** `ChannelBroadcaster`
+  published fan-out on the *application's* topic string, so PubSub had one
+  namespace for two unrelated things — and an application meets both
+  directions of that by accident: subscribing to `shipment:42` delivered
+  Channels' internal frames as opaque JSON, and publishing to `shipment:42`
+  had the message dropped by every connected socket's pump, with a warning
+  each. Frames now travel under `flight:channels:<topic>`, named by
+  `ChannelProtocol.busTopic(_:)`, exactly as Presence has always namespaced
+  its gossip. Nothing on the wire changes; code that watches channel traffic
+  from outside Channels subscribes through that function.
+
+- **`JobStatus.runCount` counts runs rather than successes.** A job that
+  failed four times reported `runCount: 0, failureCount: 4`. Successes are
+  `runCount - failureCount`.
+
+### Added
+
+- **`Flight.run`** — `bootstrap` that does not throw. A startup failure prints
+  the reason and exits 1 instead of arriving as "Fatal error: Error raised at
+  top level" plus a backtrace, which is what a mistyped configuration key
+  produced. The starter templates each hand-rolled this; it belongs here.
+
+- **`ErrorMapper`** — one registered closure mapping the error vocabularies an
+  application does not own onto HTTP. `DataSourceError.poolExhausted`,
+  `HangarError.unknownFilterField`, `ChangesetValidationError` and friends
+  cannot conform to `HTTPErrorRepresentable` (the application does not own
+  them; the packages below FlightWeb deliberately do not depend on it), and a
+  middleware never sees a handler's error — the router renders it inside the
+  chain. Without this the only option was a `do`/`catch` at every call site,
+  and the usual result was a retryable saturation reported as 500 rather than
+  503. Returns an `ErrorMapper.Mapping`, which can carry headers —
+  `Retry-After` on a 503 being the case that earns them.
+
+- **`ServiceShutdownPhase`** — `.inbound`, `.standard`, `.infrastructure`, with
+  bootstrap sorting services by it. See *Fixed* below.
+
+- **`ChannelCloseCode.writeTimeout` (4408)** — a socket closed for not reading
+  used to report `1000`, indistinguishable from a clean server shutdown.
+
+### Fixed
+
+- **`SIGTERM` during an in-flight request crashed the process and dropped the
+  response.** `ServiceGroup` shuts down in reverse array order, and bootstrap
+  built that array from the module DAG — which cannot express "the HTTP server
+  depends on the pool", because it does not: the *requests* do. The order came
+  from however an application listed its modules, and the shape every example
+  uses put the transport first and therefore shut it down last, closing the
+  pools underneath a server that was still serving. The result was
+  "PostgresConnection deinitialized before being closed" and a `Signal 4`,
+  on every rolling deploy that restarted under load. Services now sort by
+  phase, so the transport stops first and the infrastructure it borrowed from
+  stops last.
+
+- **No server-initiated WebSocket close reached the peer.** 4400, 1003, 4000
+  and the 1000 of a graceful `flight:close` all arrived as `1006`. Each was
+  issued from inside the task that the handler's own exit coordination then
+  cancelled: the write threw `CancellationError` into a `try?` while the
+  transport's state machine had already moved to "closing", so the later,
+  uncancelled close was a no-op. The close is now decided where it is noticed
+  and *written* by the handler, after every task is joined and the writer has
+  drained.
+
+- **Dropped broadcasts were invisible.** `Socket.droppedEnvelopeCount` exists
+  so "a subscriber falling behind is visible rather than silent", and the
+  fan-out it was written about called `yield` with the result discarded. 600
+  broadcasts to a socket that had stopped reading produced no drop line at
+  all.
+
+- **`@Inject var x: any P` did not compile.** The expansion emitted
+  `resolve(any P.self)`, which parses as `any (P.self)`; only the
+  parenthesized spelling worked, and every documentation page teaches the bare
+  one. Fixed in all four copies of that emission.
+
+- **Two `@Inject` properties of one type now collide only when they would
+  resolve the same key**, so the primary datasource (registered unqualified
+  *and* by name) can sit beside a named one in the same type.
+
+- **A foreign PubSub payload on a channel topic logged once per socket per
+  message**, unbounded; rate-limited on the same 1-then-every-100 rule as the
+  drop log.
+
+### Documentation
+
+- The first example on three pages did not compile: `@Inject var` in a
+  `Sendable` class is a hard Swift error, and the macros want `let`.
+- The actuator page now says what an *unset* `FLIGHT_ENV` means for it —
+  `health_only`, deliberately, and not the `dev` that Flight Config's page
+  describes for everything else.
+- The channels page documents the bus namespace and the new close code.
+
+### Internal
+
+- CI now calls flight-cli's template workflow with the commit under review, so
+  a breaking change fails on its own pull request rather than in a new user's
+  first ten minutes.
+
 ## [0.13.0] - 2026-09-01
 
 First two increments of the container → composition migration. See

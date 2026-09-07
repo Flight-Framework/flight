@@ -47,7 +47,13 @@ Three levels, decided at bootstrap and never re-read:
 | `health_only` | `/actuator/health` — a liveness answer with no topology in it |
 | `full` | health **and** the dashboard: module list, every component's type name, failure messages |
 
-`full` is the default in `dev`, `development`, `test` and `local`.
+`full` is the default in `dev`, `development`, `test` and `local` — when
+`FLIGHT_ENV` actually *says* so. **An unset `FLIGHT_ENV` is `health_only`**,
+not `dev`: everywhere else an unset variable means development
+([config](config.md)), but the question here is whether to publish an
+unauthenticated description of your topology, and "nobody set the variable"
+is not an answer worth acting on. Set `FLIGHT_ENV=dev` (or
+`FLIGHT_ACTUATOR_EXPOSURE=full`) to get the dashboard.
 **Everywhere else the default is `health_only`** — an orchestrator needs a
 probe in production, and an all-or-nothing gate left production with none.
 

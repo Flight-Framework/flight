@@ -114,6 +114,14 @@ extension RequestContext {
     }
 }
 
+extension RequestContext {
+    /// This application's error mapper, or one that declines everything when
+    /// nothing registered one — so a hand-built context still renders errors.
+    public var errorMapper: ErrorMapper {
+        (try? resolve(ErrorMapper.self)) ?? .none
+    }
+}
+
 extension WebCoders {
     /// Builds the coders from `web.*` configuration.
     ///

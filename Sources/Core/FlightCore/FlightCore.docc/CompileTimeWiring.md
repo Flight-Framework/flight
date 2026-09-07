@@ -39,7 +39,7 @@ final class PostgresUserRepository: UserRepository, Sendable {}
 
 @Service
 final class UserService: Sendable {
-    @Inject var repository: any UserRepository   // wired automatically
+    @Inject let repository: any UserRepository   // wired automatically
 }
 ```
 

@@ -9,14 +9,14 @@ once, freezes it, and runs your services under a `ServiceGroup`.
 ```swift
 @Service
 final class UserService: Sendable {
-    @Inject var repository: any UserRepository
-    @ConfigValue("features.signup_enabled", default: true) var signupEnabled: Bool
+    @Inject let repository: any UserRepository
+    @ConfigValue("features.signup_enabled", default: true) let signupEnabled: Bool
 }
 
 @main
 struct App {
-    static func main() async throws {
-        try await Flight.bootstrap(
+    static func main() async {
+        await Flight.run(
             configuration: try Configuration.load(),
             modules: [WebModule.self, DataModule.self]
         )
@@ -28,7 +28,7 @@ struct App {
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.11.0")
+    .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0")
 ]
 ```
 
@@ -41,6 +41,13 @@ dependencies: [
 ```
 
 Requires Swift 6.2+. Linux and macOS 15+.
+
+`Flight.run` is `bootstrap` that does not throw: it starts the application,
+and if it *cannot* start it prints why and exits `1`. A `main` that throws
+instead reports the same message under `Fatal error: Error raised at top
+level`, a backtrace and a `Signal 4` — a configuration typo dressed as a
+crash. `bootstrap` remains for embedders that want the error rather than the
+exit.
 
 ## Two phases, and why it matters
 

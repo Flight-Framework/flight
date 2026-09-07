@@ -184,6 +184,10 @@ public struct ChannelBroadcaster: Sendable {
             metadata[Self.precomputedFrameMetadataKey] = text
             metadata[Self.frameTokenMetadataKey] = Self.frameToken
         }
-        await pubsub.publish(Message(topic: topic, payload: data, metadata: metadata))
+        // Published under the channel bus prefix, not on the application's
+        // own topic string — see `ChannelProtocol.busTopic(_:)` for the
+        // collision that shared namespace caused in both directions.
+        await pubsub.publish(
+            Message(topic: ChannelProtocol.busTopic(topic), payload: data, metadata: metadata))
     }
 }

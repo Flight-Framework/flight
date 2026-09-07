@@ -167,6 +167,22 @@ public final class Socket: Sendable, Identifiable {
             ])
             return
         }
+        enqueueEncoded(text, topic: envelope.topic, event: envelope.event)
+    }
+
+    /// Enqueues text that is already framed, with the same accounting.
+    ///
+    /// The fan-out pumps hold the outbound continuation rather than the
+    /// socket, for the encode-once path — and called `yield` on it directly,
+    /// discarding the result. So every *broadcast* dropped for a socket that
+    /// had fallen behind was invisible: not counted in
+    /// ``droppedEnvelopeCount``, not logged, though that counter exists
+    /// precisely so "a subscriber falling behind is visible rather than
+    /// silent". Single-target sends were accounted for; the fan-out that the
+    /// bound exists to survive was not.
+    ///
+    /// `nonisolated` and lock-free, so a pump pays no hop for it.
+    internal func enqueueEncoded(_ text: String, topic: String, event: String) {
         switch outbound.yield(text) {
         case .enqueued, .terminated:
             break
@@ -178,8 +194,8 @@ public final class Socket: Sendable, Identifiable {
                 logger.warning(
                     "outbound queue full; dropping the oldest messages for this socket",
                     metadata: [
-                        "topic": "\(envelope.topic)",
-                        "event": "\(envelope.event)",
+                        "topic": "\(topic)",
+                        "event": "\(event)",
                         "dropped-total": "\(total)",
                     ]
                 )

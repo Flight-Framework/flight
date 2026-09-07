@@ -1,5 +1,6 @@
 import Synchronization
 @_spi(FlightInternal) import FlightChannels
+import FlightChannelsProtocol
 import FlightPresenceProtocol
 import FlightPubSub
 import struct Foundation.Data
@@ -747,7 +748,9 @@ public actor PresenceTracker: Presence {
                 pendingDiffsHead = 0
             }
             await localBus.publish(
-                Message(topic: queued.topic, payload: queued.payload, metadata: queued.metadata))
+                Message(
+                    topic: ChannelProtocol.busTopic(queued.topic), payload: queued.payload,
+                    metadata: queued.metadata))
         }
     }
 

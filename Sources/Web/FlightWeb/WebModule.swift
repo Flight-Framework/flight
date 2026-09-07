@@ -49,6 +49,11 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule {
     public var service: (any Service)? {
         container.map { WebHostService<Transport>(container: $0) }
     }
+
+    /// The transport is what brings work in, so it is the first thing to
+    /// stop: no new requests, drain what is in flight, and only then let the
+    /// pools and buses everything else was using go.
+    public var serviceShutdownPhase: ServiceShutdownPhase { .inbound }
 }
 
 /// Runs the web stack: build dispatch from the (by now frozen) container,

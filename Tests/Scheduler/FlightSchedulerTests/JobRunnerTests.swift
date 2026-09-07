@@ -108,7 +108,9 @@ struct JobRunnerTests {
 
         let status = await runner.currentStatus()
         #expect(status.failureCount == 1)
-        #expect(status.runCount == 0)
+        // A run that threw is still a run: `runCount` counts firings that
+        // reached the body, and `runCount - failureCount` is the successes.
+        #expect(status.runCount == 1)
         if case .failed(let message) = status.lastOutcome {
             #expect(message.contains("boom"))
         } else {
@@ -143,7 +145,9 @@ struct JobRunnerTests {
         await runner.fire(scheduledFor: epoch.addingTimeInterval(60))
 
         let status = await runner.currentStatus()
-        #expect(status.runCount == 1)
+        // Two firings reached the body, one of them threw: two runs, one
+        // failure, and one success by subtraction.
+        #expect(status.runCount == 2)
         #expect(status.failureCount == 1)
         #expect(status.lastFired == epoch.addingTimeInterval(60))
     }

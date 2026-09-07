@@ -1,3 +1,4 @@
+import FlightChannelsProtocol
 import FlightChannels
 import FlightPresenceProtocol
 import FlightPubSub
@@ -62,8 +63,12 @@ final class DiffCollector: Sendable {
     private let storage = Storage()
     private let pump: Mutex<Task<Void, Never>?> = Mutex(nil)
 
+    /// `topic` is the *channel* topic, as a caller thinks of it; the
+    /// subscription is on the bus topic Channels and Presence publish to
+    /// (`ChannelProtocol.busTopic(_:)`), which is what a joined socket's pump
+    /// subscribes to as well.
     init(pubsub: some PubSub, topic: String) {
-        let stream = pubsub.subscribe(topic)
+        let stream = pubsub.subscribe(ChannelProtocol.busTopic(topic))
         let storage = self.storage
         let task = Task {
             for await message in stream {
