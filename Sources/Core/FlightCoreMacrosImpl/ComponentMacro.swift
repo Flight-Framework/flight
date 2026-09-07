@@ -45,6 +45,19 @@ public struct RepositoryMacro: RegistrationMacro {
 // MARK: - Injected-property model
 // (File scope — nested types are not permitted in protocol extensions.)
 
+/// The parameter-label lists of every initializer the type declares itself.
+///
+/// Used to skip generating one that would redeclare a hand-written init —
+/// a redeclaration error reported inside an expansion the author cannot see.
+func declaredInitializerLabels(_ declaration: some DeclGroupSyntax) -> [[String]] {
+    declaration.memberBlock.members.compactMap { member in
+        guard let initializer = member.decl.as(InitializerDeclSyntax.self) else { return nil }
+        return initializer.signature.parameterClause.parameters.map {
+            ($0.firstName.tokenKind == .wildcard ? "_" : $0.firstName.text)
+        }
+    }
+}
+
 struct InjectedProperty {
     enum Kind {
         case inject(qualifier: String?)
@@ -137,6 +150,56 @@ extension RegistrationMacro {
             internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
             """
 
+        // 1b. Constructor injection: the same properties, as parameters.
+        //
+        // This is what a composition function calls and what a test calls —
+        // `UserService(repo: FakeRepo())`, with no container, no
+        // registration, and no override registry. A struct would get it from
+        // memberwise synthesis, except that declaring `init(_flight:)` above
+        // suppresses that, which is why it has to be generated rather than
+        // relied on.
+        //
+        // `@ConfigValue` properties stay derived rather than becoming
+        // parameters: their value is a property of the deployment, not of the
+        // call site, and a caller passing one would be overriding
+        // configuration by accident. The configuration itself is the
+        // parameter, and only when the type actually reads from it.
+        var parameterInit: DeclSyntax?
+        let injected = properties.filter { if case .inject = $0.kind { return true } else { return false } }
+        let configured = properties.filter { if case .configValue = $0.kind { return true } else { return false } }
+        var parameters = injected.map { "\($0.name): \($0.typeText)" }
+        if !configured.isEmpty {
+            parameters.insert("_flightConfiguration configuration: FlightCore.Configuration", at: 0)
+        }
+        var labels = injected.map(\.name)
+        if !configured.isEmpty { labels.insert("_flightConfiguration", at: 0) }
+
+        // A type that already declares this signature keeps its own.
+        // `Authentication` is the live case: it carries `@Inject var
+        // validator` *and* a hand-written `init(validator:)` for manual
+        // wiring, and generating a second would be a redeclaration error
+        // inside an expansion the author cannot see.
+        if !declaredInitializerLabels(declaration).contains(labels) {
+            var assignments = injected.map { "self.\($0.name) = \($0.name)" }
+            for property in configured {
+                guard case .configValue(let key, let defaultValue) = property.kind else { continue }
+                if let defaultValue {
+                    assignments.append(
+                        "self.\(property.name) = try configuration.getIfPresent(\(key), as: \(property.metatypeBase).self) ?? (\(defaultValue))"
+                    )
+                } else {
+                    assignments.append(
+                        "self.\(property.name) = try configuration.get(\(key), as: \(property.metatypeBase).self)"
+                    )
+                }
+            }
+            let body = assignments.isEmpty ? "" : "\n    " + assignments.joined(separator: "\n    ") + "\n"
+            let throwsClause = configured.isEmpty ? "" : " throws"
+            parameterInit = """
+                \(raw: access)init(\(raw: parameters.joined(separator: ", ")))\(raw: throwsClause) {\(raw: body)}
+                """
+        }
+
         // 2. Registration thunk. Stereotypes differ from @Component only in
         // the trailing stereotype: argument.
         let stereotypeSuffix = stereotypeArgument.map { ", stereotype: \($0)" } ?? ""
@@ -155,7 +218,7 @@ extension RegistrationMacro {
             }
             """
 
-        return [resolvingInit, thunk]
+        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
     }
 
     // MARK: - ExtensionMacro
