@@ -125,7 +125,8 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         // controller, one public route". Saying nothing inherits.
         let controllerPipelines = RouteScanning.pipelines(of: node)
         for (route, path) in combinedRoutes {
-            let pipelines = route.pipelinesText ?? controllerPipelines
+            let pipelines = RouteScanning.resolvedPipelines(
+                route: route.pipelinesText, controller: controllerPipelines)
             if let routePipelines = route.pipelinesText {
                 diagnoseSecurityNarrowing(
                     controller: controllerPipelines, route: routePipelines,

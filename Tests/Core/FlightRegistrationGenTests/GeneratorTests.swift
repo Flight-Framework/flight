@@ -500,6 +500,93 @@ struct GeneratorTests {
         )
     }
 
+    // MARK: - Undeclared lanes
+
+    @Test("a route naming an undeclared lane is warned about at build time")
+    func undeclaredLaneWarns() throws {
+        let result = try generate([
+            "AppModule.swift": """
+            import FlightWeb
+            @Controller("/admin", pipelines: ["audit"])
+            struct AdminController {
+            @GetRoute("/")
+            func index(_ context: RequestContext) -> String { "x" }
+            }
+            """
+        ])
+        // A warning, not an error: the scan reaches source dependencies only,
+        // so a lane declared in a binary dependency is invisible to it.
+        // UndeclaredLaneError at bootstrap stays the enforcement.
+        #expect(result.exitCode == 0)
+        #expect(result.diagnostics.contains("warning"))
+        #expect(result.diagnostics.contains("audit"))
+    }
+
+    @Test("a declared lane is not warned about")
+    func declaredLaneIsQuiet() throws {
+        let result = try generate([
+            "AppModule.swift": """
+            import FlightWeb
+            final class AppModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline("audit") { AuditLog.self }
+            }
+            }
+            @Controller("/admin", pipelines: ["audit"])
+            struct AdminController {
+            @GetRoute("/")
+            func index(_ context: RequestContext) -> String { "x" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(!result.diagnostics.contains("audit"))
+    }
+
+    @Test("the two lanes dispatch provides need no declaration")
+    func canonicalLanesNeedNoDeclaration() throws {
+        // `.default` exists whether or not anything registers into it, and
+        // `.public` means "explicitly no lanes" — DispatchBuilder supplies
+        // both, so naming them is never a mistake.
+        let result = try generate([
+            "AppModule.swift": """
+            import FlightWeb
+            @Controller("/x", pipelines: [.default])
+            struct A {
+            @GetRoute("/a")
+            func a(_ context: RequestContext) -> String { "a" }
+            @GetRoute("/b", pipelines: [.public])
+            func b(_ context: RequestContext) -> String { "b" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(!result.diagnostics.contains("pipeline lane"))
+    }
+
+    @Test("a computed lane name silences the check rather than guessing")
+    func computedLaneStaysQuiet() throws {
+        // One unknowable declaration makes the whole set unknowable: it might
+        // be the very lane the route is asking for.
+        let result = try generate([
+            "AppModule.swift": """
+            import FlightWeb
+            final class AppModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline(PipelineLane(computedName)) { AuditLog.self }
+            }
+            }
+            @Controller("/admin", pipelines: ["audit"])
+            struct AdminController {
+            @GetRoute("/")
+            func index(_ context: RequestContext) -> String { "x" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(!result.diagnostics.contains("pipeline lane"))
+    }
+
     // MARK: - Removed lifetimes
 
     @Test("a removed lifetime is a build error that says what to do instead")

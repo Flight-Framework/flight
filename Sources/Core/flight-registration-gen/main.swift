@@ -578,10 +578,8 @@ final class ComponentVisitor: SyntaxVisitor {
                         httpMethod: route.kind.httpMethod,
                         path: RouteScanning.combinePaths(base, route.path),
                         source: "\(module).\(controller).\(route.methodName)",
-                        // A route's own `pipelines:` replaces the
-                        // controller's — the same rule the macro applies, and
-                        // the reason it is `??` rather than a concatenation.
-                        pipelinesText: route.pipelinesText ?? controllerPipelines,
+                        pipelinesText: RouteScanning.resolvedPipelines(
+                            route: route.pipelinesText, controller: controllerPipelines),
                         isUpgrade: route.kind.isUpgrade,
                         file: file,
                         line: location.line
@@ -1112,6 +1110,72 @@ where component.module != manifest.targetModuleName && !component.isPublic {
         file: component.file, line: component.line
     )
 }
+
+// MARK: - Undeclared lanes (compile-time case)
+//
+// A route naming a lane nobody declared fails when dispatch is built —
+// at bootstrap, naming the route and the lane, never as a 500. The scan
+// knows both halves before the binary exists, so it can say so at the
+// declaration instead (§2.7 asked for this).
+//
+// A warning rather than an error, deliberately. The scan reaches the target
+// and its recursive *source* dependencies, so a lane declared inside a
+// binary dependency is invisible to it — and a build error there would fail
+// an application that runs correctly. `UndeclaredLaneError` at bootstrap
+// stays the enforcement; this is the early word, and it is silent whenever
+// it cannot be sure.
+@MainActor
+func diagnoseUndeclaredLanes() {
+    // A lane whose name is computed makes the whole set unknowable: it might
+    // be the very lane a route is asking for. Say nothing rather than guess.
+    guard lanes.allSatisfy({ $0.lane != nil }) else { return }
+
+    var declared = Set(lanes.compactMap(\.lane))
+    // `DispatchBuilder` provides both without a declaration: an application
+    // with no middleware is legal, and `.public` means "explicitly no lanes".
+    declared.insert("default")
+    declared.insert("public")
+
+    for route in routes {
+        guard let text = route.pipelinesText else { continue }
+        guard let named = laneNames(in: text) else { continue }
+        for lane in named where !declared.contains(lane) {
+            emit(
+                "warning",
+                """
+                Route \(route.httpMethod) \(route.path) runs through pipeline lane \
+                '\(lane)', which no `container.pipeline("\(lane)") { }` declares. \
+                Declare the lane (an empty block is legal), or remove it from the \
+                route's pipelines — otherwise this fails when dispatch is built.
+                """,
+                file: route.file, line: route.line
+            )
+        }
+    }
+}
+
+/// Lane names from a `pipelines:` argument's source text — `[.authenticated]`,
+/// `["admin"]`, `[.default, "admin"]`. nil when any element is neither a
+/// canonical member nor a string literal, since a computed lane cannot be
+/// checked and one unknowable element makes the list unknowable.
+func laneNames(in text: String) -> [String]? {
+    let body = text.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+    guard !body.isEmpty else { return [] }
+    var names: [String] = []
+    for element in body.split(separator: ",") {
+        let piece = element.trimmingCharacters(in: .whitespaces)
+        if piece.hasPrefix("."), piece.dropFirst().allSatisfy({ $0.isLetter || $0.isNumber }) {
+            names.append(String(piece.dropFirst()))
+        } else if piece.hasPrefix("\""), piece.hasSuffix("\""), piece.count >= 2 {
+            names.append(String(piece.dropFirst().dropLast()))
+        } else {
+            return nil
+        }
+    }
+    return names
+}
+
+diagnoseUndeclaredLanes()
 
 // MARK: - Routes the manifest cannot see
 //

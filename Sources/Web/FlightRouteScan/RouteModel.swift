@@ -302,6 +302,24 @@ public enum RouteScanning {
         return path
     }
 
+    /// The lanes a route actually runs through: its own `pipelines:` when it
+    /// has one, otherwise its controller's.
+    ///
+    /// Replacement, not concatenation, and that is the whole rule — it is the
+    /// only shape that expresses both directions, a public controller with
+    /// one authenticated route and an authenticated controller with one
+    /// public route. Appending could only ever add, so it cannot say "this
+    /// one is public".
+    ///
+    /// Shared because it is applied twice: by `@Controller`, deciding what a
+    /// route registers with, and by `flight-registration-gen`, deciding what
+    /// the static manifest records. Two copies of a one-line rule is exactly
+    /// the shape that drifts quietly — the manifest would claim a lane the
+    /// expansion never used, and nothing would catch it.
+    public static func resolvedPipelines(route: String?, controller: String?) -> String? {
+        route ?? controller
+    }
+
     /// The `pipelines:` argument's source text, verbatim. A route's own
     /// `pipelines:` *replaces* this rather than adding to it.
     public static func pipelines(of node: AttributeSyntax) -> String? {
