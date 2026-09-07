@@ -110,8 +110,12 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         // 2. Registration thunk: the controller component, then its routes —
         //    ordered so eager route construction at freeze() can resolve the
         //    controller mid-freeze (Flight Core §2.1).
+        // `stereotype: .controller` is what Actuator groups the dashboard
+        // by. Omitting it defaulted every controller to `.component`, so the
+        // "Controllers" section listed only ActuatorController — the one
+        // controller registered by hand, which passed the argument.
         var thunkLines: [String] = [
-            "container.register(Self.self, scope: .singleton) { c in",
+            "container.register(Self.self, scope: .singleton, stereotype: .controller) { c in",
             "    try Self(_flight: c)",
             "}",
         ]

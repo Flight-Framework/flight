@@ -27,6 +27,17 @@ struct SnapshotTests {
         })
         #expect(repository.stereotype == .repository)
 
+        // The dashboard groups by stereotype and lists Controllers first
+        // (`ModuleHealth+Actuator.swift`'s ordering), which only works if the
+        // @Controller macro tags them. It did not: it omitted `stereotype:`
+        // entirely, so every application controller defaulted to .component
+        // and the Controllers section could only ever show Actuator's own —
+        // the one controller registered by hand with the argument passed.
+        let controller = try #require(snapshot.components.first {
+            $0.typeName == "FlightActuatorTests.SampleController"
+        })
+        #expect(controller.stereotype == .controller)
+
         let transient = try #require(snapshot.components.first {
             $0.typeName == "FlightActuatorTests.SampleTransient"
         })

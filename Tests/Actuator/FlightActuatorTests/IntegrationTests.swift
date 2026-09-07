@@ -46,8 +46,11 @@ struct IntegrationTests {
         #expect(wire.modules.allSatisfy { $0.health == "running" })
 
         // Every component the sample module registered is attributed to it.
+        // Seven hand-registered, plus SampleController and the
+        // RouteRegistration its one route registers — routes are components
+        // too, which is what makes `collectRoutes()` a container query.
         let sampleComponents = wire.components.filter { $0.sourceModule == "SampleAppModule" }
-        #expect(sampleComponents.count == 7)
+        #expect(sampleComponents.count == 9)
     }
 
     @Test("actuator registers no service — it is request-response only")

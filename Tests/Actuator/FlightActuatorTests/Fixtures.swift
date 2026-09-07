@@ -31,6 +31,12 @@ struct SampleAppModule: FlightModule {
         container.register(SampleSettings.self, scope: .singleton, stereotype: .settings) { _ in
             SampleSettings()
         }
+        // A real `@Controller`, expanded by the macro, rather than a
+        // hand-registered stand-in passing `stereotype:` itself. Which
+        // stereotype a controller lands under is the macro's decision, and
+        // every other entry here being hand-registered is why it went
+        // unnoticed that the macro was not making it.
+        try SampleController._flightRegister(container)
     }
 }
 
@@ -40,6 +46,12 @@ struct SampleTransient: Sendable {}
 struct SampleQualified: Sendable {}
 struct SampleMiddleware: Sendable {}
 struct SampleSettings: Sendable {}
+
+@Controller("/sample")
+struct SampleController {
+    @GetRoute("/ping")
+    func ping(_ context: RequestContext) -> String { "pong" }
+}
 
 /// A module registering a component whose qualifier is an XSS probe — the SSR
 /// escaping tests feed the renderer through this.
