@@ -36,6 +36,9 @@ struct MiddlewareMacroFixtureTests {
                     internal init(_flight container: FlightCore.Container) throws {
                     }
 
+                    init() {
+                    }
+
                     static func _flightRegister(_ container: FlightCore.Container) throws {
                         container.register(Self.self, scope: .singleton, stereotype: .middleware) { c in
                             try Self(_flight: c)
@@ -75,6 +78,11 @@ struct MiddlewareMacroFixtureTests {
                         self.settings = try container.resolve(WebSettings.self)
                     }
 
+                    public init(container: Container, settings: WebSettings) {
+                        self.container = container
+                        self.settings = settings
+                    }
+
                     public static func _flightRegister(_ container: FlightCore.Container) throws {
                         container.register(Self.self, scope: .singleton, stereotype: .middleware) { c in
                             try Self(_flight: c)
@@ -106,6 +114,9 @@ struct MiddlewareMacroFixtureTests {
                     func handle(_ context: RequestContext, next: Next) async throws -> Response { try await next(context) }
 
                     internal init(_flight container: FlightCore.Container) throws {
+                    }
+
+                    init() {
                     }
 
                     static func _flightRegister(_ container: FlightCore.Container) throws {

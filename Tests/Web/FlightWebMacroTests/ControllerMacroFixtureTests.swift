@@ -47,6 +47,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -103,6 +106,10 @@ struct ControllerMacroFixtureTests {
                     self.userService = try container.resolve(UserService.self)
                 }
 
+                public init(userService: UserService) {
+                    self.userService = userService
+                }
+
                 public static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -155,6 +162,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -193,6 +203,9 @@ struct ControllerMacroFixtureTests {
                 func handler(_ context: RequestContext) -> String { "x" }
 
                 internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                init() {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -234,6 +247,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -271,6 +287,9 @@ struct ControllerMacroFixtureTests {
                 func handler() -> String { "x" }
 
                 internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                init() {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -368,6 +387,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -418,6 +440,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -464,6 +489,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -504,6 +532,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -540,6 +571,9 @@ struct ControllerMacroFixtureTests {
                 func show(_ context: RequestContext) -> String { "x" }
 
                 internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                init() {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -584,6 +618,9 @@ struct ControllerMacroFixtureTests {
                 func handler(_ context: RequestContext) -> String { "x" }
 
                 internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                init() {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -745,6 +782,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -787,6 +827,9 @@ struct ControllerMacroFixtureTests {
                 func handler(_ context: RequestContext) -> String { "x" }
 
                 internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                init() {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -834,6 +877,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -879,6 +925,9 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
@@ -922,6 +971,9 @@ struct ControllerMacroFixtureTests {
                 }
 
                 internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                init() {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -974,6 +1026,9 @@ struct ControllerMacroFixtureTests {
                 }
 
                 internal init(_flight container: FlightCore.Container) throws {
+                }
+
+                init() {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {

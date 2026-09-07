@@ -70,12 +70,19 @@ struct ScannedComponent {
     /// can never see).
     var conformanceNames: [String]
     let injectTypeNames: [String]
+    /// The property names behind `injectTypeNames`, positionally. The
+    /// generated initializer labels its parameters by property name, so a
+    /// composition function calling it needs these and not the type names —
+    /// `UserRepository(pool: dataSource)`, never `(postgresDataSource:)`.
+    let injectPropertyNames: [String]
     /// `@Inject` types whose property carries a `flight:hand-registered`
     /// marker comment — the author's acknowledgment that the type is
     /// registered by hand in a module's `configure(_:)` (invisible to this
     /// scanner, P-2) and the missing-registration warning should not fire.
     /// Still participates in cycle detection.
     let acknowledgedTypeNames: [String]
+    /// As `injectPropertyNames`, for the acknowledged edges.
+    let acknowledgedPropertyNames: [String]
     /// Carries a `flight:module-registered` marker: the type is registrable
     /// (it has the macro, and therefore a `_flightRegister` thunk) but its
     /// *existence in an application* is a runtime question its own module
@@ -629,21 +636,28 @@ final class ComponentVisitor: SyntaxVisitor {
         let settingsNamespace = isSettingsType ? literalKey(of: registrable) : nil
 
         var inject: [String] = []
+        var injectNames: [String] = []
         var acknowledged: [String] = []
+        var acknowledgedNames: [String] = []
         var configValues: [ScannedConfigValue] = []
         for member in members.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
             if hasAttribute(variable.attributes, named: "Inject"),
-                let type = variable.bindings.first?.typeAnnotation?.type.trimmedDescription
+                let binding = variable.bindings.first,
+                let type = binding.typeAnnotation?.type.trimmedDescription
             {
+                let propertyName =
+                    binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text ?? ""
                 // `member.description` spans the member's leading trivia
                 // through its last token's trailing trivia, so the marker is
                 // found whether it sits on the line above the property or as
                 // a same-line trailing comment.
                 if member.description.contains("flight:hand-registered") {
                     acknowledged.append(type)
+                    acknowledgedNames.append(propertyName)
                 } else {
                     inject.append(type)
+                    injectNames.append(propertyName)
                 }
             }
             if let attribute = attribute(of: variable.attributes, named: "ConfigValue") {
@@ -702,7 +716,9 @@ final class ComponentVisitor: SyntaxVisitor {
                     $0.type.trimmedDescription
                 } ?? [],
                 injectTypeNames: inject,
+                injectPropertyNames: injectNames,
                 acknowledgedTypeNames: acknowledged,
+                acknowledgedPropertyNames: acknowledgedNames,
             isModuleRegistered: leadingTrivia.contains("flight:module-registered"),
                 configValues: configValues,
                 file: file,
@@ -797,6 +813,16 @@ do {
 }
 
 var components: [ScannedComponent] = []
+/// Imports written by the target's own sources.
+///
+/// The generated file is a separate file, so it inherits nothing. It has
+/// always emitted the modules that *declare components*, which is enough for
+/// `flightRegisterAll` — every type it names is one of those. `FlightGraph`
+/// is not: its root parameters are typed by whatever an `@Inject` said, and
+/// those types come from wherever the application imports them —
+/// `PostgresDataSource` from FlightDataPostgres, which declares no scanned
+/// component and so was never imported here.
+var targetImports: Set<String> = []
 var routes: [ScannedControllerRoute] = []
 var lanes: [ScannedPipelineLane] = []
 var moduleGraph: [ScannedModule] = []
@@ -828,6 +854,17 @@ for module in manifest.modules {
                 || source.contains("registerRoute")
                 || source.contains("registerChannelSocket")
         else { continue }
+        if module.name == manifest.targetModuleName {
+            for line in source.split(separator: "\n") {
+                let text = line.trimmingCharacters(in: .whitespaces)
+                guard text.hasPrefix("import ") else { continue }
+                let name = text.dropFirst("import ".count).trimmingCharacters(in: .whitespaces)
+                // `@_exported` and submodule paths are not plain names.
+                if !name.isEmpty, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
+                    targetImports.insert(name)
+                }
+            }
+        }
         let tree = Parser.parse(source: source)
         let visitor = ComponentVisitor(module: module.name, file: file, tree: tree)
         visitor.walk(tree)
@@ -1382,6 +1419,12 @@ var out = """
 for module in dependencyModules {
     out += "import \(module)\n"
 }
+// Plus what the target imports, for the types `FlightGraph`'s root
+// parameters are written in. Sorted so the output is byte-stable.
+for module in targetImports.sorted()
+where module != "FlightCore" && !dependencyModules.contains(module) {
+    out += "import \(module)\n"
+}
 out += """
 
     /// Registers every @Component visible from \(manifest.targetModuleName)
@@ -1441,6 +1484,134 @@ if !bridges.isEmpty {
     }
 }
 out += "}\n"
+
+// MARK: - FlightGraph (§2.1, emitted unused)
+//
+// The composition function, in the shape it will eventually replace
+// `flightRegisterAll` with: every scanned component built once, in dependency
+// order, by plain initializer calls. Nothing calls it yet — it is emitted so
+// the shape can be read, compiled and diffed against the registration path
+// before anything depends on it.
+//
+// What it can build is the application's own graph. A dependency it cannot
+// construct — a framework component registered imperatively by a module
+// (§2.11a), a type marked `flight:hand-registered`, anything the scan never
+// saw — becomes an initializer parameter instead. That is §2.6's escape
+// hatch: externally supplied values arrive through the same typed parameters
+// everything else uses, visible at one root rather than scattered across N
+// `configure(_:)` bodies.
+@MainActor
+func emitFlightGraph(into out: inout String) {
+    // Module-registered types are excluded for the same reason
+    // `flightRegisterAll` excludes them: whether they exist in an application
+    // is a runtime question their own module answers.
+    let nodes = components.filter { !$0.isModuleRegistered }
+    guard !nodes.isEmpty else { return }
+
+    let byName = Dictionary(nodes.map { (baseName($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
+    // One conformer per protocol, the same mapping the existential bridges
+    // use — so `@Inject var store: (any RoomStore)` resolves to the concrete
+    // type the graph already builds.
+    var conformerOfProtocol: [String: ScannedComponent] = [:]
+    for bridge in synthesizeBridges() {
+        conformerOfProtocol[baseName(bridge.protocolName)] = bridge.component
+    }
+
+    func qualified(_ component: ScannedComponent) -> String {
+        component.module == manifest.targetModuleName
+            ? component.typeName
+            : "\(component.module).\(component.typeName)"
+    }
+    func binding(_ component: ScannedComponent) -> String {
+        let name = baseName(component.typeName)
+        return name.prefix(1).lowercased() + name.dropFirst()
+    }
+    /// The node a dependency resolves to, or nil when the graph cannot build
+    /// it and the root must supply it.
+    func provider(of dependency: String) -> ScannedComponent? {
+        if let direct = byName[baseName(dependency)] { return direct }
+        if let name = existentialProtocolName(dependency) { return conformerOfProtocol[baseName(name)] }
+        return nil
+    }
+
+    // Dependencies first, the order `freeze()` already constructs in.
+    var ordered: [ScannedComponent] = []
+    var finished: Set<String> = []
+    var visiting: Set<String> = []
+    func visit(_ component: ScannedComponent) {
+        let key = baseName(component.typeName)
+        if finished.contains(key) || visiting.contains(key) { return }
+        visiting.insert(key)
+        for dependency in component.injectTypeNames + component.acknowledgedTypeNames {
+            if let next = provider(of: dependency) { visit(next) }
+        }
+        visiting.remove(key)
+        finished.insert(key)
+        ordered.append(component)
+    }
+    for node in nodes { visit(node) }
+
+    // Externally supplied: every dependency with no node to build it, in a
+    // stable order, deduplicated by the type as written.
+    var supplied: [String] = []
+    var seenSupplied: Set<String> = []
+    for node in ordered {
+        for dependency in node.injectTypeNames + node.acknowledgedTypeNames
+        where provider(of: dependency) == nil {
+            if seenSupplied.insert(dependency).inserted { supplied.append(dependency) }
+        }
+    }
+    func suppliedBinding(_ typeText: String) -> String {
+        let name = baseName(existentialProtocolName(typeText) ?? typeText)
+        return name.prefix(1).lowercased() + name.dropFirst()
+    }
+
+    let needsConfiguration = ordered.contains { !$0.configValues.isEmpty }
+
+    out += "\n"
+    out += "/// Every component this module declares, constructed once, in\n"
+    out += "/// dependency order, without a container.\n"
+    out += "///\n"
+    out += "/// Emitted but not yet called: `flightRegisterAll` above is still\n"
+    out += "/// what boots an application. This is the shape it becomes\n"
+    out += "/// (COMPOSITION-MIGRATION.md §2.1), compiled on every build so the\n"
+    out += "/// two cannot drift silently.\n"
+    out += "///\n"
+    out += "/// Internal, not public: an application's components are internal by\n"
+    out += "/// default, and a public struct cannot expose them. The composition\n"
+    out += "/// root is in this module too, so nothing needs it to be public.\n"
+    out += "struct FlightGraph {\n"
+    for node in ordered {
+        out += "    let \(binding(node)): \(qualified(node))\n"
+    }
+    out += "\n"
+    var parameters: [String] = []
+    if needsConfiguration { parameters.append("configuration: FlightCore.Configuration") }
+    parameters += supplied.map { "\(suppliedBinding($0)): \($0)" }
+    out += "    init(\(parameters.joined(separator: ", "))) throws {\n"
+    for node in ordered {
+        var arguments: [String] = []
+        if !node.configValues.isEmpty { arguments.append("_flightConfiguration: configuration") }
+        // Labelled by property name, which is what the generated initializer
+        // uses. Zipped rather than indexed: the two arrays are built together
+        // and stay positional, and a mismatch would silently mislabel an
+        // argument rather than fail.
+        let edges =
+            Array(zip(node.injectTypeNames, node.injectPropertyNames))
+            + Array(zip(node.acknowledgedTypeNames, node.acknowledgedPropertyNames))
+        for (dependency, label) in edges {
+            if let source = provider(of: dependency) {
+                arguments.append("\(label): \(binding(source))")
+            } else {
+                arguments.append("\(label): \(suppliedBinding(dependency))")
+            }
+        }
+        let call = "\(qualified(node))(\(arguments.joined(separator: ", ")))"
+        out += "        self.\(binding(node)) = \(node.configValues.isEmpty ? "" : "try ")\(call)\n"
+    }
+    out += "    }\n"
+    out += "}\n"
+}
 
 // MARK: - Static route manifest
 //
@@ -1664,6 +1835,8 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
     out += "    ]\n"
     out += "}\n"
 }
+
+emitFlightGraph(into: &out)
 
 do {
     let outputURL = URL(fileURLWithPath: manifest.output)

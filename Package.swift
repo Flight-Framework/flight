@@ -131,9 +131,22 @@ let package = Package(
 
         // MARK: Core
 
+        // The registration macros' shared model: one `InjectedProperty`, one
+        // parenthesisation rule, one constructor-injection generator. It was
+        // written three times before this, each copy commented as mirroring
+        // the others.
+        .target(
+            name: "FlightMacroSupport",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
+            ],
+            path: "Sources/Core/FlightMacroSupport"
+        ),
         .macro(
             name: "FlightCoreMacrosImpl",
             dependencies: [
+                "FlightMacroSupport",
                 "FlightConfigCore",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
@@ -199,6 +212,7 @@ let package = Package(
         .macro(
             name: "FlightWebMacrosImpl",
             dependencies: [
+                "FlightMacroSupport",
                 "FlightRouteScan",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
@@ -330,6 +344,7 @@ let package = Package(
         .macro(
             name: "FlightSchedulerMacrosImpl",
             dependencies: [
+                "FlightMacroSupport",
                 "FlightCronCore",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),

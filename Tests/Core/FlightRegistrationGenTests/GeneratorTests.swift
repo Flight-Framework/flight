@@ -500,6 +500,103 @@ struct GeneratorTests {
         )
     }
 
+    // MARK: - FlightGraph
+
+    @Test("the graph builds every component once, in dependency order")
+    func graphIsTopologicallyOrdered() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            @Repository
+            struct UserRepository: Sendable {}
+            @Service
+            struct UserService: Sendable {
+            @Inject var repo: UserRepository
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        let repo = try #require(result.generated.range(of: "self.userRepository ="))
+        let service = try #require(result.generated.range(of: "self.userService ="))
+        #expect(repo.lowerBound < service.lowerBound, "a dependency is built before its dependent")
+        // Labelled by property name, which is what the generated initializer
+        // uses — not by type name.
+        #expect(result.generated.contains("UserService(repo: userRepository)"))
+    }
+
+    @Test("a dependency the graph cannot build becomes a root parameter")
+    func unbuildableDependencyBecomesAParameter() throws {
+        // §2.6's escape hatch: externally supplied values arrive through the
+        // same typed parameters everything else uses, at one root rather than
+        // scattered across N configure(_:) bodies. A framework component
+        // registered imperatively by a module is the ordinary case.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            @Repository
+            struct UserRepository: Sendable {
+            @Inject var pool: PostgresDataSource
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("init(postgresDataSource: PostgresDataSource) throws"))
+        #expect(result.generated.contains("UserRepository(pool: postgresDataSource)"))
+    }
+
+    @Test("an existential dependency resolves to its single conformer")
+    func existentialResolvesToConformer() throws {
+        // The same mapping the synthesized bridges use, so the graph and the
+        // registration path agree about which concrete type answers `any P`.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            protocol UserStore {}
+            @Repository
+            struct UserRepository: UserStore {}
+            @Service
+            struct UserService: Sendable {
+            @Inject var store: (any UserStore)
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("UserService(store: userRepository)"))
+    }
+
+    @Test("a config-reading component takes the configuration and throws")
+    func configurationIsARootParameter() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            @Service
+            struct Pager: Sendable {
+            @ConfigValue("app.page-size") var size: Int
+            }
+            """,
+        ], flightYAML: "app:\n  page-size: 25\n")
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("init(configuration: FlightCore.Configuration) throws"))
+        #expect(result.generated.contains("try Pager(_flightConfiguration: configuration)"))
+    }
+
+    @Test("a module-registered component is left out of the graph")
+    func moduleRegisteredIsExcluded() throws {
+        // Same reason flightRegisterAll leaves it out: whether it exists in
+        // an application is a runtime question its own module answers.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            // flight:module-registered
+            @Middleware struct Authentication: Sendable {}
+            @Service struct Other: Sendable {}
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("let other: Other"))
+        #expect(!result.generated.contains("let authentication: Authentication"))
+    }
+
     // MARK: - Undeclared lanes
 
     @Test("a route naming an undeclared lane is warned about at build time")
