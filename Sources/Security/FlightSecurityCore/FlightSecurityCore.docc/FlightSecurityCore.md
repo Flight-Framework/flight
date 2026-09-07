@@ -52,23 +52,28 @@ struct OpaqueTokenValidator: TokenValidator {
 somewhere non-standard: keep the OIDC claim policy, change only where keys
 come from. ``HTTPJWKSSource`` is the default, using OIDC discovery.
 
-## Identity is request-scoped
+## Identity rides the request
 
-``PrincipalHolder`` is a `.scoped` component: one per request, never shared
-between them. A service reads the current identity by injecting it, with no
-thread-locals and no argument threading:
+The authentication middleware writes the ``Principal`` onto the copy of the
+request context it passes downstream, so a handler reads it off the context
+with nothing to resolve and nothing shared between requests:
 
 ```swift
-@Service
-final class OrderService: Sendable {
-    @Inject var identity: PrincipalHolder
-
-    func placeOrder(...) async throws {
-        guard let principal = identity.principal else { throw SecurityError.unauthenticated }
-        ...
-    }
+@GetRoute("/orders")
+func orders(_ context: RequestContext) async throws -> Response {
+    let principal = try context.requirePrincipal()   // 401 when absent
+    return .json(try await orders.forOwner(principal.subject))
 }
 ```
+
+For service code that should not take a principal parameter, bind the
+task-local around the call with `context.withPrincipal { ... }` and read
+``Principal/current`` inside.
+
+The web layer stores this as a ``FlightWeb/RequestIdentity`` behind a
+two-member seam protocol, because `RequestContext` cannot name ``Principal``
+without a dependency cycle — the same shape `FlightChannels` uses for
+``ChannelPrincipal``.
 
 ``AuthenticationState`` distinguishes *anonymous* from *authenticated*
 rather than collapsing both into a nil check, so a route that genuinely
@@ -136,7 +141,6 @@ WebSocket's HTTP upgrade is what the channel's join sees.
 ### Identity
 
 - ``Principal``
-- ``PrincipalHolder``
 - ``AuthenticationState``
 
 ### Enforcement

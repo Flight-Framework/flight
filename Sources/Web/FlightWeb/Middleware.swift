@@ -5,9 +5,9 @@ import HTTPTypes
 ///
 /// A plain value in, a value out — no `inout`. Nothing a middleware needs to
 /// hand downstream depends on mutating this parameter in place: per-request
-/// state that must be visible across the whole chain already goes through
-/// `context.scope` (a reference type shared by every copy of the context for
-/// one request), the same channel `PrincipalHolder` uses. That is what makes
+/// state a layer wants everything below it to see travels on the copy it
+/// hands to `next` — which is how `Authentication` publishes the request's
+/// identity, and how any layer stamps the logger. That is what makes
 /// wrapping `next` — holding something open
 /// across the handler, the capability a flat pre-handler chain cannot offer
 /// — a single expression instead of a copy-out/copy-back dance:

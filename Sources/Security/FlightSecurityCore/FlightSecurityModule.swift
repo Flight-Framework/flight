@@ -6,7 +6,6 @@ import ServiceLifecycle
 /// Authentication wiring, independent of how tokens are validated.
 ///
 /// Registers:
-/// - the request-scoped ``PrincipalHolder`` carrying the principal;
 /// - ``Authentication`` in its own `pipeline { }` call, ahead of whatever the
 ///   application declares in its own — see `Container.pipeline(_:)` for why
 ///   calling it more than once composes rather than conflicts;
@@ -44,10 +43,6 @@ public final class FlightSecurityModule: FlightModule {
     public init() {}
 
     public func configure(_ container: Container) throws {
-        container.register(PrincipalHolder.self, scope: .scoped) { _ in
-            PrincipalHolder()
-        }
-
         // Both middleware types are marked `flight:module-registered`, so the
         // application's generated `flightRegisterAll` skips them and this is
         // the only place they are registered. That is the point: whether they

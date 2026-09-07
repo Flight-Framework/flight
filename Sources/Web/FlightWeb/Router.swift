@@ -298,9 +298,7 @@ public struct Router: Sendable {
         var boundContext = context
         boundContext.pathParameters = match.pathParameters
         do {
-            let response = try await match.route.handler(boundContext)
-            boundContext.response = response
-            return response
+            return try await match.route.handler(boundContext)
         } catch {
             return errorResponse(for: error, context: boundContext)
         }

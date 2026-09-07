@@ -15,7 +15,7 @@ struct ModuleTests {
         ])
     }
 
-    @Test("the security module registers the holder and middleware, but no validator")
+    @Test("the security module registers middleware and lanes, but no validator")
     func securityModuleRegistersAuthenticationOnly() throws {
         let module = FlightSecurityModule()
         let container = try TestContainer.build {
@@ -23,15 +23,9 @@ struct ModuleTests {
             CustomValidatorModule(validator: StubValidator(principalsByToken: [:]))
         }
 
-        // The scoped holder resolves per scope — same instance within one,
-        // fresh across scopes.
-        let scopeA = Scope()
-        let holderA1 = try container.resolve(PrincipalHolder.self, in: scopeA)
-        let holderA2 = try container.resolve(PrincipalHolder.self, in: scopeA)
-        #expect(holderA1 === holderA2)
-        let holderB = try container.resolve(PrincipalHolder.self, in: Scope())
-        #expect(holderA1 !== holderB)
-
+        // The principal needs no registration at all now: it rides
+        // `RequestContext.identity` as a typed value rather than a `.scoped`
+        // component resolved out of the request's scope.
         let middleware = try container.collectMiddleware()
         #expect(middleware.contains { $0.name.contains("Authentication") })
 
@@ -50,8 +44,7 @@ struct ModuleTests {
         #expect(oidc.service != nil, "OIDC owns the JWKS maintenance service")
 
         // Listing FlightOIDCModule pulls FlightSecurityModule in transitively,
-        // so the holder and middleware arrive without naming them.
-        _ = try container.resolve(PrincipalHolder.self, in: Scope())
+        // so the middleware arrives without naming it.
         #expect(
             try container.collectMiddleware()
                 .contains { $0.name.contains("Authentication") }

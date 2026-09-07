@@ -14,7 +14,6 @@ private final class StubSecurityModule: FlightModule {
     init() {}
 
     func configure(_ container: Container) throws {
-        container.register(PrincipalHolder.self, scope: .scoped) { _ in PrincipalHolder() }
         let validator = StubValidator(principalsByToken: [
             Self.token: testPrincipal(subject: "stub-user", roles: ["admin"])
         ])
@@ -30,13 +29,20 @@ private final class StubSecurityModule: FlightModule {
 /// `case .continue` assertions were really checking.
 private func run(
     _ layer: any Middleware, _ context: RequestContext
-) async throws -> (response: Response, reached: Bool) {
-    let reached = Mutex(false)
-    let response = try await layer.handle(context) { _ in
-        reached.withLock { $0 = true }
+) async throws -> (response: Response, reached: Bool, downstream: RequestContext?) {
+    // The downstream context, captured, because that is where a layer's
+    // contribution lives. `Authentication` writes the identity into the copy
+    // it passes to `next` — it does not mutate the caller's, and could not:
+    // `RequestContext` is a value. Asserting on the context handed *in* used
+    // to work only because the principal lived in a shared mutable holder,
+    // which is the thing this design removed.
+    let captured = Mutex<RequestContext?>(nil)
+    let response = try await layer.handle(context) { downstream in
+        captured.withLock { $0 = downstream }
         return .status(.noContent)
     }
-    return (response, reached.withLock { $0 })
+    let downstream = captured.withLock { $0 }
+    return (response, downstream != nil, downstream)
 }
 
 @Suite("Authentication middleware and enforcement")
@@ -66,8 +72,9 @@ struct MiddlewareTests {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
         }
-        #expect(context.principal?.subject == "stub-user")
-        #expect(context.authenticationState.principal != nil)
+        let handled = try #require(result.downstream)
+        #expect(handled.principal?.subject == "stub-user")
+        #expect(handled.authenticationState.principal != nil)
     }
 
     @Test("no token continues as anonymous — enforcement is separate")
@@ -78,8 +85,9 @@ struct MiddlewareTests {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
         }
-        #expect(context.principal == nil)
-        if case .anonymous = context.authenticationState {} else {
+        let handled = try #require(result.downstream)
+        #expect(handled.principal == nil)
+        if case .anonymous = handled.authenticationState {} else {
             Issue.record("expected .anonymous")
         }
     }
@@ -92,8 +100,9 @@ struct MiddlewareTests {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
         }
-        #expect(context.principal == nil)
-        if case .invalidCredential = context.authenticationState {} else {
+        let handled = try #require(result.downstream)
+        #expect(handled.principal == nil)
+        if case .invalidCredential = handled.authenticationState {} else {
             Issue.record("expected .invalidCredential")
         }
     }
@@ -127,8 +136,9 @@ struct MiddlewareTests {
     @Test("requireAuthentication distinguishes a rejected credential (RFC 6750) without leaking detail")
     func requireAuthenticationInvalid() async throws {
         let context = try makeContext(authorization: "Bearer forged")
-        _ = try await run(authentication(in: context), context)
-        let result = try await run(RequireAuthentication(), context)
+        let authenticated = try #require(
+            try await run(authentication(in: context), context).downstream)
+        let result = try await run(RequireAuthentication(), authenticated)
         guard !result.reached else {
             Issue.record("expected the layer to answer; the request continued instead")
             return
@@ -144,8 +154,9 @@ struct MiddlewareTests {
     @Test("requireAuthentication passes authenticated requests")
     func requireAuthenticationPasses() async throws {
         let context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        _ = try await run(authentication(in: context), context)
-        let result = try await run(RequireAuthentication(), context)
+        let authenticated = try #require(
+            try await run(authentication(in: context), context).downstream)
+        let result = try await run(RequireAuthentication(), authenticated)
         guard result.reached else {
             Issue.record("expected the request to continue; it was answered with \(result.response.status)")
             return
@@ -182,31 +193,34 @@ struct MiddlewareTests {
     @Test("withPrincipal binds Principal.current for the operation")
     func withPrincipalBinds() async throws {
         let context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        _ = try await run(authentication(in: context), context)
+        let authenticated = try #require(
+            try await run(authentication(in: context), context).downstream)
 
-        let subject = await context.withPrincipal { Principal.current?.subject }
+        let subject = await authenticated.withPrincipal { Principal.current?.subject }
         #expect(subject == "stub-user")
         #expect(Principal.current == nil, "binding unwinds after the operation")
 
         let anonymous = try makeContext()
-        _ = try await run(authentication(in: anonymous), anonymous)
-        let none = await anonymous.withPrincipal { Principal.current?.subject }
+        let handled = try #require(
+            try await run(authentication(in: anonymous), anonymous).downstream)
+        let none = await handled.withPrincipal { Principal.current?.subject }
         #expect(none == nil)
     }
 
     @Test("handler-level guards: requirePrincipal / requireRole / requireScope")
     func handlerGuards() async throws {
         let context = try makeContext(authorization: "Bearer \(StubSecurityModule.token)")
-        _ = try await run(authentication(in: context), context)
+        let handled = try #require(
+            try await run(authentication(in: context), context).downstream)
 
-        #expect(try context.requirePrincipal().subject == "stub-user")
-        #expect(try context.requireRole("admin").subject == "stub-user")
+        #expect(try handled.requirePrincipal().subject == "stub-user")
+        #expect(try handled.requireRole("admin").subject == "stub-user")
 
         #expect(throws: SecurityError.forbidden) {
-            try context.requireRole("superuser")
+            try handled.requireRole("superuser")
         }
         #expect(throws: SecurityError.forbidden) {
-            try context.requireScope("read:everything")
+            try handled.requireScope("read:everything")
         }
 
         let anonymous = try makeContext()

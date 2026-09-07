@@ -18,7 +18,16 @@ import ServiceContextModule
 public struct RequestContext: Sendable {
     public let request: Request
     public var pathParameters: [String: String]
-    public var response: Response
+
+    /// What authentication decided about this request, written by the
+    /// authentication middleware into the copy it passes downstream.
+    ///
+    /// Flight Web stores it and never reads it: the seam exists so an
+    /// identity can ride the request without `RequestContext` depending on
+    /// the package that defines one. `.anonymous` until something says
+    /// otherwise, so a request through a pipeline with no authentication
+    /// behaves exactly as it did before.
+    public var identity: RequestIdentity
 
     /// Opened once per request by Flight Web's dispatch closure — Flight Web
     /// is the first thing to interpret a Scope's lifetime as "one request";
@@ -44,7 +53,7 @@ public struct RequestContext: Sendable {
     public init(
         request: Request,
         pathParameters: [String: String] = [:],
-        response: Response = .notFound,
+        identity: RequestIdentity = .anonymous,
         scope: Scope,
         logger: Logger,
         tracingContext: ServiceContext = .topLevel,
@@ -52,7 +61,7 @@ public struct RequestContext: Sendable {
     ) {
         self.request = request
         self.pathParameters = pathParameters
-        self.response = response
+        self.identity = identity
         self.scope = scope
         self.logger = logger
         self.tracingContext = tracingContext

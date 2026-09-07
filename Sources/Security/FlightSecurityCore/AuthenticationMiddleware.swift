@@ -2,9 +2,9 @@ import FlightCore
 import FlightWeb
 import HTTPTypes
 
-/// Extracts the bearer token, validates it, and — on success — publishes
-/// the ``Principal`` on the request's scope (via the scoped
-/// ``PrincipalHolder`` component). Registered by ``FlightSecurityModule``.
+/// Extracts the bearer token, validates it, and writes the resulting
+/// ``Principal`` onto the copy of the request context it passes downstream.
+/// Registered by ``FlightSecurityModule``.
 ///
 /// Authentication is deliberately not enforcement: requests with no token,
 /// and requests whose token fails validation, both continue as
@@ -44,29 +44,20 @@ public struct Authentication: Sendable {
             // No credential: unauthenticated, not an error.
             return try await next(context)
         }
-        guard let holder = try? context.resolve(PrincipalHolder.self) else {
-            // A wiring bug, not a client error: fail closed, say nothing
-            // token-specific to the wire. `PrincipalHolder` is request-scoped
-            // and so cannot be an `@Inject` dependency of this singleton
-            // (that would be the captive-dependency mistake Flight Core's
-            // scope check exists to catch) — it is only absent at all if
-            // this type is running without `FlightSecurityModule`, which is
-            // what registers it.
-            context.logger.error(
-                "authentication middleware is registered but the PrincipalHolder scoped component is not; register FlightSecurityModule"
-            )
-            return .problem(status: .internalServerError, message: "Internal Server Error")
-        }
         do {
             let principal = try await validator.validate(token)
-            holder.set(.authenticated(principal))
-            // Stamp the identity onto the request logger so downstream log
-            // lines correlate — the subject is the IdP's opaque id, not PII
-            // Flight invents. A local copy: `context` is a value, and this
-            // stamped logger is only meant for what runs after this point.
-            var stamped = context
-            stamped.logger[metadataKey: "auth.subject"] = "\(principal.subject)"
-            return try await next(stamped)
+            // One local copy carrying both the identity and the stamped
+            // logger to everything downstream. `context` is a value and the
+            // chain is layered, so writing here is what makes the principal
+            // visible to the handler — no shared mutable holder, and nothing
+            // to resolve out of a scope.
+            //
+            // The subject is stamped onto the logger so downstream lines
+            // correlate; it is the IdP's opaque id, not PII Flight invents.
+            var authenticated = context
+            authenticated.identity = .authenticated(principal)
+            authenticated.logger[metadataKey: "auth.subject"] = "\(principal.subject)"
+            return try await next(authenticated)
         } catch {
             // Error hygiene: the specific reason stays in the internal log;
             // the wire sees nothing here, and enforcement points return a
@@ -75,8 +66,9 @@ public struct Authentication: Sendable {
                 "token validation failed",
                 metadata: ["reason": "\(error)"]
             )
-            holder.set(.invalidCredential)
-            return try await next(context)
+            var rejected = context
+            rejected.identity = .invalidCredential
+            return try await next(rejected)
         }
     }
 }

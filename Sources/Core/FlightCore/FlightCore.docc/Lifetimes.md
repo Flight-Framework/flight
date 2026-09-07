@@ -31,20 +31,26 @@ Because a singleton is shared across every task in the process, it must be
 
 ## Scoped
 
-One instance per request. This is where per-request mutable state belongs: an
-authenticated principal, a request-scoped cache, a correlation id that every
-log line in the request should carry.
+One instance per request, for per-request state that genuinely needs a
+component: a request-scoped cache, an accumulator, anything a request builds
+up and several collaborators read.
 
 ```swift
-container.register(PrincipalHolder.self, scope: .scoped) { _ in
-    PrincipalHolder()
+container.register(RequestAudit.self, scope: .scoped) { _ in
+    RequestAudit()
 }
 ```
 
-That is Flight Security's real registration, and it is the shape to copy. A
-pooled database connection is *not* on the list: Flight Data's repositories
-hold the pool and lease a connection per operation, precisely so that nothing
-has to keep one alive for the length of a request.
+**Two things are deliberately not on that list.** A pooled database
+connection: Flight Data's repositories hold the pool and lease per operation,
+so nothing keeps one alive for the length of a request — an upgraded
+WebSocket would otherwise pin a connection for as long as the tab stayed
+open. And the authenticated principal: it rides `RequestContext.identity` as
+a typed value written by the authentication middleware into the copy it
+passes downstream, which needs no registration and no scope.
+
+Flight itself registers nothing `.scoped` today. If you reach for it, check
+first whether the value can travel on the request context instead.
 
 Resolving a `.scoped` component with no active scope **throws**. It does not
 quietly fall back to a shared instance, because that is the captive-dependency
@@ -53,7 +59,7 @@ belonged to, serving the wrong user's data.
 
 ```swift
 try container.withScope { scope in
-    let holder = try container.resolve(PrincipalHolder.self, in: scope)
+    let audit = try container.resolve(RequestAudit.self, in: scope)
     // …
 }   // scope ends; scoped instances are released
 ```

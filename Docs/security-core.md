@@ -283,8 +283,12 @@ chain was a flat sequential loop, so a task-local bound inside the
 authentication middleware unwound before the handler ran. The implemented
 mechanism keeps the intended semantics with the real APIs:
 
-- The principal rides the request's `Scope` as a `.scoped` component
-  (`PrincipalHolder`), read through `context.principal`.
+- The principal rides `RequestContext.identity`, written by the
+  authentication middleware into the copy it passes downstream and read
+  through `context.principal`. It was a `.scoped` `PrincipalHolder`
+  component until the composition migration; the container was inverting a
+  dependency (`RequestContext` is Flight Web's, `Principal` is this
+  package's) that a seam protocol expresses directly.
 - `Principal.current` still exists as a task-local; handlers opt in with
   `context.withPrincipal { ... }`, which binds it around service calls. The
   `Task.detached` caveat from design applies unchanged.
