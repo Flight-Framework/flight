@@ -640,20 +640,6 @@ struct GeneratorTests {
         #expect(result.generated.contains(#"method: "GET""#))
     }
 
-    @Test("a target with no routes emits no manifest at all")
-    func noRoutesNoManifest() throws {
-        let result = try generate([
-            "UserService.swift": """
-            import FlightCore
-            @Service final class UserService: Sendable {
-            init() {}
-            }
-            """
-        ])
-        #expect(result.exitCode == 0)
-        #expect(!result.generated.contains("FlightRouteManifest"))
-    }
-
     @Test("a route the macro would reject does not reach the manifest")
     func rejectedRoutesAreOmitted() throws {
         // The generator scans silently — @Controller already diagnoses this,
@@ -677,6 +663,116 @@ struct GeneratorTests {
         #expect(
             !result.diagnostics.contains("must be an instance method"),
             "the macro owns this diagnostic; the generator must not repeat it")
+    }
+
+    // MARK: - Lane manifest
+
+    @Test("lane declarations are scanned with their middleware in order")
+    func emitsLanes() throws {
+        let result = try generate([
+            "AppModule.swift": """
+            import FlightWeb
+            final class AppModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline {
+            RequestTiming.self
+            Authentication.self
+            }
+            container.pipeline("admin") {
+            RequireAdmin.self
+            }
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("FlightRouteManifest"))
+        // Unnamed form is the default lane; order is the declaration's content.
+        #expect(result.generated.contains(#"name: "default", middleware: ["RequestTiming", "Authentication"]"#))
+        #expect(result.generated.contains(#"name: "admin", middleware: ["RequireAdmin"]"#))
+        // The enclosing type is what decides whether the lane exists at all.
+        #expect(result.generated.contains(#"declaredIn: "AppModule""#))
+    }
+
+    @Test("a canonical lane member is named, not left as source text")
+    func namesCanonicalLanes() throws {
+        let result = try generate([
+            "SecurityModule.swift": """
+            import FlightWeb
+            final class SecurityModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline(.authenticated) {
+            Authentication.self
+            RequireAuthentication.self
+            }
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains(#"name: "authenticated""#))
+        #expect(result.generated.contains(#"["Authentication", "RequireAuthentication"]"#))
+    }
+
+    @Test("an empty block still declares its lane")
+    func emptyBlockDeclaresLane() throws {
+        // The motivating case: a static-asset lane that runs nothing. Before
+        // the framework registered a marker for it, the block left no trace
+        // and any route naming the lane failed validation.
+        let result = try generate([
+            "AssetsModule.swift": """
+            import FlightWeb
+            final class AssetsModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline("assets") {}
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains(#"name: "assets", middleware: []"#))
+    }
+
+    @Test("two declarations of one lane are kept separate, in order")
+    func lanesCompose() throws {
+        // pipeline() composes rather than conflicts: a framework module
+        // installs its middleware and the application appends. Flattening
+        // them here would lose the only thing the declaration carries.
+        let result = try generate([
+            "A.swift": """
+            import FlightWeb
+            final class FrameworkModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline { Authentication.self }
+            }
+            }
+            """,
+            "B.swift": """
+            import FlightWeb
+            final class AppModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline { RequestLogging.self }
+            }
+            }
+            """,
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains(#"middleware: ["Authentication"], declaredIn: "FrameworkModule""#))
+        #expect(result.generated.contains(#"middleware: ["RequestLogging"], declaredIn: "AppModule""#))
+    }
+
+    @Test("a target with neither routes nor lanes emits no manifest")
+    func noRoutesNoLanesNoManifest() throws {
+        let result = try generate([
+            "UserService.swift": """
+            import FlightCore
+            @Service final class UserService: Sendable {
+            init() {}
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(!result.generated.contains("FlightRouteManifest"))
     }
 
     // MARK: - Failure modes

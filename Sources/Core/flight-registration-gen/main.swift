@@ -146,6 +146,137 @@ struct SilentRouteDiagnostics: RouteDiagnostics {
     func warning(_ id: String, _ message: String, at node: some SyntaxProtocol) {}
 }
 
+/// One `container.pipeline(_:_:)` declaration.
+///
+/// Lanes are the other half of what dispatch reads out of the container
+/// (COMPOSITION-MIGRATION.md §2.9): `collectMiddleware(lane:)` and
+/// `declaredMiddlewareLanes()` are container-as-data exactly the way
+/// `collectRoutes()` is, so the manifest has to carry them too.
+struct ScannedPipelineLane {
+    /// Normalized lane name: `"default"` for the unnamed form, the literal's
+    /// content for `pipeline("admin")`, the member's name for
+    /// `pipeline(.authenticated)`. nil when the argument is neither — a
+    /// computed lane, which the manifest records but cannot name.
+    let lane: String?
+    /// The lane argument's source text, verbatim; nil for the unnamed form.
+    let laneText: String?
+    /// Middleware type names in declared order — outermost first, which is
+    /// the order the block is written in.
+    let middleware: [String]
+    /// The type whose body holds this call, when there is one.
+    ///
+    /// Nearly always a `FlightModule`, and that is the point: the call runs
+    /// only if the application includes that module, so a lane the scan sees
+    /// is not necessarily a lane the container gets. The same conditional
+    /// -inclusion fact `flight:module-registered` exists to record for
+    /// components.
+    let declaredIn: String?
+    let module: String
+    let file: String
+    let line: Int
+}
+
+/// Finds `container.pipeline { }` calls.
+///
+/// A second pass rather than work folded into `ComponentVisitor`: that one
+/// returns `.skipChildren` at every type declaration, deliberately — nested
+/// registrable types are a non-goal — so it never descends into the method
+/// bodies where these calls live. Walking twice costs one more traversal of
+/// an already-parsed tree and leaves component collection untouched.
+final class PipelineVisitor: SyntaxVisitor {
+    let module: String
+    let file: String
+    let converter: SourceLocationConverter
+    var lanes: [ScannedPipelineLane] = []
+    private var typeStack: [String] = []
+
+    init(module: String, file: String, tree: SourceFileSyntax) {
+        self.module = module
+        self.file = file
+        self.converter = SourceLocationConverter(fileName: file, tree: tree)
+        super.init(viewMode: .sourceAccurate)
+    }
+
+    override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
+        typeStack.append(node.name.text)
+        return .visitChildren
+    }
+    override func visitPost(_ node: ClassDeclSyntax) { typeStack.removeLast() }
+
+    override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
+        typeStack.append(node.name.text)
+        return .visitChildren
+    }
+    override func visitPost(_ node: StructDeclSyntax) { typeStack.removeLast() }
+
+    override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind {
+        typeStack.append(node.name.text)
+        return .visitChildren
+    }
+    override func visitPost(_ node: EnumDeclSyntax) { typeStack.removeLast() }
+
+    override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
+        typeStack.append(node.extendedType.trimmedDescription)
+        return .visitChildren
+    }
+    override func visitPost(_ node: ExtensionDeclSyntax) { typeStack.removeLast() }
+
+    override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
+        guard let callee = node.calledExpression.as(MemberAccessExprSyntax.self),
+              callee.declName.baseName.text == "pipeline",
+              // The lane block is a trailing closure in every form; a
+              // `pipeline` call without one is somebody else's method.
+              let block = node.trailingClosure
+        else { return .visitChildren }
+
+        // The lane: absent (default), a string literal, or `.name`.
+        var lane: String? = "default"
+        var laneText: String? = nil
+        if let argument = node.arguments.first, argument.label == nil {
+            laneText = argument.expression.trimmedDescription
+            if let literal = argument.expression.as(StringLiteralExprSyntax.self) {
+                lane = literal.segments.compactMap {
+                    $0.as(StringSegmentSyntax.self)?.content.text
+                }.joined()
+                // An interpolated lane name is not statically knowable.
+                if literal.segments.count != literal.segments.compactMap({
+                    $0.as(StringSegmentSyntax.self)
+                }).count {
+                    lane = nil
+                }
+            } else if let member = argument.expression.as(MemberAccessExprSyntax.self),
+                      member.base == nil {
+                lane = member.declName.baseName.text
+            } else {
+                lane = nil
+            }
+        }
+
+        // `X.self` per statement, in order.
+        var middleware: [String] = []
+        for statement in block.statements {
+            guard let expression = statement.item.as(ExprSyntax.self),
+                  let member = expression.as(MemberAccessExprSyntax.self),
+                  member.declName.baseName.tokenKind == .keyword(.self),
+                  let base = member.base
+            else { continue }
+            middleware.append(base.trimmedDescription)
+        }
+
+        lanes.append(
+            ScannedPipelineLane(
+                lane: lane,
+                laneText: laneText,
+                middleware: middleware,
+                declaredIn: typeStack.last,
+                module: module,
+                file: file,
+                line: converter.location(for: node.position).line
+            ))
+        return .visitChildren
+    }
+}
+
 // MARK: - Syntax visitor
 
 /// Collects top-level `@Component`/`@Controller` types. Nested registrable
@@ -456,6 +587,7 @@ do {
 
 var components: [ScannedComponent] = []
 var routes: [ScannedControllerRoute] = []
+var lanes: [ScannedPipelineLane] = []
 var extensionConformances: [(typeName: String, protocols: [String])] = []
 for module in manifest.modules {
     for file in module.files {
@@ -475,6 +607,9 @@ for module in manifest.modules {
         guard
             ComponentVisitor.registrableAttributes.contains(where: { source.contains("@\($0)") })
                 || source.contains("extension")
+                // A module body declaring lanes and nothing else has no
+                // registrable attribute to match on.
+                || source.contains(".pipeline")
         else { continue }
         let tree = Parser.parse(source: source)
         let visitor = ComponentVisitor(module: module.name, file: file, tree: tree)
@@ -482,6 +617,12 @@ for module in manifest.modules {
         components.append(contentsOf: visitor.components)
         routes.append(contentsOf: visitor.routes)
         extensionConformances.append(contentsOf: visitor.extensionConformances)
+
+        if source.contains(".pipeline") {
+            let pipelines = PipelineVisitor(module: module.name, file: file, tree: tree)
+            pipelines.walk(tree)
+            lanes.append(contentsOf: pipelines.lanes)
+        }
     }
 }
 
@@ -941,7 +1082,7 @@ out += "}\n"
 //
 // Emitted only when the target actually declares routes, so a target with no
 // controllers gets a generated file of exactly the shape it had before.
-if !routes.isEmpty {
+if !routes.isEmpty || !lanes.isEmpty {
     let sorted = routes.sorted {
         ($0.path, $0.httpMethod, $0.source) < ($1.path, $1.httpMethod, $1.source)
     }
@@ -970,6 +1111,41 @@ if !routes.isEmpty {
         out += "source: \"\(escaped(route.source))\", "
         out += "pipelines: \(pipelines), "
         out += "isUpgrade: \(route.isUpgrade)),\n"
+    }
+    out += "    ]\n"
+
+    // Lanes, in declaration order. Order is the whole content of a lane
+    // declaration — `pipeline` composes across calls, so a framework module
+    // contributing `Authentication` and an application appending its own
+    // concatenate by registration sequence, and flattening that here would
+    // lose the only thing the declaration carries.
+    out += "\n"
+    out += "    /// One `container.pipeline(_:_:)` declaration, in the order\n"
+    out += "    /// the scan met it. Calls compose: two declarations naming\n"
+    out += "    /// one lane concatenate rather than conflict.\n"
+    out += "    public struct Lane: Sendable {\n"
+    out += "        /// nil when the lane argument is not a literal or a\n"
+    out += "        /// canonical member — a computed name, unknowable here.\n"
+    out += "        public let name: String?\n"
+    out += "        /// Middleware type names, outermost first.\n"
+    out += "        public let middleware: [String]\n"
+    out += "        /// The type whose body declared it — nearly always a\n"
+    out += "        /// FlightModule, and the reason this lane may or may not\n"
+    out += "        /// exist in a given application.\n"
+    out += "        public let declaredIn: String?\n"
+    out += "        public let module: String\n"
+    out += "    }\n"
+    out += "\n"
+    out += "    public static let lanes: [Lane] = [\n"
+    for lane in lanes {
+        let name = lane.lane.map { "\"\(escaped($0))\"" } ?? "nil"
+        let declaredIn = lane.declaredIn.map { "\"\(escaped($0))\"" } ?? "nil"
+        let middleware = lane.middleware.map { "\"\(escaped($0))\"" }.joined(separator: ", ")
+        out += "        Lane("
+        out += "name: \(name), "
+        out += "middleware: [\(middleware)], "
+        out += "declaredIn: \(declaredIn), "
+        out += "module: \"\(escaped(lane.module))\"),\n"
     }
     out += "    ]\n"
     out += "}\n"
