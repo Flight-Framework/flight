@@ -216,24 +216,32 @@ extension RegistrationMacro {
         _ properties: [InjectedProperty],
         in context: some MacroExpansionContext
     ) -> Bool {
-        var seen: [String: String?] = [:]  // typeText → first qualifier
+        // Two properties collide when they would resolve the *same key* —
+        // same type and same qualifier, "no qualifier" being a key of its
+        // own. It used to be enough for the types to match with either
+        // qualifier absent, which refused the shape the stack's own
+        // datasource convention produces:
+        //
+        //     @Inject var pool: PostgresDataSource                    // primary
+        //     @Inject("analytics") var analytics: PostgresDataSource
+        //
+        // flight-data registers the primary pool unqualified *as well as* by
+        // name, precisely so the one-database case needs no qualifier. Those
+        // two properties name two different registrations, and refusing them
+        // made the documented convention unusable inside one type.
         var seenPairs: Set<String> = []
         var valid = true
         for property in properties {
             guard case .inject(let qualifier) = property.kind else { continue }
             let pairKey = "\(property.typeText)|\(qualifier ?? "<nil>")"
-            if let first = seen[property.typeText] {
-                if qualifier == nil || first == nil || seenPairs.contains(pairKey) {
-                    context.diagnoseError(
-                        "inject.ambiguous",
-                        "Two @Inject properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
-                        at: property.node
-                    )
-                    valid = false
-                }
+            if !seenPairs.insert(pairKey).inserted {
+                context.diagnoseError(
+                    "inject.ambiguous",
+                    "Two @Inject properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
+                    at: property.node
+                )
+                valid = false
             }
-            seen[property.typeText] = seen[property.typeText] ?? qualifier
-            seenPairs.insert(pairKey)
         }
         return valid
     }

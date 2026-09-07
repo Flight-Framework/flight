@@ -248,24 +248,26 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
         _ properties: [InjectedProperty],
         in context: some MacroExpansionContext
     ) -> Bool {
-        var seen: [String: String?] = [:]
+        // Two properties collide when they would resolve the *same key* —
+        // same type and same qualifier, "no qualifier" being a key of its
+        // own. Mirrors `ComponentMacro`, including why: flight-data registers
+        // the primary datasource unqualified as well as by name, so
+        // `@Inject var pool: PostgresDataSource` beside
+        // `@Inject("analytics") var analytics: PostgresDataSource` names two
+        // different registrations and used to be refused anyway.
         var seenPairs: Set<String> = []
         var valid = true
         for property in properties {
             guard case .inject(let qualifier) = property.kind else { continue }
             let pairKey = "\(property.typeText)|\(qualifier ?? "<nil>")"
-            if let first = seen[property.typeText] {
-                if qualifier == nil || first == nil || seenPairs.contains(pairKey) {
-                    context.diagnoseError(
-                        "inject.ambiguous",
-                        "Two @Inject properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
-                        at: property.node
-                    )
-                    valid = false
-                }
+            if !seenPairs.insert(pairKey).inserted {
+                context.diagnoseError(
+                    "inject.ambiguous",
+                    "Two @Inject properties of type '\(property.typeText)' require distinct explicit qualifiers, e.g. @Inject(\"primary\").",
+                    at: property.node
+                )
+                valid = false
             }
-            seen[property.typeText] = seen[property.typeText] ?? qualifier
-            seenPairs.insert(pairKey)
         }
         return valid
     }
