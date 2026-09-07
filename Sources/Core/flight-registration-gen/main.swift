@@ -23,6 +23,7 @@
 // form, which SwiftPM surfaces in build logs and IDEs.
 
 import FlightConfigCore
+import FlightRouteScan
 import Foundation
 import SwiftParser
 import SwiftSyntax
@@ -107,6 +108,44 @@ struct ScannedConfigValue {
     let line: Int
 }
 
+// MARK: - Route scanning
+
+/// One route, as the generator sees it: the same scan `@Controller` runs,
+/// through the same parser (`FlightRouteScan`), so the manifest and the
+/// expansion cannot disagree about a path, a method, or a lane.
+struct ScannedControllerRoute {
+    let httpMethod: String
+    /// Controller base path combined with the route's own, by the same rule
+    /// the macro applies.
+    let path: String
+    /// `String(reflecting:)`-shaped origin, matching the qualifier the macro
+    /// gives the route's `RouteRegistration`.
+    let source: String
+    /// Resolved lanes, verbatim: the route's own `pipelines:` when it has
+    /// one — replacement, not addition — otherwise the controller's.
+    let pipelinesText: String?
+    let isUpgrade: Bool
+    let file: String
+    let line: Int
+}
+
+/// Swallows what the scan reports.
+///
+/// Deliberate, and the reason is double-reporting: `@Controller` already
+/// scans every one of these functions and already diagnoses a non-literal
+/// path, a static handler, a bad signature, an upgrade with a body. The
+/// generator runs over the same sources in the same build, so anything it
+/// reported would arrive at the author twice, at the same line, in the same
+/// build log.
+///
+/// The macro owns the reporting; the generator owns the manifest. A route
+/// the macro rejects simply does not reach the manifest — which is correct,
+/// because the macro did not register it either.
+struct SilentRouteDiagnostics: RouteDiagnostics {
+    func error(_ id: String, _ message: String, at node: some SyntaxProtocol) {}
+    func warning(_ id: String, _ message: String, at node: some SyntaxProtocol) {}
+}
+
 // MARK: - Syntax visitor
 
 /// Collects top-level `@Component`/`@Controller` types. Nested registrable
@@ -136,6 +175,7 @@ final class ComponentVisitor: SyntaxVisitor {
     let file: String
     let converter: SourceLocationConverter
     var components: [ScannedComponent] = []
+    var routes: [ScannedControllerRoute] = []
     /// `extension T: P` clauses seen in this file, keyed later by the extended
     /// type's base name. Collected file-wide (not just for known components —
     /// the component's declaration may live in a different file).
@@ -177,6 +217,38 @@ final class ComponentVisitor: SyntaxVisitor {
         return .skipChildren
     }
 
+
+    /// Scans one `@Controller`'s members for routes and records them with
+    /// their combined paths and resolved lanes.
+    private func collectRoutes(
+        controller: String, attribute: AttributeSyntax, members: MemberBlockSyntax
+    ) {
+        let silent = SilentRouteDiagnostics()
+        let base = RouteScanning.basePath(of: attribute, diagnostics: silent)
+        let controllerPipelines = RouteScanning.pipelines(of: attribute)
+
+        for member in members.members {
+            guard let function = member.decl.as(FunctionDeclSyntax.self) else { continue }
+            for route in RouteScanning.scanRoutes(of: function, diagnostics: silent) {
+                let location = converter.location(for: route.node.position)
+                routes.append(
+                    ScannedControllerRoute(
+                        httpMethod: route.kind.httpMethod,
+                        path: RouteScanning.combinePaths(base, route.path),
+                        source: "\(module).\(controller).\(route.methodName)",
+                        // A route's own `pipelines:` replaces the
+                        // controller's — the same rule the macro applies, and
+                        // the reason it is `??` rather than a concatenation.
+                        pipelinesText: route.pipelinesText ?? controllerPipelines,
+                        isUpgrade: route.kind.isUpgrade,
+                        file: file,
+                        line: location.line
+                    )
+                )
+            }
+        }
+    }
+
     private func collect(
         name: String,
         attributes: AttributeListSyntax,
@@ -205,6 +277,13 @@ final class ComponentVisitor: SyntaxVisitor {
         // (ConfigKeyNaming.kebabCase, shared rather than duplicated) so a
         // required key with no default can get the same compile-time
         // flight.yaml check @ConfigValue's explicit form already has.
+        // Routes, for the static manifest (COMPOSITION-MIGRATION.md §2.9).
+        // Same parser the macro uses, so a path combined here and a path
+        // combined in the expansion are combined by one implementation.
+        if registrable.attributeName.as(IdentifierTypeSyntax.self)?.name.text == "Controller" {
+            collectRoutes(controller: name, attribute: registrable, members: members)
+        }
+
         let isSettingsType =
             registrable.attributeName.as(IdentifierTypeSyntax.self)?.name.text == "Settings"
         let settingsNamespace = isSettingsType ? literalKey(of: registrable) : nil
@@ -376,6 +455,7 @@ do {
 }
 
 var components: [ScannedComponent] = []
+var routes: [ScannedControllerRoute] = []
 var extensionConformances: [(typeName: String, protocols: [String])] = []
 for module in manifest.modules {
     for file in module.files {
@@ -400,6 +480,7 @@ for module in manifest.modules {
         let visitor = ComponentVisitor(module: module.name, file: file, tree: tree)
         visitor.walk(tree)
         components.append(contentsOf: visitor.components)
+        routes.append(contentsOf: visitor.routes)
         extensionConformances.append(contentsOf: visitor.extensionConformances)
     }
 }
@@ -627,6 +708,51 @@ func detectCycles() {
 }
 detectCycles()
 
+// MARK: - Captive dependency (compile-time case)
+//
+// A singleton is constructed once, at `freeze()`, and outlives every request.
+// One that injects a `.scoped` component either fails the freeze — the
+// factory finds no ambient `Scope.active` and throws `scopeRequired`, naming
+// the type — or, on a dynamic path that does have a scope, captures one
+// request's instance for the life of the process.
+//
+// The scan already knows both scopes and already walks `@Inject` edges for
+// `detectCycles()`, so this is a comparison on an existing traversal. Moving
+// it from startup to build time is the whole of the improvement: the runtime
+// check stays, and stays correct, until composition removes the lifetime
+// concept entirely (COMPOSITION-MIGRATION.md §2.2).
+@MainActor
+func detectCaptiveDependencies() {
+    let byName = Dictionary(components.map { ($0.typeName, $0) }, uniquingKeysWith: { a, _ in a })
+
+    // `.singleton` is the macro's default, so an absent `scope:` argument is
+    // a singleton — matching `parseComponentArguments`, which the bridge
+    // synthesizer already relies on agreeing with.
+    func isScoped(_ component: ScannedComponent) -> Bool {
+        component.scopeText.hasSuffix(".scoped")
+    }
+    func isSingleton(_ component: ScannedComponent) -> Bool {
+        component.scopeText.hasSuffix(".singleton")
+    }
+
+    for component in components where isSingleton(component) {
+        // Acknowledged edges are included deliberately, as in `detectCycles`:
+        // the marker says "registered by hand", not "exempt from lifetime
+        // rules", and a hand-registered scoped component is captive just the
+        // same.
+        for dependency in component.injectTypeNames + component.acknowledgedTypeNames {
+            guard let injected = byName[dependency], isScoped(injected) else { continue }
+            let message =
+                "'\(component.typeName)' is .singleton but injects '\(dependency)', which is "
+                + ".scoped. A singleton is built once at startup and outlives every request, so "
+                + "it would capture one request's instance forever. Give \(component.typeName) "
+                + "`scope: .scoped` too, or inject something that can produce \(dependency) per use."
+            emit("error", message, file: component.file, line: component.line)
+        }
+    }
+}
+detectCaptiveDependencies()
+
 // Cross-module registration requires the component be visible to the target's
 // generated code.
 for component in components
@@ -705,6 +831,14 @@ func checkConfigKeys() {
 checkConfigKeys()
 
 if errorCount > 0 { exit(1) }
+
+/// Escapes text being re-embedded in a generated Swift string literal. Route
+/// paths are already refused a quote or a backslash by the scanner, but the
+/// lane text is an arbitrary expression, so this is not decorative.
+func escaped(_ text: String) -> String {
+    text.replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+}
 
 // MARK: - Emission
 
@@ -795,6 +929,51 @@ if !bridges.isEmpty {
     }
 }
 out += "}\n"
+
+// MARK: - Static route manifest
+//
+// Every route this target declares, scanned at build time through the same
+// `FlightRouteScan` parser `@Controller` expands with. Nothing consumes it
+// yet: dispatch still collects `RouteRegistration` components out of the
+// container (COMPOSITION-MIGRATION.md §2.9, work plan step 1). It is emitted
+// now so the manifest and the container's route table can be compared on
+// real applications before anything depends on the manifest being right.
+//
+// Emitted only when the target actually declares routes, so a target with no
+// controllers gets a generated file of exactly the shape it had before.
+if !routes.isEmpty {
+    let sorted = routes.sorted {
+        ($0.path, $0.httpMethod, $0.source) < ($1.path, $1.httpMethod, $1.source)
+    }
+    out += "\n"
+    out += "/// Every route this module declares, as scanned at build time.\n"
+    out += "///\n"
+    out += "/// Not yet consumed by dispatch — the route table is still built from\n"
+    out += "/// `RouteRegistration` components. This is the static form it moves to.\n"
+    out += "public enum FlightRouteManifest {\n"
+    out += "    public struct Entry: Sendable {\n"
+    out += "        public let method: String\n"
+    out += "        public let path: String\n"
+    out += "        public let source: String\n"
+    out += "        /// Lane names as written, after the route-replaces-controller\n"
+    out += "        /// rule; nil means the route inherits the default lane.\n"
+    out += "        public let pipelines: String?\n"
+    out += "        public let isUpgrade: Bool\n"
+    out += "    }\n"
+    out += "\n"
+    out += "    public static let routes: [Entry] = [\n"
+    for route in sorted {
+        let pipelines = route.pipelinesText.map { "\"\(escaped($0))\"" } ?? "nil"
+        out += "        Entry("
+        out += "method: \"\(route.httpMethod)\", "
+        out += "path: \"\(escaped(route.path))\", "
+        out += "source: \"\(escaped(route.source))\", "
+        out += "pipelines: \(pipelines), "
+        out += "isUpgrade: \(route.isUpgrade)),\n"
+    }
+    out += "    ]\n"
+    out += "}\n"
+}
 
 do {
     let outputURL = URL(fileURLWithPath: manifest.output)

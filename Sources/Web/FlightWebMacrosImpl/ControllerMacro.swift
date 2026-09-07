@@ -1,3 +1,4 @@
+import FlightRouteScan
 import SwiftDiagnostics
 import SwiftSyntax
 import SwiftSyntaxBuilder
@@ -65,7 +66,8 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         guard validateQualifierDisambiguation(properties, in: context) else { return [] }
         guard validateNonInjectedStorage(declaration, injected: properties, in: context) else { return [] }
 
-        let basePath = parseBasePath(node, in: context)
+        let basePath = RouteScanning.basePath(
+            of: node, diagnostics: MacroRouteDiagnostics(context: context))
         let routes = collectRoutes(from: declaration, in: context)
         let combinedRoutes = routes.map { route in
             (route: route, path: RouteScanning.combinePaths(basePath, route.path))
@@ -117,7 +119,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         // adding to it — the only rule that can express both "public
         // controller, one authenticated route" and "authenticated
         // controller, one public route". Saying nothing inherits.
-        let controllerPipelines = parsePipelines(node)
+        let controllerPipelines = RouteScanning.pipelines(of: node)
         for (route, path) in combinedRoutes {
             let pipelines = route.pipelinesText ?? controllerPipelines
             if let routePipelines = route.pipelinesText {
@@ -216,7 +218,9 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         var routes: [ScannedRoute] = []
         for member in declaration.memberBlock.members {
             guard let function = member.decl.as(FunctionDeclSyntax.self) else { continue }
-            routes.append(contentsOf: RouteScanning.scanRoutes(of: function, in: context))
+            routes.append(
+                contentsOf: RouteScanning.scanRoutes(
+                    of: function, diagnostics: MacroRouteDiagnostics(context: context)))
         }
         return routes
     }
@@ -249,13 +253,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// every generated RouteRegistration — or nil for the default lane.
     /// Verbatim like @Component's `scope:`: the expression is evaluated in
     /// the expansion, so `[.defaultLane, "admin"]` and a constant both work.
-    private static func parsePipelines(_ node: AttributeSyntax) -> String? {
-        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self) else { return nil }
-        for argument in arguments where argument.label?.text == "pipelines" {
-            return argument.expression.trimmedDescription
-        }
-        return nil
-    }
 
     /// The canonical security lanes, in every spelling a declaration site can
     /// use. A macro sees source text and nothing else — it cannot resolve
@@ -339,45 +336,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// the macro declaration's doc comment). Returns `""` for "no base path":
     /// omitted, explicit `nil`, empty string, and bare `"/"` are all the
     /// identity element for `RouteScanning.combinePaths`.
-    private static func parseBasePath(
-        _ node: AttributeSyntax,
-        in context: some MacroExpansionContext
-    ) -> String {
-        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self),
-              let first = arguments.first, first.label == nil
-        else { return "" }
-        if first.expression.trimmedDescription == "nil" { return "" }
-        guard let literal = first.expression.as(StringLiteralExprSyntax.self) else {
-            context.diagnoseError(
-                "controller.path.nonliteral",
-                "@Controller's path must be a string literal — the route table is built at compile time (§4).",
-                at: first.expression
-            )
-            return ""
-        }
-        var path = ""
-        for segment in literal.segments {
-            guard let text = segment.as(StringSegmentSyntax.self) else {
-                context.diagnoseError(
-                    "controller.path.nonliteral",
-                    "@Controller's path must be a plain string literal, with no interpolation.",
-                    at: first.expression
-                )
-                return ""
-            }
-            path += text.content.text
-        }
-        guard !path.isEmpty, path != "/" else { return "" }
-        guard path.hasPrefix("/") else {
-            context.diagnoseError(
-                "controller.path",
-                "@Controller path '\(path)' must start with '/'.",
-                at: node
-            )
-            return ""
-        }
-        return path
-    }
 
     // MARK: - Validation (mirrors ComponentMacro)
 

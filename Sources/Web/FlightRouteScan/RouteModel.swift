@@ -1,8 +1,7 @@
 import SwiftSyntax
-import SwiftSyntaxMacros
 
 /// The route attributes `@Controller` consumes, and what each means.
-enum RouteKind: String, CaseIterable {
+public enum RouteKind: String, CaseIterable {
     case get = "GetRoute"
     case post = "PostRoute"
     case put = "PutRoute"
@@ -10,7 +9,7 @@ enum RouteKind: String, CaseIterable {
     case delete = "DeleteRoute"
     case webSocket = "WebSocketRoute"
 
-    var httpMethod: String {
+    public var httpMethod: String {
         switch self {
         case .get: return "GET"
         case .post: return "POST"
@@ -21,46 +20,46 @@ enum RouteKind: String, CaseIterable {
         }
     }
 
-    var isUpgrade: Bool { self == .webSocket }
+    public var isUpgrade: Bool { self == .webSocket }
 }
 
 /// One mapped handler method, as scanned from the controller body.
-struct ScannedRoute {
-    let kind: RouteKind
+public struct ScannedRoute {
+    public let kind: RouteKind
     /// The path pattern's literal content ("/users/:id").
-    let path: String
-    let methodName: String
+    public let path: String
+    public let methodName: String
     /// Has a second, `body:`-labeled parameter of this type.
-    let bodyTypeText: String?
+    public let bodyTypeText: String?
     /// The `maxBodyBytes:` argument's source text, verbatim — nil means
     /// the transport default.
-    let maxBodyBytesText: String?
+    public let maxBodyBytesText: String?
     /// The route's own `pipelines:` argument, verbatim. nil means the route
     /// said nothing and inherits the controller's lanes; non-nil *replaces*
     /// them.
-    let pipelinesText: String?
+    public let pipelinesText: String?
     /// Where to point a diagnostic about this route's lanes.
-    let attribute: AttributeSyntax
+    public let attribute: AttributeSyntax
     /// A `body: RequestBodyStream` parameter — the route is
     /// streaming-bodied and the transport must not buffer it.
-    var isStreamingBody: Bool {
+    public var isStreamingBody: Bool {
         bodyTypeText == "RequestBodyStream" || bodyTypeText == "FlightWeb.RequestBodyStream"
     }
-    let isAsync: Bool
-    let isThrows: Bool
+    public let isAsync: Bool
+    public let isThrows: Bool
     /// nil ⇔ no return value (handler answers 204).
-    let returnTypeText: String?
-    let node: FunctionDeclSyntax
+    public let returnTypeText: String?
+    public let node: FunctionDeclSyntax
 }
 
-enum RouteScanning {
+public enum RouteScanning {
 
     /// The route attributes attached to `function`, with their literal
     /// paths. Diagnoses (and skips) non-literal paths — the route table is
     /// compile-time information (§4), so a computed path is a build error.
-    static func mappingAttributes(
+    public static func mappingAttributes(
         of function: FunctionDeclSyntax,
-        in context: some MacroExpansionContext
+        diagnostics: some RouteDiagnostics
     ) -> [(
         kind: RouteKind, path: String, maxBodyBytes: String?, pipelines: String?,
         attribute: AttributeSyntax
@@ -72,7 +71,7 @@ enum RouteScanning {
                   let kind = RouteKind(rawValue: name)
             else { continue }
             guard let path = literalPath(of: attribute) else {
-                context.diagnoseError(
+                diagnostics.error(
                     "route.nonliteral",
                     "@\(name) requires a string-literal path — the route table is built at compile time (§4).",
                     at: attribute
@@ -123,11 +122,11 @@ enum RouteScanning {
     ///
     ///     func f(_ context: RequestContext) [async] [throws] [-> T]
     ///     func f(_ context: RequestContext, body: B) [async] [throws] [-> T]
-    static func scanRoutes(
+    public static func scanRoutes(
         of function: FunctionDeclSyntax,
-        in context: some MacroExpansionContext
+        diagnostics: some RouteDiagnostics
     ) -> [ScannedRoute] {
-        let mappings = mappingAttributes(of: function, in: context)
+        let mappings = mappingAttributes(of: function, diagnostics: diagnostics)
         guard !mappings.isEmpty else { return [] }
 
         // Path validation lives here, where the routes are actually built,
@@ -136,13 +135,13 @@ enum RouteScanning {
         for mapping in mappings {
             validatePath(
                 mapping.path, name: mapping.kind.rawValue,
-                at: mapping.attribute, in: context)
+                at: mapping.attribute, diagnostics: diagnostics)
             // A path is re-embedded into generated string literals verbatim,
             // so a `"` or `\` in one produced a compile error inside an
             // expansion the author cannot see, at a line they did not write.
             // Neither belongs in a URL path anyway.
             if mapping.path.contains("\"") || mapping.path.contains("\\") {
-                context.diagnoseError(
+                diagnostics.error(
                     "route.path",
                     """
                     @\(mapping.kind.rawValue) path "\(mapping.path)" contains a quote or a \
@@ -161,7 +160,7 @@ enum RouteScanning {
             $0.name.tokenKind == .keyword(.static) || $0.name.tokenKind == .keyword(.class)
         }
         if isTypeLevel {
-            context.diagnoseError(
+            diagnostics.error(
                 "route.static",
                 "Route handler '\(name)' must be an instance method — the container resolves the controller instance per registration.",
                 at: function
@@ -169,7 +168,7 @@ enum RouteScanning {
             return []
         }
         if function.modifiers.contains(where: { $0.name.tokenKind == .keyword(.mutating) }) {
-            context.diagnoseError(
+            diagnostics.error(
                 "route.mutating",
                 "Route handler '\(name)' must not be mutating — the controller component is shared across requests.",
                 at: function
@@ -182,7 +181,7 @@ enum RouteScanning {
               first.firstName.tokenKind == .wildcard,
               typeName(first.type).hasSuffix("RequestContext")
         else {
-            context.diagnoseError(
+            diagnostics.error(
                 "route.signature",
                 "Route handler '\(name)' must take '_ context: RequestContext' as its first parameter.",
                 at: function
@@ -194,7 +193,7 @@ enum RouteScanning {
         if parameters.count >= 2 {
             let second = parameters[1]
             guard parameters.count == 2, second.firstName.text == "body" else {
-                context.diagnoseError(
+                diagnostics.error(
                     "route.signature",
                     "Route handler '\(name)' may take at most one extra parameter, labeled 'body:', decoded from the request body.",
                     at: function
@@ -213,7 +212,7 @@ enum RouteScanning {
         // all until a runtime refusal nobody could explain.
         for mapping in mappings where mapping.kind.isUpgrade {
             if bodyTypeText != nil {
-                context.diagnoseError(
+                diagnostics.error(
                     "route.upgradebody",
                     """
                     A @\(mapping.kind.rawValue) handler cannot take a 'body:' parameter: an \
@@ -230,7 +229,7 @@ enum RouteScanning {
             // rest is the type checker's — it just used to report inside the
             // expansion rather than at the handler.
             guard returnType != nil else {
-                context.diagnoseError(
+                diagnostics.error(
                     "route.upgradereturn",
                     """
                     A @\(mapping.kind.rawValue) handler must return something conforming to \
@@ -261,6 +260,58 @@ enum RouteScanning {
         }
     }
 
+    /// The `@Controller` base path — its first, unlabeled string-literal
+    /// argument. Empty for `@Controller` with no path, and for `nil`.
+    public static func basePath(
+        of node: AttributeSyntax,
+        diagnostics: some RouteDiagnostics
+    ) -> String {
+        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self),
+              let first = arguments.first, first.label == nil
+        else { return "" }
+        if first.expression.trimmedDescription == "nil" { return "" }
+        guard let literal = first.expression.as(StringLiteralExprSyntax.self) else {
+            diagnostics.error(
+                "controller.path.nonliteral",
+                "@Controller's path must be a string literal — the route table is built at compile time (§4).",
+                at: first.expression
+            )
+            return ""
+        }
+        var path = ""
+        for segment in literal.segments {
+            guard let text = segment.as(StringSegmentSyntax.self) else {
+                diagnostics.error(
+                    "controller.path.nonliteral",
+                    "@Controller's path must be a plain string literal, with no interpolation.",
+                    at: first.expression
+                )
+                return ""
+            }
+            path += text.content.text
+        }
+        guard !path.isEmpty, path != "/" else { return "" }
+        guard path.hasPrefix("/") else {
+            diagnostics.error(
+                "controller.path",
+                "@Controller path '\(path)' must start with '/'.",
+                at: node
+            )
+            return ""
+        }
+        return path
+    }
+
+    /// The `pipelines:` argument's source text, verbatim. A route's own
+    /// `pipelines:` *replaces* this rather than adding to it.
+    public static func pipelines(of node: AttributeSyntax) -> String? {
+        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self) else { return nil }
+        for argument in arguments where argument.label?.text == "pipelines" {
+            return argument.expression.trimmedDescription
+        }
+        return nil
+    }
+
     private static func typeName(_ type: TypeSyntax) -> String {
         type.trimmedDescription
     }
@@ -284,7 +335,7 @@ enum RouteScanning {
     /// at `Router.init` (Flight Core's established split: per-literal syntax
     /// is a macro-time diagnostic, conflicts across combination are a
     /// startup error, same as cross-controller route conflicts already are).
-    static func combinePaths(_ base: String, _ method: String) -> String {
+    public static func combinePaths(_ base: String, _ method: String) -> String {
         guard !base.isEmpty else { return method }
         guard !method.isEmpty, method != "/" else { return base }
         let baseEndsWithSlash = base.hasSuffix("/")
@@ -302,14 +353,14 @@ enum RouteScanning {
     /// becomes information the build has before the binary exists"). Kept in
     /// lockstep with the runtime `RoutePattern` parser — these rules are the
     /// same ones it enforces.
-    static func validatePath(
+    public static func validatePath(
         _ path: String,
         name: String,
         at node: AttributeSyntax,
-        in context: some MacroExpansionContext
+        diagnostics: some RouteDiagnostics
     ) {
         guard path.hasPrefix("/") else {
-            context.diagnoseError(
+            diagnostics.error(
                 "route.path",
                 "@\(name) path '\(path)' must start with '/'.",
                 at: node
@@ -321,7 +372,7 @@ enum RouteScanning {
         for (index, segment) in segments.enumerated() {
             if segment == "**" {
                 if index != segments.count - 1 {
-                    context.diagnoseError(
+                    diagnostics.error(
                         "route.path",
                         "@\(name) path '\(path)': '**' is only allowed as the final segment.",
                         at: node
@@ -330,13 +381,13 @@ enum RouteScanning {
             } else if segment.hasPrefix(":") {
                 let parameter = String(segment.dropFirst())
                 if parameter.isEmpty {
-                    context.diagnoseError(
+                    diagnostics.error(
                         "route.path",
                         "@\(name) path '\(path)' has a ':' segment with no parameter name.",
                         at: node
                     )
                 } else if !seenParameters.insert(parameter).inserted {
-                    context.diagnoseError(
+                    diagnostics.error(
                         "route.path",
                         "@\(name) path '\(path)' binds ':\(parameter)' more than once.",
                         at: node

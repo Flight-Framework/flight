@@ -491,6 +491,194 @@ struct GeneratorTests {
         )
     }
 
+    // MARK: - Captive dependencies
+
+    @Test("a singleton injecting a scoped component is a build error naming both")
+    func reportsCaptiveDependency() throws {
+        // The defect this exists to catch: a singleton is built once at
+        // freeze() and outlives every request, so holding a per-request
+        // instance means serving the first request's state forever. Today
+        // this throws `scopeRequired` at startup; the point of the check is
+        // that it never gets that far.
+        let result = try generate([
+            "Captive.swift": """
+            import FlightCore
+            @Service final class PricingService: Sendable {
+            @Inject var users: UserRepository
+            init() {}
+            }
+            @Repository(scope: .scoped) final class UserRepository: Sendable {
+            init() {}
+            }
+            """
+        ])
+        #expect(result.exitCode != 0)
+        #expect(result.diagnostics.contains("PricingService"))
+        #expect(result.diagnostics.contains("UserRepository"))
+        #expect(result.diagnostics.contains(".singleton") && result.diagnostics.contains(".scoped"))
+    }
+
+    @Test("scoped injecting scoped is fine — same lifetime, no capture")
+    func scopedInjectingScopedIsFine() throws {
+        let result = try generate([
+            "Scoped.swift": """
+            import FlightCore
+            @Service(scope: .scoped) final class RequestAudit: Sendable {
+            @Inject var users: UserRepository
+            init() {}
+            }
+            @Repository(scope: .scoped) final class UserRepository: Sendable {
+            init() {}
+            }
+            """
+        ])
+        #expect(result.exitCode == 0, "no capture: both live for one request")
+    }
+
+    @Test("singleton injecting singleton is fine")
+    func singletonInjectingSingletonIsFine() throws {
+        let result = try generate([
+            "Singletons.swift": """
+            import FlightCore
+            @Service final class PricingService: Sendable {
+            @Inject var users: UserRepository
+            init() {}
+            }
+            @Repository final class UserRepository: Sendable {
+            init() {}
+            }
+            """
+        ])
+        #expect(result.exitCode == 0, "no capture: both live for the process")
+    }
+
+    @Test("a hand-registered marker does not exempt a captive dependency")
+    func markerDoesNotExemptCaptive() throws {
+        // The marker means "registered by hand", not "exempt from lifetime
+        // rules" — the same posture `detectCycles` takes toward it. A
+        // hand-registered scoped component captured by a singleton is captive
+        // in exactly the same way.
+        let result = try generate([
+            "MarkedCaptive.swift": """
+            import FlightCore
+            @Service final class PricingService: Sendable {
+            // flight:hand-registered
+            @Inject var users: UserRepository
+            init() {}
+            }
+            @Repository(scope: .scoped) final class UserRepository: Sendable {
+            init() {}
+            }
+            """
+        ])
+        #expect(result.exitCode != 0)
+        #expect(result.diagnostics.contains("PricingService"))
+    }
+
+    // MARK: - Static route manifest
+
+    @Test("routes are scanned into a static manifest, with controller paths combined")
+    func emitsRouteManifest() throws {
+        let result = try generate([
+            "UserController.swift": """
+            import FlightWeb
+            @Controller("/users")
+            struct UserController {
+            @GetRoute("/:id")
+            func show(_ context: RequestContext) -> String { "x" }
+            @PostRoute("")
+            func create(_ context: RequestContext) -> String { "y" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("FlightRouteManifest"))
+        // The combination rule is the macro's, applied by the same parser.
+        #expect(result.generated.contains(#"path: "/users/:id""#))
+        #expect(result.generated.contains(#"path: "/users""#))
+        #expect(result.generated.contains(#"method: "GET""#))
+        #expect(result.generated.contains(#"method: "POST""#))
+        #expect(result.generated.contains("AppModule.UserController.show"))
+    }
+
+    @Test("a route's own pipelines replace the controller's in the manifest")
+    func manifestResolvesPipelines() throws {
+        // Replacement, not addition — the rule a route relies on to say
+        // "this one is public" under an authenticated controller.
+        let result = try generate([
+            "DashboardController.swift": """
+            import FlightWeb
+            @Controller("/dashboard", pipelines: [.authenticated])
+            struct DashboardController {
+            @GetRoute("/admin")
+            func admin(_ context: RequestContext) -> String { "a" }
+            @GetRoute("/", pipelines: [.public])
+            func index(_ context: RequestContext) -> String { "i" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("[.authenticated]"))
+        #expect(result.generated.contains("[.public]"))
+    }
+
+    @Test("a WebSocket route is marked as an upgrade")
+    func manifestMarksUpgrades() throws {
+        let result = try generate([
+            "SocketController.swift": """
+            import FlightWeb
+            @Controller("/live")
+            struct SocketController {
+            @WebSocketRoute("/feed")
+            func feed(_ context: RequestContext) -> some WebSocketUpgradeHandler { fatalError() }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("isUpgrade: true"))
+        // An upgrade rides a GET (RFC 6455 §4.1).
+        #expect(result.generated.contains(#"method: "GET""#))
+    }
+
+    @Test("a target with no routes emits no manifest at all")
+    func noRoutesNoManifest() throws {
+        let result = try generate([
+            "UserService.swift": """
+            import FlightCore
+            @Service final class UserService: Sendable {
+            init() {}
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(!result.generated.contains("FlightRouteManifest"))
+    }
+
+    @Test("a route the macro would reject does not reach the manifest")
+    func rejectedRoutesAreOmitted() throws {
+        // The generator scans silently — @Controller already diagnoses this,
+        // and both run in the same build, so reporting here would say it
+        // twice. What matters is that the bad route is not manifested either.
+        let result = try generate([
+            "BadController.swift": """
+            import FlightWeb
+            @Controller("/bad")
+            struct BadController {
+            @GetRoute("/ok")
+            func ok(_ context: RequestContext) -> String { "ok" }
+            @GetRoute("/static")
+            static func wrong(_ context: RequestContext) -> String { "no" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains(#"path: "/bad/ok""#))
+        #expect(!result.generated.contains(#"path: "/bad/static""#))
+        #expect(
+            !result.diagnostics.contains("must be an instance method"),
+            "the macro owns this diagnostic; the generator must not repeat it")
+    }
+
     // MARK: - Failure modes
 
     @Test("an unreadable source file is skipped with a warning, not a crash")
