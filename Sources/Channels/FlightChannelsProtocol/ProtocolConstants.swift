@@ -29,6 +29,37 @@ public enum ChannelProtocol {
 
     /// The `flight:error` payload is `{"reason": <string>}`; this is its key.
     public static let errorReasonKey = "reason"
+
+    /// The prefix under which channel traffic travels on the PubSub bus.
+    ///
+    /// Frames a channel fans out are *not* published on the topic a client
+    /// joined; they are published under this prefix. Presence has always
+    /// namespaced its gossip (`flight:presence`), and channel traffic now
+    /// does the same.
+    public static let busPrefix = "flight:channels:"
+
+    /// The bus topic a channel topic's frames travel on.
+    ///
+    /// Channels' fan-out is PubSub's, and it used to publish straight onto
+    /// the application's own topic string — one namespace for two unrelated
+    /// things. Both directions of that collision were real: an application
+    /// subscribing to `shipment:42` received Channels' internal frames as
+    /// opaque JSON, and an application *publishing* to `shipment:42` had its
+    /// message dropped by every connected socket's pump, with a warning
+    /// each. Neither was documented, and both are easy to hit — a topic name
+    /// like "the thing this is about" is the obvious choice on both sides.
+    ///
+    /// The mapping is a prefix, so it is injective: two distinct channel
+    /// topics never share a bus topic. Nothing on the wire changes — this
+    /// names a topic on the bus, never one a client joins or sees.
+    ///
+    /// Code that deliberately watches channel traffic from outside Channels
+    /// subscribes through this:
+    ///
+    /// ```swift
+    /// for await message in pubsub.subscribe(ChannelProtocol.busTopic("room:42")) { … }
+    /// ```
+    public static func busTopic(_ topic: String) -> String { busPrefix + topic }
 }
 
 /// Error reasons the server emits in `flight:error` payloads. Strings, not
@@ -65,4 +96,15 @@ public enum ChannelCloseCode {
     /// Flight owns both clients, this is always a bug or an attack — the
     /// server closes rather than negotiating.
     public static let protocolViolation: UInt16 = 4400
+
+    /// The peer stopped reading: one outbound frame took longer than
+    /// `flight.channels.write-timeout-seconds` to leave.
+    ///
+    /// Distinct from ``heartbeatTimeout`` because the two say different
+    /// things about the same client — one has gone silent, the other is
+    /// still talking but no longer listening — and distinct from a normal
+    /// closure because it is not one. It used to be reported as `1000`,
+    /// which a client cannot tell from a clean server shutdown, so a
+    /// reconnect loop treated "you are not reading" as "come back".
+    public static let writeTimeout: UInt16 = 4408
 }

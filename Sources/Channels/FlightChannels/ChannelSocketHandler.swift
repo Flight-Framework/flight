@@ -128,6 +128,10 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                             "socket": "\(socket.id)",
                             "timeout": "\(configuration.writeTimeout.map(String.init(describing:)) ?? "none")",
                         ])
+                    finishedContinuation.yield(
+                        CloseIntent(
+                            code: WebSocketCloseCode(ChannelCloseCode.writeTimeout),
+                            reason: "peer did not accept a frame in time"))
                     break
                 } catch {
                     break  // connection gone; remaining outbound is undeliverable

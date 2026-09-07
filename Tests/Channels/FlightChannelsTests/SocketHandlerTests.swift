@@ -319,8 +319,13 @@ struct SocketHandlerBroadcastTests {
         let wire = try await harness.wire()
         _ = try await wire.join("room:1")
 
-        // Publish raw junk to the topic, bypassing the broadcaster.
-        await (try harness.localPubSub).publish(Message(topic: "room:1", payload: Data("junk".utf8)))
+        // Publish raw junk onto the *bus* topic the pump subscribes to,
+        // bypassing the broadcaster. (An application publishing to "room:1"
+        // itself no longer reaches this path at all — channel traffic has its
+        // own namespace, `ChannelProtocol.busTopic(_:)` — so the drop path is
+        // reached the only way it still can be.)
+        await (try harness.localPubSub).publish(
+            Message(topic: ChannelProtocol.busTopic("room:1"), payload: Data("junk".utf8)))
 
         try wire.send(ref: "2", topic: "room:1", event: "echo", payload: ["marker": true])
         let next = try await wire.nextEnvelope()

@@ -134,7 +134,7 @@ internal actor SocketSession {
             // second; start the pump last. Everything funnels through one
             // outbound queue, so the client always sees the join reply
             // before any broadcast.
-            let subscription = pubsub.subscribe(topic)
+            let subscription = pubsub.subscribe(ChannelProtocol.busTopic(topic))
             if let ref = envelope.ref {
                 socket.sendReply(ref: ref, topic: topic, payload: initialState ?? .null)
             }

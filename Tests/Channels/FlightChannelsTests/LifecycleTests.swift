@@ -24,7 +24,7 @@ struct LifecycleTests {
         try wire.send(ref: "3", topic: "room:1", event: "echo")
         #expect(try await wire.nextEnvelope()?.payload == ["reason": "not_joined"])
         // …and its PubSub subscription ended.
-        #expect(try harness.localPubSub.subscriberCount(for: "room:1") == 0)
+        #expect(try harness.localPubSub.subscriberCount(for: ChannelProtocol.busTopic("room:1")) == 0)
         wire.close()
     }
 
@@ -43,7 +43,7 @@ struct LifecycleTests {
         let wire = try await harness.wire("/socket?token=alice")
         _ = try await wire.join("room:1", ref: "1")
         _ = try await wire.join("room:2", ref: "2")
-        #expect(try harness.localPubSub.subscriberCount(for: "room:1") == 1)
+        #expect(try harness.localPubSub.subscriberCount(for: ChannelProtocol.busTopic("room:1")) == 1)
 
         wire.close()
         wire.socket.finishFromServer()
@@ -53,8 +53,8 @@ struct LifecycleTests {
         #expect(await events.waitFor {
             $0.contains("leave room:1 by alice") && $0.contains("leave room:2 by alice")
         })
-        #expect(try harness.localPubSub.subscriberCount(for: "room:1") == 0)
-        #expect(try harness.localPubSub.subscriberCount(for: "room:2") == 0)
+        #expect(try harness.localPubSub.subscriberCount(for: ChannelProtocol.busTopic("room:1")) == 0)
+        #expect(try harness.localPubSub.subscriberCount(for: ChannelProtocol.busTopic("room:2")) == 0)
     }
 
     @Test("flight:close: graceful teardown — ack flushed, then the close frame")
@@ -111,7 +111,7 @@ struct LifecycleTests {
         }
         #expect(closeCode == WebSocketCloseCode(ChannelCloseCode.heartbeatTimeout))
         #expect(await (try harness.events).waitFor { $0.contains("leave room:1 by alice") })
-        #expect(try harness.localPubSub.subscriberCount(for: "room:1") == 0)
+        #expect(try harness.localPubSub.subscriberCount(for: ChannelProtocol.busTopic("room:1")) == 0)
     }
 
     @Test("heartbeats keep an otherwise-quiet socket alive")

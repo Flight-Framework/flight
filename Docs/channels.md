@@ -155,12 +155,26 @@ One envelope, both directions, JSON text frames in v1:
   which can never be joined.
 - Correlated success is `flight:reply` with the ref; correlated failure
   (join rejected, handler error) is `flight:error` with the ref.
-- Close codes beyond RFC 6455's set: `4000` heartbeat timeout, `4400`
-  protocol violation (undecodable envelope); binary frames close with
-  `1003` (the binary codec is a later, negotiated addition).
+- Close codes beyond RFC 6455's set: `4000` heartbeat timeout, `4408` write
+  timeout (the peer stopped reading — still talking, no longer listening),
+  `4400` protocol violation (undecodable envelope); binary frames close with
+  `1003` (the binary codec is a later, negotiated addition). Every
+  server-initiated close sends its code: the frame is written by the socket
+  handler after its tasks are joined, because a close issued from inside one
+  of them raced that task's own cancellation and reached the peer as `1006`.
 - Server-produced error reasons: `unauthenticated`, `forbidden`,
   `unmatched_topic`, `already_joined`, `not_joined`, `reserved_topic`,
   `handler_error`, `invalid_event`.
+
+Channel traffic travels on the bus under `flight:channels:<topic>`, not on
+the topic string a client joined — `ChannelProtocol.busTopic(_:)` is the
+mapping, and Presence's own gossip has always been namespaced the same way
+(`flight:presence`). It used to share the application's namespace, and both
+directions of that collision were real: an application subscribing to
+`shipment:42` received Channels' internal frames as opaque JSON, and one
+*publishing* to `shipment:42` had its message dropped by every connected
+socket's pump, with a warning each. Code that deliberately watches channel
+traffic from outside subscribes through `ChannelProtocol.busTopic("room:42")`.
 
 Semantics inherited from PubSub: at-most-once, no durability, no
 replay. Per-socket inbound processing is serial (one envelope fully handled
@@ -175,6 +189,11 @@ queue — a slow client never blocks a handler, and frames never interleave.
 | `flight.channels.heartbeat-check-interval-seconds` | timeout ÷ 4 | Watchdog cadence |
 | `flight.channels.outbound-buffer-size` | `256` | Queued frames per socket before the oldest are dropped |
 | `flight.channels.write-timeout-seconds` | `30` | One outbound frame taking longer than this closes the socket (`0` disables) |
+
+A socket closed this way is told so with `4408` — as far as it can be. A peer
+that has stopped reading entirely cannot receive a close frame either, so the
+code is what a *slow* client sees and a wedged one never does; for that one the
+timeout is about reclaiming the server's task and connection.
 
 The write timeout is the bound the watchdog cannot supply. The watchdog counts
 *inbound* frames as liveness, so a client that keeps heartbeating while never
