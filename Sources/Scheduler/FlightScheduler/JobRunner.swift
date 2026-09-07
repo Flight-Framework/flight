@@ -22,7 +22,22 @@ public struct JobStatus: Sendable, Equatable {
     public var lastOutcome: JobOutcome?
     public var lastDuration: Duration?
     public var nextFire: Date?
+
+    /// How many firings actually ran the job's body — successes *and*
+    /// failures. It counted successes only, so a job that failed every time
+    /// reported `runCount: 0, failureCount: 4`, which reads as "it has never
+    /// run" about something that had run four times. Successes are
+    /// `runCount - failureCount`.
+    ///
+    /// A firing that never reached the body is not a run: one skipped for
+    /// overlapping a previous run, or lost to another node's claim, counts
+    /// in neither.
     public var runCount: Int
+
+    /// How many firings ended in an error — the job's own throw, or a
+    /// coordinator that could not be reached to claim the firing. The second
+    /// is not a run (the body never executed) and so appears here without a
+    /// matching `runCount`.
     public var failureCount: Int
 }
 
@@ -220,6 +235,7 @@ actor JobRunner {
             // Propagating would take down the scheduler, and one broken job
             // must not stop the others.
             status.lastOutcome = .failed("\(error)")
+            status.runCount += 1
             status.failureCount += 1
             logger.error(
                 "scheduled job failed",
