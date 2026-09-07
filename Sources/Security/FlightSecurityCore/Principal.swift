@@ -57,10 +57,14 @@ extension Principal {
     /// detached background job should not silently inherit the requester's
     /// identity.
     ///
-    /// Note: because Flight Web middleware runs as a flat chain (each
-    /// middleware returns before the next runs), the authentication
-    /// middleware cannot bind this task-local around the handler for you.
-    /// Inside handlers and middleware, read `context.principal`; use this
-    /// task-local for services called under `withPrincipal`.
+    /// Note: the authentication middleware does not bind this task-local
+    /// around the handler. It once could not — the chain was a flat sequence
+    /// of returns — but `compose(_:around:)` folds it into layers now, so
+    /// each middleware's `next(context)` runs inside its own extent and a
+    /// binding there would reach the handler. It stays unbound because the
+    /// principal travels on the context instead, which is readable without
+    /// an ambient lookup. Inside handlers and middleware read
+    /// `context.principal`; use this task-local for services called under
+    /// `withPrincipal`.
     @TaskLocal public static var current: Principal?
 }

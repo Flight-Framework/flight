@@ -88,14 +88,29 @@ struct AppModule: FlightModule {
         container.registerChannel("room:*") { c in
             RoomChannel(broadcaster: try c.resolve(ChannelBroadcaster.self))
         }
-        container.registerChannelSocket("/socket") { context in
-            // Runs during the upgrade request. Return a principal,
-            // nil for anonymous, or throw HTTPError(.unauthorized).
-            try await verify(context.request.queryParam("token"))
-        }
+    }
+}
+
+@Controller
+struct SocketController {
+    @Inject var validator: any TokenValidator
+
+    // Runs during the upgrade request. Return a principal, nil for
+    // anonymous, or throw HTTPError(.unauthorized).
+    @WebSocketRoute("/socket")
+    func socket(_ context: RequestContext) async throws -> ChannelSocketHandler {
+        let principal = try await verify(context.request.queryParam("token"))
+        return try ChannelSocketHandler(context: context, principal: principal)
     }
 }
 ```
+
+`container.registerChannelSocket("/socket") { ... }` wires the same thing in
+one line — it is a wrapper over `registerRoute(.get, path, kind:
+.upgrade(.webSocket))` — and suits a test harness or a spike. An application
+is better served by the declared form: a route registered from a module body
+is arbitrary Swift, so no build-time scan can enumerate it, and it takes its
+dependencies through `context.resolve` rather than through the type.
 
 Topic patterns are exact (`"lobby"`), prefix-wildcard (`"room:*"`), or
 catch-all (`"*"`); the most specific match wins, and duplicate or malformed
@@ -234,7 +249,7 @@ wire-level assertions. Multi-node behavior is testable with
    ```
 
    The conformance is empty because `Principal` already has both members.
-   Its validator then feeds `registerChannelSocket`'s `authenticate`
+   Its validator then feeds the upgrade route's authentication
    closure, with no Channels change — which is what the seam was for. Same
    "seam, not engine" posture the package takes with transports and PubSub
    adapters.
