@@ -176,18 +176,38 @@ struct ScannedPipelineLane {
     let line: Int
 }
 
-/// Finds `container.pipeline { }` calls.
+/// One `FlightModule` conformer and the modules it pulls in.
+///
+/// The edges `_flightResolveModuleOrder` walks. It topologically sorts the
+/// DAG and `Bootstrap` runs `configure` in that order, which is what makes
+/// registration sequence — and therefore lane order — a property of the
+/// module graph rather than of file order.
+struct ScannedModule {
+    let typeName: String
+    /// Dependency type names as written, `.self` and any generic argument
+    /// stripped: `PostgresDataModule<PrimaryDataSource>.self` is
+    /// `PostgresDataModule`.
+    let dependencies: [String]
+    let module: String
+}
+
+/// Finds `container.pipeline { }` calls and `FlightModule` declarations.
 ///
 /// A second pass rather than work folded into `ComponentVisitor`: that one
 /// returns `.skipChildren` at every type declaration, deliberately — nested
 /// registrable types are a non-goal — so it never descends into the method
 /// bodies where these calls live. Walking twice costs one more traversal of
 /// an already-parsed tree and leaves component collection untouched.
-final class PipelineVisitor: SyntaxVisitor {
+///
+/// Lanes and module edges are collected together because neither is useful
+/// without the other: a lane declaration says what a stack contains, and the
+/// module graph says when it runs.
+final class ModuleVisitor: SyntaxVisitor {
     let module: String
     let file: String
     let converter: SourceLocationConverter
     var lanes: [ScannedPipelineLane] = []
+    var modules: [ScannedModule] = []
     private var typeStack: [String] = []
 
     init(module: String, file: String, tree: SourceFileSyntax) {
@@ -199,18 +219,24 @@ final class PipelineVisitor: SyntaxVisitor {
 
     override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
         typeStack.append(node.name.text)
+        collectModule(
+            named: node.name.text, inheritance: node.inheritanceClause, members: node.memberBlock)
         return .visitChildren
     }
     override func visitPost(_ node: ClassDeclSyntax) { typeStack.removeLast() }
 
     override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
         typeStack.append(node.name.text)
+        collectModule(
+            named: node.name.text, inheritance: node.inheritanceClause, members: node.memberBlock)
         return .visitChildren
     }
     override func visitPost(_ node: StructDeclSyntax) { typeStack.removeLast() }
 
     override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind {
         typeStack.append(node.name.text)
+        collectModule(
+            named: node.name.text, inheritance: node.inheritanceClause, members: node.memberBlock)
         return .visitChildren
     }
     override func visitPost(_ node: EnumDeclSyntax) { typeStack.removeLast() }
@@ -220,6 +246,78 @@ final class PipelineVisitor: SyntaxVisitor {
         return .visitChildren
     }
     override func visitPost(_ node: ExtensionDeclSyntax) { typeStack.removeLast() }
+
+
+    /// Records a `FlightModule` conformer and the `dependencies` it declares.
+    ///
+    /// Conformance is matched by name, like everything else in this scanner —
+    /// a build tool has source text and no symbol graph. A type that conforms
+    /// only through an extension is missed, which is the same blind spot the
+    /// component scan has and the same reason `extension T: P` clauses are
+    /// merged in separately there.
+    private func collectModule(
+        named name: String, inheritance: InheritanceClauseSyntax?, members: MemberBlockSyntax
+    ) {
+        guard let inheritance,
+              inheritance.inheritedTypes.contains(where: {
+                  baseName($0.type.trimmedDescription) == "FlightModule"
+              })
+        else { return }
+
+        var dependencies: [String] = []
+        for member in members.members {
+            guard let variable = member.decl.as(VariableDeclSyntax.self),
+                  variable.modifiers.contains(where: { $0.name.tokenKind == .keyword(.static) }),
+                  variable.bindings.first?.pattern.as(IdentifierPatternSyntax.self)?
+                      .identifier.text == "dependencies"
+            else { continue }
+            for element in arrayElements(of: variable) {
+                // `Foo<Bar>.self` -> `Foo`. The runtime treats each
+                // specialization as its own type; for ordering, the edge is
+                // what matters and the base name carries it.
+                guard let member = element.as(MemberAccessExprSyntax.self),
+                      member.declName.baseName.tokenKind == .keyword(.self),
+                      let base = member.base
+                else { continue }
+                var text = base.trimmedDescription
+                if let angle = text.firstIndex(of: "<") { text = String(text[..<angle]) }
+                dependencies.append(baseName(text))
+            }
+        }
+        modules.append(
+            ScannedModule(typeName: name, dependencies: dependencies, module: module))
+    }
+
+    /// The elements of the array literal a `dependencies` property returns,
+    /// whether it is written as an implicit-return getter or with `return`.
+    private func arrayElements(of variable: VariableDeclSyntax) -> [ExprSyntax] {
+        guard let accessors = variable.bindings.first?.accessorBlock else {
+            // `static let dependencies: [...] = [ ... ]`
+            if let value = variable.bindings.first?.initializer?.value.as(ArrayExprSyntax.self) {
+                return value.elements.map(\.expression)
+            }
+            return []
+        }
+        let statements: CodeBlockItemListSyntax
+        switch accessors.accessors {
+        case .getter(let items): statements = items
+        case .accessors(let list):
+            guard let getter = list.first(where: { $0.accessorSpecifier.tokenKind == .keyword(.get) }),
+                  let body = getter.body
+            else { return [] }
+            statements = body.statements
+        }
+        for statement in statements {
+            if let array = statement.item.as(ExprSyntax.self)?.as(ArrayExprSyntax.self) {
+                return array.elements.map(\.expression)
+            }
+            if let returned = statement.item.as(ReturnStmtSyntax.self)?.expression?
+                .as(ArrayExprSyntax.self) {
+                return returned.elements.map(\.expression)
+            }
+        }
+        return []
+    }
 
     override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
         guard let callee = node.calledExpression.as(MemberAccessExprSyntax.self),
@@ -588,6 +686,7 @@ do {
 var components: [ScannedComponent] = []
 var routes: [ScannedControllerRoute] = []
 var lanes: [ScannedPipelineLane] = []
+var moduleGraph: [ScannedModule] = []
 var extensionConformances: [(typeName: String, protocols: [String])] = []
 for module in manifest.modules {
     for file in module.files {
@@ -607,9 +706,11 @@ for module in manifest.modules {
         guard
             ComponentVisitor.registrableAttributes.contains(where: { source.contains("@\($0)") })
                 || source.contains("extension")
-                // A module body declaring lanes and nothing else has no
+                // A module body declaring lanes, or carrying the
+                // dependency edges lane order is derived from, has no
                 // registrable attribute to match on.
                 || source.contains(".pipeline")
+                || source.contains("FlightModule")
         else { continue }
         let tree = Parser.parse(source: source)
         let visitor = ComponentVisitor(module: module.name, file: file, tree: tree)
@@ -618,10 +719,11 @@ for module in manifest.modules {
         routes.append(contentsOf: visitor.routes)
         extensionConformances.append(contentsOf: visitor.extensionConformances)
 
-        if source.contains(".pipeline") {
-            let pipelines = PipelineVisitor(module: module.name, file: file, tree: tree)
-            pipelines.walk(tree)
-            lanes.append(contentsOf: pipelines.lanes)
+        if source.contains(".pipeline") || source.contains("FlightModule") {
+            let moduleScan = ModuleVisitor(module: module.name, file: file, tree: tree)
+            moduleScan.walk(tree)
+            lanes.append(contentsOf: moduleScan.lanes)
+            moduleGraph.append(contentsOf: moduleScan.modules)
         }
     }
 }
@@ -973,6 +1075,56 @@ checkConfigKeys()
 
 if errorCount > 0 { exit(1) }
 
+/// Lane declarations in the order their modules configure.
+///
+/// `collectMiddleware(lane:)` sorts by registration sequence, and
+/// registration sequence is module sequence: `_flightResolveModuleOrder`
+/// walks the DAG depth-first and appends each module *after* its
+/// dependencies, then `Bootstrap` runs `configure` in that order. Scan order
+/// has no such notion — it follows the file list, which puts the target's
+/// own module first, so a framework module's middleware landed after the
+/// application's when the runtime puts it before.
+///
+/// The same walk, over the edges scanned from `static var dependencies`.
+/// Where two modules have no path between them the runtime order comes from
+/// the bootstrap list, which is not in scope here; those keep scan order
+/// relative to each other, which is the honest answer rather than a guess.
+@MainActor
+func lanesInModuleOrder() -> [ScannedPipelineLane] {
+    let byName = Dictionary(
+        moduleGraph.map { ($0.typeName, $0) }, uniquingKeysWith: { a, _ in a })
+    var position: [String: Int] = [:]
+    var finished: Set<String> = []
+    var inProgress: Set<String> = []
+
+    func visit(_ name: String) {
+        guard let module = byName[name], !finished.contains(name) else { return }
+        // A cycle is ModuleGraphError.cycle at startup; nothing to add here
+        // beyond not looping.
+        guard !inProgress.contains(name) else { return }
+        inProgress.insert(name)
+        for dependency in module.dependencies {
+            visit(dependency)
+        }
+        inProgress.remove(name)
+        finished.insert(name)
+        position[name] = position.count
+    }
+
+    for module in moduleGraph {
+        visit(module.typeName)
+    }
+
+    // Stable: declarations from one module keep the order they were written
+    // in, which is the order `configure` makes the calls.
+    return lanes.enumerated().sorted { left, right in
+        let leftModule = left.element.declaredIn.flatMap { position[$0] } ?? Int.max
+        let rightModule = right.element.declaredIn.flatMap { position[$0] } ?? Int.max
+        if leftModule != rightModule { return leftModule < rightModule }
+        return left.offset < right.offset
+    }.map(\.element)
+}
+
 /// Escapes text being re-embedded in a generated Swift string literal. Route
 /// paths are already refused a quote or a backslash by the scanner, but the
 /// lane text is an arbitrary expression, so this is not decorative.
@@ -1082,7 +1234,7 @@ out += "}\n"
 //
 // Emitted only when the target actually declares routes, so a target with no
 // controllers gets a generated file of exactly the shape it had before.
-if !routes.isEmpty || !lanes.isEmpty {
+if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty {
     let sorted = routes.sorted {
         ($0.path, $0.httpMethod, $0.source) < ($1.path, $1.httpMethod, $1.source)
     }
@@ -1137,7 +1289,7 @@ if !routes.isEmpty || !lanes.isEmpty {
     out += "    }\n"
     out += "\n"
     out += "    public static let lanes: [Lane] = [\n"
-    for lane in lanes {
+    for lane in lanesInModuleOrder() {
         let name = lane.lane.map { "\"\(escaped($0))\"" } ?? "nil"
         let declaredIn = lane.declaredIn.map { "\"\(escaped($0))\"" } ?? "nil"
         let middleware = lane.middleware.map { "\"\(escaped($0))\"" }.joined(separator: ", ")
@@ -1146,6 +1298,30 @@ if !routes.isEmpty || !lanes.isEmpty {
         out += "middleware: [\(middleware)], "
         out += "declaredIn: \(declaredIn), "
         out += "module: \"\(escaped(lane.module))\"),\n"
+    }
+    out += "    ]\n"
+
+    // The edges the lane order above was derived from, so a consumer holding
+    // the real bootstrap list can redo the sort with the right roots. This
+    // scan uses every scanned module as a root, in scan order, which
+    // reproduces the runtime wherever a dependency path exists between two
+    // modules and cannot where none does.
+    out += "\n"
+    out += "    /// A `FlightModule` conformer and the modules it pulls in.\n"
+    out += "    public struct ModuleEdge: Sendable {\n"
+    out += "        public let name: String\n"
+    out += "        /// Dependency type names, generic arguments stripped.\n"
+    out += "        public let dependencies: [String]\n"
+    out += "        public let module: String\n"
+    out += "    }\n"
+    out += "\n"
+    out += "    public static let moduleGraph: [ModuleEdge] = [\n"
+    for edge in moduleGraph.sorted(by: { $0.typeName < $1.typeName }) {
+        let dependencies = edge.dependencies.map { "\"\(escaped($0))\"" }.joined(separator: ", ")
+        out += "        ModuleEdge("
+        out += "name: \"\(escaped(edge.typeName))\", "
+        out += "dependencies: [\(dependencies)], "
+        out += "module: \"\(escaped(edge.module))\"),\n"
     }
     out += "    ]\n"
     out += "}\n"

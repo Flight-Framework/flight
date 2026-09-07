@@ -775,6 +775,98 @@ struct GeneratorTests {
         #expect(!result.generated.contains("FlightRouteManifest"))
     }
 
+    // MARK: - Module order
+
+    @Test("a dependency's lanes come before its dependent's, not in file order")
+    func lanesFollowModuleOrder() throws {
+        // The defect this exists to catch: collectMiddleware sorts by
+        // registration sequence, which is module sequence — dependencies
+        // configure first. Scan order follows the file list, which put the
+        // app's own module first and reversed the real chain.
+        let result = try generate([
+            "A_AppModule.swift": """
+            import FlightWeb
+            final class AppModule: FlightModule {
+            static var dependencies: [any FlightModule.Type] { [SecurityModule.self] }
+            func configure(_ container: Container) throws {
+            container.pipeline { RequestLogging.self }
+            }
+            }
+            """,
+            "B_SecurityModule.swift": """
+            import FlightWeb
+            final class SecurityModule: FlightModule {
+            func configure(_ container: Container) throws {
+            container.pipeline { Authentication.self }
+            }
+            }
+            """,
+        ])
+        #expect(result.exitCode == 0)
+        let authentication = try #require(result.generated.range(of: #""Authentication""#))
+        let logging = try #require(result.generated.range(of: #""RequestLogging""#))
+        #expect(
+            authentication.lowerBound < logging.lowerBound,
+            "AppModule depends on SecurityModule, so SecurityModule configures first")
+    }
+
+    @Test("the module graph is emitted, generic arguments stripped")
+    func emitsModuleGraph() throws {
+        let result = try generate([
+            "AppModule.swift": """
+            import FlightWeb
+            final class AppModule: FlightModule {
+            static var dependencies: [any FlightModule.Type] {
+            [
+            PostgresDataModule<PrimaryDataSource>.self,
+            FlightPubSubModule.self,
+            ]
+            }
+            func configure(_ container: Container) throws {}
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains(
+                #"name: "AppModule", dependencies: ["PostgresDataModule", "FlightPubSubModule"]"#))
+    }
+
+    @Test("a module with no dependencies is still an edge in the graph")
+    func moduleWithoutDependencies() throws {
+        let result = try generate([
+            "Bare.swift": """
+            import FlightWeb
+            final class BareModule: FlightModule {
+            func configure(_ container: Container) throws {}
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains(#"name: "BareModule", dependencies: []"#))
+    }
+
+    @Test("a dependency cycle between modules does not hang the sort")
+    func cyclicModulesTerminate() throws {
+        // ModuleGraphError.cycle is the runtime's job; this only has to not
+        // loop forever while producing something.
+        let result = try generate([
+            "Cycle.swift": """
+            import FlightWeb
+            final class A: FlightModule {
+            static var dependencies: [any FlightModule.Type] { [B.self] }
+            func configure(_ container: Container) throws {}
+            }
+            final class B: FlightModule {
+            static var dependencies: [any FlightModule.Type] { [A.self] }
+            func configure(_ container: Container) throws {}
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("moduleGraph"))
+    }
+
     // MARK: - Failure modes
 
     @Test("an unreadable source file is skipped with a warning, not a crash")
