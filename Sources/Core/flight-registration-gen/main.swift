@@ -191,6 +191,58 @@ struct ScannedModule {
     let module: String
 }
 
+/// A route family mounted by a framework convenience, or a route registered
+/// by hand.
+///
+/// The three imperative doors are not one problem. `assets(at:root:)` and
+/// `uploads(at:store:)` expand one call into several routes whose paths the
+/// framework derives from a prefix the application supplies — so the *mount*
+/// is the declaration, and it is scannable at the call site even though the
+/// `registerRoute` calls inside the convenience are not.
+/// `registerChannelSocket` is the same shape with one route.
+/// `registerRoute` itself is the raw escape hatch, and the only one where a
+/// path can be genuinely uncomputable.
+struct ScannedMount {
+    enum Kind: String {
+        case assets
+        case uploads
+        case socket
+        /// A direct `registerRoute` — no prefix to derive routes from.
+        case route
+    }
+    let kind: Kind
+    /// The literal prefix or path, when the argument is a plain string
+    /// literal. nil for an interpolated or computed one, which is the case
+    /// the manifest cannot carry and the acknowledgment exists for.
+    let path: String?
+    /// The `pipelines:` argument's source text, verbatim.
+    let pipelinesText: String?
+    /// Carries a `flight:hand-registered` marker — the author's
+    /// acknowledgment that this route is invisible to the scan, the same
+    /// convention `@Inject` uses for a type registered by hand.
+    let isAcknowledged: Bool
+    let declaredIn: String?
+    let module: String
+    let file: String
+    let line: Int
+}
+
+extension ScannedMount.Kind {
+    /// The framework spellings that put a route in the table without an
+    /// attribute. `registerChannelSocket` is a wrapper over `registerRoute`,
+    /// but it is recognized separately because its call site carries a
+    /// literal path where the wrapper's does not.
+    init?(callee name: String) {
+        switch name {
+        case "assets": self = .assets
+        case "uploads": self = .uploads
+        case "registerChannelSocket": self = .socket
+        case "registerRoute": self = .route
+        default: return nil
+        }
+    }
+}
+
 /// Finds `container.pipeline { }` calls and `FlightModule` declarations.
 ///
 /// A second pass rather than work folded into `ComponentVisitor`: that one
@@ -208,6 +260,7 @@ final class ModuleVisitor: SyntaxVisitor {
     let converter: SourceLocationConverter
     var lanes: [ScannedPipelineLane] = []
     var modules: [ScannedModule] = []
+    var mounts: [ScannedMount] = []
     private var typeStack: [String] = []
 
     init(module: String, file: String, tree: SourceFileSyntax) {
@@ -319,9 +372,64 @@ final class ModuleVisitor: SyntaxVisitor {
         return []
     }
 
+
+    /// Records one mount or hand-registered route.
+    private func collectMount(_ kind: ScannedMount.Kind, _ node: FunctionCallExprSyntax) {
+        // `assets(at:)` and `uploads(at:)` label the prefix; the socket and
+        // raw-route forms pass it positionally — second for `registerRoute`,
+        // which leads with the HTTP method.
+        var pathExpression: ExprSyntax?
+        switch kind {
+        case .assets, .uploads:
+            pathExpression = node.arguments.first { $0.label?.text == "at" }?.expression
+        case .socket:
+            pathExpression = node.arguments.first { $0.label == nil }?.expression
+        case .route:
+            let unlabeled = Array(node.arguments.filter { $0.label == nil })
+            pathExpression = unlabeled.count >= 2 ? unlabeled[1].expression : nil
+        }
+
+        var path: String?
+        if let literal = pathExpression?.as(StringLiteralExprSyntax.self) {
+            let segments = literal.segments.compactMap { $0.as(StringSegmentSyntax.self) }
+            // An interpolated path is the uncomputable case, not a path.
+            if segments.count == literal.segments.count {
+                path = segments.map(\.content.text).joined()
+            }
+        } else if pathExpression == nil, kind == .socket {
+            // `registerChannelSocket()` defaults to "/socket".
+            path = "/socket"
+        }
+
+        mounts.append(
+            ScannedMount(
+                kind: kind,
+                path: path,
+                pipelinesText: node.arguments.first { $0.label?.text == "pipelines" }?
+                    .expression.trimmedDescription,
+                isAcknowledged: node.leadingTrivia.description.contains(
+                    "flight:hand-registered"),
+                declaredIn: typeStack.last,
+                module: module,
+                file: file,
+                line: converter.location(for: node.position).line
+            ))
+    }
+
     override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
-        guard let callee = node.calledExpression.as(MemberAccessExprSyntax.self),
-              callee.declName.baseName.text == "pipeline",
+        guard let callee = node.calledExpression.as(MemberAccessExprSyntax.self) else {
+            return .visitChildren
+        }
+        // Mounts and hand-registered routes: the three imperative doors, plus
+        // the raw one. Recognized by method name, like `pipeline` above — a
+        // build tool matches source text, and these are the framework's own
+        // spellings.
+        if let kind = ScannedMount.Kind(callee: callee.declName.baseName.text) {
+            collectMount(kind, node)
+            return .visitChildren
+        }
+
+        guard callee.declName.baseName.text == "pipeline",
               // The lane block is a trailing closure in every form; a
               // `pipeline` call without one is somebody else's method.
               let block = node.trailingClosure
@@ -687,6 +795,7 @@ var components: [ScannedComponent] = []
 var routes: [ScannedControllerRoute] = []
 var lanes: [ScannedPipelineLane] = []
 var moduleGraph: [ScannedModule] = []
+var mounts: [ScannedMount] = []
 var extensionConformances: [(typeName: String, protocols: [String])] = []
 for module in manifest.modules {
     for file in module.files {
@@ -711,6 +820,8 @@ for module in manifest.modules {
                 // registrable attribute to match on.
                 || source.contains(".pipeline")
                 || source.contains("FlightModule")
+                || source.contains("registerRoute")
+                || source.contains("registerChannelSocket")
         else { continue }
         let tree = Parser.parse(source: source)
         let visitor = ComponentVisitor(module: module.name, file: file, tree: tree)
@@ -724,6 +835,7 @@ for module in manifest.modules {
             moduleScan.walk(tree)
             lanes.append(contentsOf: moduleScan.lanes)
             moduleGraph.append(contentsOf: moduleScan.modules)
+            mounts.append(contentsOf: moduleScan.mounts)
         }
     }
 }
@@ -1007,6 +1119,38 @@ where component.module != manifest.targetModuleName && !component.isPublic {
     )
 }
 
+// MARK: - Routes the manifest cannot see
+//
+// `registerRoute` is the escape hatch beside the macro path, the way Core's
+// `register` is beside `@Component`, and it is deliberately arbitrary Swift:
+// a path can come from configuration or a loop. So the scan cannot enumerate
+// what it registers, and a static route table that silently omitted it would
+// turn a working route into a 404 with nothing to grep for.
+//
+// The same answer the component scan already uses: acknowledge it at the call
+// site with `// flight:hand-registered`, and name every skipped route in the
+// generated file so nothing disappears quietly.
+//
+// Mounts (`assets`, `uploads`, `registerChannelSocket`) are exempt: their
+// call site carries the prefix the framework derives routes from, so they are
+// recorded rather than skipped.
+@MainActor
+func reportHandRegisteredRoutes() {
+    for mount in mounts where mount.kind == .route && !mount.isAcknowledged {
+        emit(
+            "warning",
+            """
+            This route is registered by hand, so the static route manifest \
+            cannot see it. Declare it with @GetRoute/@PostRoute on a \
+            @Controller, or acknowledge it with a `// flight:hand-registered` \
+            comment above the call.
+            """,
+            file: mount.file, line: mount.line
+        )
+    }
+}
+reportHandRegisteredRoutes()
+
 // MARK: - @ConfigValue key check (compile-time case)
 //
 // A @ConfigValue key with no `default:` must exist in flight.yaml — the base
@@ -1234,7 +1378,7 @@ out += "}\n"
 //
 // Emitted only when the target actually declares routes, so a target with no
 // controllers gets a generated file of exactly the shape it had before.
-if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty {
+if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty {
     let sorted = routes.sorted {
         ($0.path, $0.httpMethod, $0.source) < ($1.path, $1.httpMethod, $1.source)
     }
@@ -1322,6 +1466,72 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty {
         out += "name: \"\(escaped(edge.typeName))\", "
         out += "dependencies: [\(dependencies)], "
         out += "module: \"\(escaped(edge.module))\"),\n"
+    }
+    out += "    ]\n"
+
+    // Mounts, and the routes the scan could not see. Both are emitted even
+    // when empty: "this application hand-registers nothing" is a fact worth
+    // being able to read, and the whole point of the acknowledgment is that
+    // a skipped route leaves a trace.
+    out += "\n"
+    out += "    /// A route family mounted by a framework convenience.\n"
+    out += "    ///\n"
+    out += "    /// The call site carries the prefix the framework derives its\n"
+    out += "    /// routes from, so the mount is scannable even though the\n"
+    out += "    /// `registerRoute` calls inside the convenience are not.\n"
+    out += "    public struct Mount: Sendable {\n"
+    out += "        /// \"assets\", \"uploads\", or \"socket\".\n"
+    out += "        public let kind: String\n"
+    out += "        /// nil when the prefix is interpolated or computed.\n"
+    out += "        public let path: String?\n"
+    out += "        public let pipelines: String?\n"
+    out += "        public let declaredIn: String?\n"
+    out += "        public let module: String\n"
+    out += "    }\n"
+    out += "\n"
+    out += "    public static let mounts: [Mount] = [\n"
+    for mount in mounts.filter({ $0.kind != .route }) {
+        let path = mount.path.map { "\"\(escaped($0))\"" } ?? "nil"
+        let pipelines = mount.pipelinesText.map { "\"\(escaped($0))\"" } ?? "nil"
+        let declaredIn = mount.declaredIn.map { "\"\(escaped($0))\"" } ?? "nil"
+        out += "        Mount("
+        out += "kind: \"\(mount.kind.rawValue)\", "
+        out += "path: \(path), "
+        out += "pipelines: \(pipelines), "
+        out += "declaredIn: \(declaredIn), "
+        out += "module: \"\(escaped(mount.module))\"),\n"
+    }
+    out += "    ]\n"
+
+    out += "\n"
+    out += "    /// Routes registered by hand, which this manifest does not\n"
+    out += "    /// carry. Named so a route the scan cannot see still leaves a\n"
+    out += "    /// trace — the reason `registerRoute` asks for a\n"
+    out += "    /// `flight:hand-registered` acknowledgment.\n"
+    out += "    public struct HandRegistered: Sendable {\n"
+    out += "        /// nil when the path is interpolated or computed.\n"
+    out += "        public let path: String?\n"
+    out += "        public let declaredIn: String?\n"
+    out += "        public let module: String\n"
+    out += "        public let file: String\n"
+    out += "        public let line: Int\n"
+    out += "    }\n"
+    out += "\n"
+    out += "    public static let handRegisteredRoutes: [HandRegistered] = [\n"
+    for mount in mounts.filter({ $0.kind == .route }) {
+        let path = mount.path.map { "\"\(escaped($0))\"" } ?? "nil"
+        let declaredIn = mount.declaredIn.map { "\"\(escaped($0))\"" } ?? "nil"
+        out += "        HandRegistered("
+        out += "path: \(path), "
+        out += "declaredIn: \(declaredIn), "
+        out += "module: \"\(escaped(mount.module))\", "
+        // Basename, not the absolute path the scan carries: this string is
+        // baked into generated source, and an absolute path would make the
+        // output differ between machines for no gain — the module name plus
+        // the file name already locates it.
+        let fileName = mount.file.split(separator: "/").last.map(String.init) ?? mount.file
+        out += "file: \"\(escaped(fileName))\", "
+        out += "line: \(mount.line)),\n"
     }
     out += "    ]\n"
     out += "}\n"
