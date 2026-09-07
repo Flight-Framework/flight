@@ -38,11 +38,6 @@ struct SnapshotTests {
         })
         #expect(controller.stereotype == .controller)
 
-        let transient = try #require(snapshot.components.first {
-            $0.typeName == "FlightActuatorTests.SampleTransient"
-        })
-        #expect(transient.scope == .transient)
-
         // Qualified duplicate-type registrations stay distinguishable —
         // the reason ComponentDescriptor carries the qualifier at all.
         let qualified = snapshot.components.filter {
@@ -117,8 +112,6 @@ struct ModuleHealthHelperTests {
         #expect(ModuleHealth.failed(SomeError()).actuatorLabel == "failed")
 
         #expect(Lifetime.singleton.actuatorLabel == "singleton")
-        #expect(Lifetime.transient.actuatorLabel == "transient")
-        #expect(Lifetime.scoped.actuatorLabel == "scoped")
 
         #expect(Stereotype.component.actuatorLabel == "component")
         #expect(Stereotype.service.actuatorLabel == "service")

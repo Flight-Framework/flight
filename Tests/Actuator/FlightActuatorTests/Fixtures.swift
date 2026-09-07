@@ -6,8 +6,8 @@ import ServiceLifecycle
 // Shared test fixtures. All go through public Flight contracts only —
 // Actuator is a consumer of the stack, and so are its tests.
 
-/// A module registering one component of each stereotype/scope combination the
-/// dashboard needs to distinguish, plus a qualified duplicate-type pair.
+/// A module registering one component of each stereotype the dashboard needs
+/// to distinguish, plus a qualified duplicate-type pair.
 struct SampleAppModule: FlightModule {
     func configure(_ container: Container) throws {
         container.register(SampleService.self, scope: .singleton, stereotype: .service) { _ in
@@ -15,9 +15,6 @@ struct SampleAppModule: FlightModule {
         }
         container.register(SampleRepository.self, scope: .singleton, stereotype: .repository) { _ in
             SampleRepository()
-        }
-        container.register(SampleTransient.self, scope: .transient) { _ in
-            SampleTransient()
         }
         container.register(SampleQualified.self, qualifier: "primary", scope: .singleton) { _ in
             SampleQualified()
@@ -42,7 +39,6 @@ struct SampleAppModule: FlightModule {
 
 struct SampleService: Sendable {}
 struct SampleRepository: Sendable {}
-struct SampleTransient: Sendable {}
 struct SampleQualified: Sendable {}
 struct SampleMiddleware: Sendable {}
 struct SampleSettings: Sendable {}

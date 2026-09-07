@@ -299,12 +299,8 @@ public enum DispatchBuilder {
                 span.attributes["http.request.method"] = request.method.rawValue
                 span.attributes["url.path"] = request.path
 
-                // One Scope per request (§2): created directly, ends when the
-                // request's last reference drops — streaming bodies and
-                // upgraded connections legitimately outlive this closure.
                 let context = RequestContext(
                     request: request,
-                    scope: Scope(),
                     logger: requestLogger,
                     tracingContext: span.context,
                     container: container

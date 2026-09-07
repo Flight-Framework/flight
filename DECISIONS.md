@@ -7,6 +7,67 @@ wrong, say so and it changes.
 
 ---
 
+## D9 — `Lifetime` kept as a single-case enum, parameter defaulted
+
+**Context.** §2.2 removed `.scoped` and `.transient`. `Lifetime` is now one
+case, and `Container.register(_:qualifier:scope:stereotype:factory:)` still
+takes it.
+
+**Chosen.** Default the argument (`scope: Lifetime = .singleton`) rather than
+remove the parameter.
+
+**Why.** A single-case enum is zero-sized in Swift, so the parameter costs
+nothing at runtime — removing it is API tidiness, not performance. Doing it
+now would touch five macro implementations, the generator's bridge emission,
+every module registration, 18 controller golden fixtures and the core macro
+fixtures, in a change that buys no behaviour. Defaulting unblocks every call
+site immediately and leaves the deletion as a clean, separable pass.
+
+**Alternative.** Remove it now and absorb the churn while the surrounding
+code is already moving. Defensible; I judged the review cost higher than the
+benefit, and it can be done any time.
+
+**Watch.** A one-case enum is an attractive nuisance — it reads as though
+lifetimes are still a concept. If it survives to step 9 it should go.
+
+---
+
+## D8 — Long-lived responses are in scope, and what that requires is verified
+
+**Context.** Step 6 constructs the request's object graph in the generated
+route terminal. A streaming or upgraded response outlives the dispatch call
+that produced it, so whatever the terminal built is still referenced after
+dispatch returns. Confirmed as acceptable, provided those responses maintain
+their own state and shut down gracefully while telling the client.
+
+**Verified, not assumed.**
+
+- **WebSockets.** `ChannelSocketHandler` routes a close *intent* from
+  whichever task decided to end the session to the one place that writes the
+  close frame, after every task has joined — the writer first, so queued
+  frames reach the wire ahead of the close. Teardown is idempotent and runs
+  `leave` per joined channel exactly once. Server-shutdown cancellation is an
+  explicit path through it, and the documented close codes reach the client
+  (they used to arrive as an abnormal 1006).
+- **Streaming.** `Response.streaming` wires `onCancel: { producer.stop() }`,
+  so a consumer going away — client disconnected, request task cancelled at
+  shutdown — stops the producer rather than leaving it running against a
+  stream nobody reads. Now pinned by a test; it was the one load-bearing
+  property here with no coverage.
+
+**The honest boundary.** Flight has no generic "server going away" *message*
+for a byte stream. WebSocket has close codes; `.streaming` is opaque bytes
+and SSE has no standard goodbye, so an application that wants to say
+something on the way out sends it itself — it owns the writer. Flight's
+guarantee is that the producer is stopped and nothing leaks, not that the
+client is told why.
+
+**Consequence for step 6.** Nothing the terminal constructs may own a
+pooled resource (§2.12 already says this). With that held, a response
+outliving dispatch is ordinary Swift lifetime and needs no scope.
+
+---
+
 ## D7 — The request's identity is a seam protocol in Flight Web
 
 **Context.** Step 3 moves the principal onto `RequestContext` as a typed

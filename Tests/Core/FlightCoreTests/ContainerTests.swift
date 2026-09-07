@@ -16,17 +16,6 @@ struct ContainerTests {
         #expect(first === second)
     }
 
-    @Test("transient resolves to a fresh instance every time")
-    func transientDistinct() throws {
-        let container = Container()
-        container.register(Alpha.self, scope: .transient) { _ in Alpha() }
-        try container.freeze()
-
-        let first = try container.resolve(Alpha.self)
-        let second = try container.resolve(Alpha.self)
-        #expect(first !== second)
-    }
-
     @Test("factories resolve their own dependencies through the container")
     func dependencyResolution() throws {
         let container = Container()
@@ -68,20 +57,6 @@ struct ContainerTests {
         #expect(counter.value == 1)
     }
 
-    @Test("transient factories do not run at freeze()")
-    func lazyTransients() throws {
-        let counter = InvocationCounter()
-        let container = Container()
-        container.register(Alpha.self, scope: .transient) { _ in
-            counter.increment()
-            return Alpha()
-        }
-        try container.freeze()
-        #expect(counter.value == 0)
-        _ = try container.resolve(Alpha.self)
-        #expect(counter.value == 1)
-    }
-
     @Test("qualifiers distinguish multiple components of one type")
     func qualifiers() throws {
         let container = Container()
@@ -101,28 +76,11 @@ struct ContainerTests {
         }
     }
 
-    @Test("resolving a .scoped component without a scope throws scopeRequired")
-    func scopedNeedsScope() throws {
-        let container = Container()
-        container.register(Gamma.self, scope: .scoped) { _ in Gamma() }
-        try container.freeze()
-
-        do {
-            _ = try container.resolve(Gamma.self)
-            Issue.record("expected scopeRequired")
-        } catch let error as ResolutionError {
-            guard case .scopeRequired = error else {
-                Issue.record("expected scopeRequired, got \(error)")
-                return
-            }
-        }
-    }
-
     @Test("post-freeze resolution is safe under concurrency (smoke)")
     func concurrentResolve() async throws {
         let container = Container()
         container.register(Alpha.self, scope: .singleton) { _ in Alpha() }
-        container.register(Beta.self, scope: .transient) { c in
+        container.register(Beta.self) { c in
             Beta(alpha: try c.resolve(Alpha.self))
         }
         try container.freeze()

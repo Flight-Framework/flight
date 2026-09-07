@@ -150,7 +150,7 @@ struct GeneratorTests {
             "Sources.swift": """
             import FlightCore
             protocol Greeter {}
-            @Service(scope: .scoped)
+            @Service
             struct EnglishGreeter: Greeter {}
             @Component
             final class Welcomer {
@@ -184,8 +184,8 @@ struct GeneratorTests {
                     // with exactly one scanned conformer resolves through that conformer,
                     // mirroring its scope. A `// flight:hand-registered` marker on the
                     // demanding property suppresses the bridge.
-                    container.register((any Greeter).self, scope: .scoped) { c in
-                        try c.resolveInActiveScope(EnglishGreeter.self)
+                    container.register((any Greeter).self) { c in
+                        try c.resolve(EnglishGreeter.self)
                     }
                 }
                 """)
@@ -500,88 +500,42 @@ struct GeneratorTests {
         )
     }
 
-    // MARK: - Captive dependencies
+    // MARK: - Removed lifetimes
 
-    @Test("a singleton injecting a scoped component is a build error naming both")
-    func reportsCaptiveDependency() throws {
-        // The defect this exists to catch: a singleton is built once at
-        // freeze() and outlives every request, so holding a per-request
-        // instance means serving the first request's state forever. Today
-        // this throws `scopeRequired` at startup; the point of the check is
-        // that it never gets that far.
+    @Test("a removed lifetime is a build error that says what to do instead")
+    func removedLifetimeDiagnosed() throws {
+        // This check used to catch captive dependencies — a singleton
+        // injecting a `.scoped` component. That class cannot happen now:
+        // there is one lifetime, so a singleton has nothing shorter-lived to
+        // capture. What survives is the migration case. Source carrying
+        // `.scoped` otherwise meets "type 'Lifetime' has no member 'scoped'",
+        // which says what is wrong and nothing about what to do.
         let result = try generate([
             "Captive.swift": """
             import FlightCore
-            @Service final class PricingService: Sendable {
-            @Inject var users: UserRepository
-            init() {}
-            }
             @Repository(scope: .scoped) final class UserRepository: Sendable {
             init() {}
             }
             """
         ])
         #expect(result.exitCode != 0)
-        #expect(result.diagnostics.contains("PricingService"))
         #expect(result.diagnostics.contains("UserRepository"))
-        #expect(result.diagnostics.contains(".singleton") && result.diagnostics.contains(".scoped"))
+        #expect(result.diagnostics.contains("no longer exists"))
+        #expect(result.diagnostics.contains("RequestContext"))
     }
 
-    @Test("scoped injecting scoped is fine — same lifetime, no capture")
-    func scopedInjectingScopedIsFine() throws {
+    @Test("`.transient` is diagnosed the same way")
+    func removedTransientDiagnosed() throws {
         let result = try generate([
-            "Scoped.swift": """
+            "Old.swift": """
             import FlightCore
-            @Service(scope: .scoped) final class RequestAudit: Sendable {
-            @Inject var users: UserRepository
-            init() {}
-            }
-            @Repository(scope: .scoped) final class UserRepository: Sendable {
-            init() {}
-            }
-            """
-        ])
-        #expect(result.exitCode == 0, "no capture: both live for one request")
-    }
-
-    @Test("singleton injecting singleton is fine")
-    func singletonInjectingSingletonIsFine() throws {
-        let result = try generate([
-            "Singletons.swift": """
-            import FlightCore
-            @Service final class PricingService: Sendable {
-            @Inject var users: UserRepository
-            init() {}
-            }
-            @Repository final class UserRepository: Sendable {
-            init() {}
-            }
-            """
-        ])
-        #expect(result.exitCode == 0, "no capture: both live for the process")
-    }
-
-    @Test("a hand-registered marker does not exempt a captive dependency")
-    func markerDoesNotExemptCaptive() throws {
-        // The marker means "registered by hand", not "exempt from lifetime
-        // rules" — the same posture `detectCycles` takes toward it. A
-        // hand-registered scoped component captured by a singleton is captive
-        // in exactly the same way.
-        let result = try generate([
-            "MarkedCaptive.swift": """
-            import FlightCore
-            @Service final class PricingService: Sendable {
-            // flight:hand-registered
-            @Inject var users: UserRepository
-            init() {}
-            }
-            @Repository(scope: .scoped) final class UserRepository: Sendable {
+            @Service(scope: .transient) final class Builder: Sendable {
             init() {}
             }
             """
         ])
         #expect(result.exitCode != 0)
-        #expect(result.diagnostics.contains("PricingService"))
+        #expect(result.diagnostics.contains(".transient"))
     }
 
     // MARK: - Static route manifest

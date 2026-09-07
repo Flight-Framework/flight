@@ -211,7 +211,7 @@ struct MacroFixtureTests {
     func scopedComponent() {
         assertMacroExpansion(
             """
-            @Component(scope: .scoped)
+            @Component
             final class RequestContext {
             }
             """,
@@ -222,7 +222,7 @@ struct MacroFixtureTests {
                     }
 
                     static func _flightRegister(_ container: FlightCore.Container) throws {
-                        container.register(Self.self, scope: .scoped) { c in
+                        container.register(Self.self, scope: .singleton) { c in
                             try Self(_flight: c)
                         }
                     }

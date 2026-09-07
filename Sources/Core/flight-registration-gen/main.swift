@@ -1084,36 +1084,23 @@ detectCycles()
 // check stays, and stays correct, until composition removes the lifetime
 // concept entirely (COMPOSITION-MIGRATION.md §2.2).
 @MainActor
-func detectCaptiveDependencies() {
-    let byName = Dictionary(components.map { ($0.typeName, $0) }, uniquingKeysWith: { a, _ in a })
-
-    // `.singleton` is the macro's default, so an absent `scope:` argument is
-    // a singleton — matching `parseComponentArguments`, which the bridge
-    // synthesizer already relies on agreeing with.
-    func isScoped(_ component: ScannedComponent) -> Bool {
-        component.scopeText.hasSuffix(".scoped")
-    }
-    func isSingleton(_ component: ScannedComponent) -> Bool {
-        component.scopeText.hasSuffix(".singleton")
-    }
-
-    for component in components where isSingleton(component) {
-        // Acknowledged edges are included deliberately, as in `detectCycles`:
-        // the marker says "registered by hand", not "exempt from lifetime
-        // rules", and a hand-registered scoped component is captive just the
-        // same.
-        for dependency in component.injectTypeNames + component.acknowledgedTypeNames {
-            guard let injected = byName[dependency], isScoped(injected) else { continue }
-            let message =
-                "'\(component.typeName)' is .singleton but injects '\(dependency)', which is "
-                + ".scoped. A singleton is built once at startup and outlives every request, so "
-                + "it would capture one request's instance forever. Give \(component.typeName) "
-                + "`scope: .scoped` too, or inject something that can produce \(dependency) per use."
-            emit("error", message, file: component.file, line: component.line)
-        }
+func diagnoseRemovedLifetimes() {
+    for component in components
+    where component.scopeText.hasSuffix(".scoped")
+        || component.scopeText.hasSuffix(".transient")
+    {
+        let lifetime = component.scopeText.hasSuffix(".scoped") ? ".scoped" : ".transient"
+        let message =
+            "'\(component.typeName)' declares `scope: \(lifetime)`, which no longer exists. "
+            + "Singleton is the only lifetime: nothing needed the others, and removing them "
+            + "removed the captive-dependency class with them. Per-request state travels on "
+            + "`RequestContext` — the authenticated principal is the worked example — and a "
+            + "pooled connection is leased per operation by the repository that holds the pool. "
+            + "Drop the argument."
+        emit("error", message, file: component.file, line: component.line)
     }
 }
-detectCaptiveDependencies()
+diagnoseRemovedLifetimes()
 
 // Cross-module registration requires the component be visible to the target's
 // generated code.
@@ -1377,16 +1364,14 @@ if !bridges.isEmpty {
             ? component.typeName
             : "\(component.module).\(component.typeName)"
         let qualifierArgument = component.qualifierText.map { ", qualifier: \($0)" } ?? ""
-        // resolveInActiveScope for scoped conformers: by the time the bridge
-        // factory runs, resolution of the scoped existential key has already
-        // bound the ambient scope, and the explicit spelling keeps the
-        // captive-dependency error precise. Everything else is a plain resolve.
-        let resolveCall =
-            component.scopeText.hasSuffix("scoped")
-            ? "try c.resolveInActiveScope(\(concrete).self\(qualifierArgument))"
-            : "try c.resolve(\(concrete).self\(qualifierArgument))"
+        // One lifetime, so one spelling. This used to branch: a scoped
+        // conformer resolved through `resolveInActiveScope`, because by the
+        // time the bridge factory ran the ambient scope was already bound and
+        // the explicit form kept the captive-dependency error precise. Both
+        // the lifetime and the scope went with §2.2.
+        let resolveCall = "try c.resolve(\(concrete).self\(qualifierArgument))"
         out +=
-            "    container.register((any \(bridge.protocolName)).self, scope: \(component.scopeText)) { c in\n"
+            "    container.register((any \(bridge.protocolName)).self) { c in\n"
         out += "        \(resolveCall)\n"
         out += "    }\n"
     }

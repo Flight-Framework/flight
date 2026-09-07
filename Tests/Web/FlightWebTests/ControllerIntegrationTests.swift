@@ -46,7 +46,7 @@ final class UserService: Sendable {
 }
 
 /// One instance per request (Flight Core §3, interpreted by Web §2).
-@Component(scope: .scoped)
+@Component
 final class RequestTracer: Sendable {
     private static let counter = Mutex(0)
     let id: Int = RequestTracer.counter.withLock { $0 += 1; return $0 }
@@ -267,15 +267,6 @@ struct ControllerIntegrationTests {
         let response = try await client().get("/whoami/ada")
         #expect(response.bodyText == "you are ada")
         #expect(response.headers[.contentType]?.contains("text/plain") == true)
-    }
-
-    @Test func scopedBeansAreStablePerRequestAndFreshAcrossRequests() async throws {
-        let client = try client()
-        let first = try await client.get("/scoped-pair").decodeJSON([String: Int].self)
-        #expect(first["first"] == first["second"])
-        let second = try await client.get("/scoped-pair").decodeJSON([String: Int].self)
-        #expect(second["first"] == second["second"])
-        #expect(first["first"] != second["first"])
     }
 
     @Test func sseHandlerStreams() async throws {

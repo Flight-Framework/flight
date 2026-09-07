@@ -22,7 +22,6 @@ extension RequestContext {
         return RequestContext(
             request: Request(method: method, path: path, headers: headers, body: body),
             pathParameters: pathParameters,
-            scope: Scope(),
             logger: logger,
             tracingContext: .topLevel,
             container: container ?? TestContainer.empty()

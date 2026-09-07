@@ -117,6 +117,50 @@ struct StreamingResponseTests {
         #expect(String(decoding: body, as: UTF8.self) == "onetwo")
     }
 
+    @Test("abandoning the stream stops the producer")
+    func abandoningTheStreamStopsTheProducer() async throws {
+        // A streaming response outlives the dispatch call that produced it —
+        // deliberately, and the composition migration builds on that (§2.12:
+        // an entry point constructs, it never leases). What makes that safe
+        // is that when the consumer goes away the producer is told: the
+        // client disconnected, or the server is shutting down and the
+        // request task was cancelled.
+        //
+        // `Response.streaming` wires `onCancel: { producer.stop() }` for
+        // exactly this. Without it a producer would keep running against a
+        // stream nobody reads, holding whatever it captured, for as long as
+        // it felt like — which is the leak shape, one level up from the
+        // slow-reader buffering the test above pins.
+        let stopped = Mutex(false)
+        let produced = Mutex(0)
+        let response = Response.streaming(contentType: .text) { emit in
+            defer { stopped.withLock { $0 = true } }
+            for index in 0..<1_000 {
+                await emit.write(Data("\(index)".utf8))
+                produced.withLock { $0 += 1 }
+            }
+        }
+        guard case .streaming(_, _, let stream) = response else {
+            Issue.record("expected streaming response")
+            return
+        }
+
+        // Read two chunks, then abandon the stream the way a dropped
+        // connection does.
+        var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next()
+        _ = await iterator.next()
+        iterator = stream.makeAsyncIterator()  // drop the first iterator
+
+        // Give the producer a chance to run away if it is going to.
+        for _ in 0..<50 where !stopped.withLock({ $0 }) {
+            await Task.yield()
+        }
+        #expect(
+            produced.withLock { $0 } < 1_000,
+            "the producer ran to completion against a stream nobody was reading")
+    }
+
     @Test func producerWaitsForTheConsumerInsteadOfBuffering() async throws {
         // The defect this pins: the producer used to be handed an
         // `AsyncStream.Continuation` with the default `.unbounded` policy, and

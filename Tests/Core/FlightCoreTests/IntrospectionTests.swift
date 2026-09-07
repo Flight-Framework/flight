@@ -5,14 +5,14 @@ import Testing
 @Suite("Introspection")
 struct IntrospectionTests {
 
-    @Test("allRegistrations reflects registration order, scope, and qualifier")
+    @Test("allRegistrations reflects registration order and qualifier")
     func descriptors() throws {
         let container = Container()
         container.register(Alpha.self, scope: .singleton) { _ in Alpha() }
-        container.register(Beta.self, scope: .transient) { c in
+        container.register(Beta.self) { c in
             Beta(alpha: try c.resolve(Alpha.self))
         }
-        container.register(Gamma.self, qualifier: "special", scope: .scoped) { _ in Gamma() }
+        container.register(Gamma.self, qualifier: "special") { _ in Gamma() }
         try container.freeze()
 
         let descriptors = container.allRegistrations()
@@ -25,10 +25,8 @@ struct IntrospectionTests {
         #expect(descriptors[0].stereotype == .component)
 
         #expect(descriptors[1].typeName.contains("Beta"))
-        #expect(descriptors[1].scope == .transient)
 
         #expect(descriptors[2].typeName.contains("Gamma"))
-        #expect(descriptors[2].scope == .scoped)
         #expect(descriptors[2].qualifier == "special")
     }
 

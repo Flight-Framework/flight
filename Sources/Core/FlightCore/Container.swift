@@ -78,7 +78,7 @@ public final class Container: @unchecked Sendable {
     public func register<T: Sendable>(
         _ type: T.Type,
         qualifier: String? = nil,
-        scope: Lifetime,
+        scope: Lifetime = .singleton,
         stereotype: Stereotype = .component,
         factory: @escaping @Sendable (Container) throws -> T
     ) {
@@ -139,7 +139,7 @@ public final class Container: @unchecked Sendable {
     public func override<T: Sendable>(
         _ type: T.Type,
         qualifier: String? = nil,
-        scope: Lifetime,
+        scope: Lifetime = .singleton,
         stereotype: Stereotype = .component,
         factory: @escaping @Sendable (Container) throws -> T
     ) {
@@ -237,29 +237,6 @@ public final class Container: @unchecked Sendable {
         return typed
     }
 
-    /// Scoped resolution. `.singleton`/`.transient` components resolved through
-    /// this overload behave exactly as plain `resolve` — a component's scope is a
-    /// property of its registration, not of the call site.
-    ///
-    /// The whole resolution runs with `Scope.active` bound to `scope`, and
-    /// plain `resolve` consults that binding for `.scoped` registrations — so
-    /// this overload is exactly "bind the scope, then resolve". Factories
-    /// underneath it (including a
-    /// transient's) resolve further scoped components against the same scope
-    /// through either plain `resolve` or the explicit `resolveInActiveScope`.
-    public func resolve<T: Sendable>(
-        _ type: T.Type = T.self, qualifier: String? = nil, in scope: Scope
-    ) throws -> T {
-        guard frozenStorage != nil else {
-            preconditionFailure(
-                "Scoped resolution requires a frozen container — scopes exist only in the resolution phase."
-            )
-        }
-        return try Scope.$active.withValue(scope) {
-            try resolve(type, qualifier: qualifier)
-        }
-    }
-
     /// The container resolves to itself.
     ///
     /// Not a registration — a fallback *after* the lookup misses, so the
@@ -297,35 +274,16 @@ public final class Container: @unchecked Sendable {
                 if key == Self.selfKey { return self }
                 throw ResolutionError.notRegistered(key.description)
             }
-            switch registration.scope {
-            case .singleton:
-                // Every singleton was constructed at freeze(); this is the
-                // pure, lock-free read the two-phase model exists to enable.
-                guard let instance = frozen.singletons[key] else {
-                    // Unreachable by construction; named for debuggability.
-                    throw ResolutionError.notRegistered(key.description)
-                }
-                return instance
-            case .transient:
-                return try constructTracked(registration)
-            case .scoped:
-                // Delta 12: plain resolve rides the ambient scope when one is
-                // bound (by resolve(_:in:), which covers the whole resolution
-                // synchronously). This is what lets @Inject — which always
-                // expands to plain resolve — wire a scoped component into another
-                // scoped component: the outer resolution binds the scope, the
-                // generated init's resolve lands here, and both instances
-                // share the scope. With no ambient scope the error is
-                // unchanged, so the captive-dependency guarantee holds: a
-                // singleton factory at freeze() has no ambient scope and
-                // fails loudly.
-                guard let scope = Scope.active else {
-                    throw ResolutionError.scopeRequired(key.description)
-                }
-                return try scope.instance(for: key) {
-                    try constructTracked(registration)
-                }
+            // Every component was constructed at freeze(); this is the pure,
+            // lock-free read the two-phase model exists to enable. Nothing to
+            // switch on any more: `.scoped` and `.transient` went once nothing
+            // needed them, and with `.scoped` went the ambient-scope lookup
+            // that used to stand between a resolution and its answer.
+            guard let instance = frozen.singletons[key] else {
+                // Unreachable by construction; named for debuggability.
+                throw ResolutionError.notRegistered(key.description)
             }
+            return instance
         }
 
         // Mid-freeze: eager singleton construction resolves dependencies
@@ -339,17 +297,10 @@ public final class Container: @unchecked Sendable {
             if key == Self.selfKey { return self }
             throw ResolutionError.notRegistered(key.description)
         }
-        switch registration.scope {
-        case .singleton:
-            if let cached = singletonsUnderConstruction[key] { return cached }
-            let instance = try constructTracked(registration)
-            singletonsUnderConstruction[key] = instance
-            return instance
-        case .transient:
-            return try constructTracked(registration)
-        case .scoped:
-            throw ResolutionError.scopeRequired(key.description)
-        }
+        if let cached = singletonsUnderConstruction[key] { return cached }
+        let instance = try constructTracked(registration)
+        singletonsUnderConstruction[key] = instance
+        return instance
     }
 
     // MARK: - Runtime cycle detection
