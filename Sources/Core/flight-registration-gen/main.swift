@@ -279,6 +279,13 @@ final class ModuleVisitor: SyntaxVisitor {
     var lanes: [ScannedPipelineLane] = []
     var modules: [ScannedModule] = []
     var mounts: [ScannedMount] = []
+    /// Module types named in a `modules:` argument — the bootstrap list.
+    ///
+    /// This is the fact that makes conditional inclusion static. It was
+    /// treated as a runtime question because the container was the only
+    /// mechanism that knew it, but the list is a literal array in the
+    /// application's own source, and that source is scanned.
+    var bootstrapModules: [String] = []
     private var typeStack: [String] = []
 
     init(module: String, file: String, tree: SourceFileSyntax) {
@@ -434,7 +441,30 @@ final class ModuleVisitor: SyntaxVisitor {
             ))
     }
 
+
+    /// Records the module types a `modules:` argument names.
+    private func collectBootstrapModules(_ node: FunctionCallExprSyntax) {
+        guard let argument = node.arguments.first(where: { $0.label?.text == "modules" }),
+            let array = argument.expression.as(ArrayExprSyntax.self)
+        else { return }
+        for element in array.elements {
+            guard let member = element.expression.as(MemberAccessExprSyntax.self),
+                member.declName.baseName.tokenKind == .keyword(.self),
+                let base = member.base
+            else { continue }
+            // `FlightWebModule<FlightTransport>.self` names one module; the
+            // generic argument is a transport choice, not a second module.
+            var text = base.trimmedDescription
+            if let angle = text.firstIndex(of: "<") { text = String(text[..<angle]) }
+            bootstrapModules.append(baseName(text))
+        }
+    }
+
     override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
+        // `modules:` can appear on `Flight.run`, `Flight.bootstrap` or
+        // `Flight.assemble`; the label is what identifies it, not the callee.
+        collectBootstrapModules(node)
+
         guard let callee = node.calledExpression.as(MemberAccessExprSyntax.self) else {
             return .visitChildren
         }
@@ -837,6 +867,7 @@ var targetImports: Set<String> = []
 var routes: [ScannedControllerRoute] = []
 var lanes: [ScannedPipelineLane] = []
 var moduleGraph: [ScannedModule] = []
+var bootstrapModules: [String] = []
 var mounts: [ScannedMount] = []
 var extensionConformances: [(typeName: String, protocols: [String])] = []
 for module in manifest.modules {
@@ -864,6 +895,7 @@ for module in manifest.modules {
                 || source.contains("FlightModule")
                 || source.contains("registerRoute")
                 || source.contains("registerChannelSocket")
+                || source.contains("modules:")
         else { continue }
         if module.name == manifest.targetModuleName {
             for line in source.split(separator: "\n") {
@@ -888,6 +920,9 @@ for module in manifest.modules {
             moduleScan.walk(tree)
             lanes.append(contentsOf: moduleScan.lanes)
             moduleGraph.append(contentsOf: moduleScan.modules)
+            if module.name == manifest.targetModuleName {
+                bootstrapModules.append(contentsOf: moduleScan.bootstrapModules)
+            }
             mounts.append(contentsOf: moduleScan.mounts)
         }
     }
@@ -1224,6 +1259,39 @@ func laneNames(in text: String) -> [String]? {
 }
 
 diagnoseUndeclaredLanes()
+
+/// Every module an application actually includes: the ones it listed, plus
+/// everything those pull in through `dependencies`.
+///
+/// The runtime resolves the same set at bootstrap with
+/// `_flightResolveModuleOrder`; this is that walk over the scanned edges,
+/// against roots read from the `modules:` argument in the application's own
+/// source. It is what makes "does this subsystem exist in this app" a
+/// build-time question instead of a runtime one — the assumption behind
+/// `flight:module-registered`, and the thing D11 removes the need for.
+///
+/// Empty when the target names no bootstrap list, which is the ordinary case
+/// for a library: it includes nothing because it starts nothing.
+@MainActor
+func resolveIncludedModules() -> [String] {
+    let byName = Dictionary(
+        moduleGraph.map { (baseName($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
+    var ordered: [String] = []
+    var seen: Set<String> = []
+
+    func visit(_ name: String) {
+        guard !seen.contains(name) else { return }
+        seen.insert(name)
+        // Dependencies first, the order `configure` runs in.
+        for dependency in byName[name]?.dependencies ?? [] {
+            visit(dependency)
+        }
+        ordered.append(name)
+    }
+    for root in bootstrapModules { visit(root) }
+    return ordered
+}
+let includedModules = resolveIncludedModules()
 
 // MARK: - Routes the manifest cannot see
 //
@@ -1927,6 +1995,18 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
     out += "        public let dependencies: [String]\n"
     out += "        public let module: String\n"
     out += "    }\n"
+    out += "\n"
+    out += "    /// The modules this application includes: the ones its\n"
+    out += "    /// bootstrap list names, plus everything those pull in\n"
+    out += "    /// through `dependencies`, dependencies first.\n"
+    out += "    ///\n"
+    out += "    /// Empty for a target that starts nothing, which is what a\n"
+    out += "    /// library is.\n"
+    out += "    public static let includedModules: [String] = [\n"
+    for module in includedModules {
+        out += "        \"\(escaped(module))\",\n"
+    }
+    out += "    ]\n"
     out += "\n"
     out += "    public static let moduleGraph: [ModuleEdge] = [\n"
     for edge in moduleGraph.sorted(by: { $0.typeName < $1.typeName }) {

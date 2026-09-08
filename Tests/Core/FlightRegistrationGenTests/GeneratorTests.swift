@@ -767,6 +767,64 @@ struct GeneratorTests {
         #expect(result.generated.contains("UserService(store: userRepository)"))
     }
 
+    // MARK: - Included modules
+
+    @Test("the bootstrap list resolves transitively, dependencies first")
+    func includedModulesResolve() throws {
+        // The fact D11 turns on: which subsystems an application includes is
+        // a literal in its own source, so it is knowable at build time. It
+        // was treated as a runtime question only because the container was
+        // the one thing that knew it.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            final class AppModule: FlightModule {
+            static var dependencies: [any FlightModule.Type] { [ChannelsModule.self] }
+            func configure(_ container: Container) throws {}
+            }
+            final class ChannelsModule: FlightModule {
+            static var dependencies: [any FlightModule.Type] { [PubSubModule.self] }
+            func configure(_ container: Container) throws {}
+            }
+            final class PubSubModule: FlightModule {
+            func configure(_ container: Container) throws {}
+            }
+            final class UnlistedModule: FlightModule {
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [AppModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains(
+                #""PubSubModule",\n        "ChannelsModule",\n        "AppModule","#
+                    .replacingOccurrences(of: "\\n", with: "\n")),
+            "dependencies come before the module that pulled them in")
+        // Linked but never listed: present in the graph, absent from the set.
+        #expect(result.generated.contains(#"name: "UnlistedModule""#))
+        let start = try #require(
+            result.generated.range(of: "public static let includedModules")).lowerBound
+        let end = try #require(result.generated.range(of: "\n    ]", range: start..<result.generated.endIndex)).upperBound
+        #expect(!result.generated[start..<end].contains("UnlistedModule"))
+    }
+
+    @Test("a target that starts nothing includes nothing")
+    func libraryIncludesNothing() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            @Service struct UserService: Sendable {}
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("public static let includedModules: [String] = [\n    ]"))
+    }
+
     // MARK: - Undeclared lanes
 
     @Test("a route naming an undeclared lane is warned about at build time")
