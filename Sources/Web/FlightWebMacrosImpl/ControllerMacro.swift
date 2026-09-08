@@ -101,7 +101,8 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         // controller, one authenticated route" and "authenticated
         // controller, one public route". Saying nothing inherits.
         let controllerPipelines = RouteScanning.pipelines(of: node)
-        for (route, path) in combinedRoutes {
+        var factories: [DeclSyntax] = []
+        for (index, (route, path)) in combinedRoutes.enumerated() {
             let pipelines = RouteScanning.resolvedPipelines(
                 route: route.pipelinesText, controller: controllerPipelines)
             if let routePipelines = route.pipelinesText {
@@ -110,7 +111,11 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
                     at: route.attribute, method: route.methodName, in: context)
             }
             thunkLines.append(
-                contentsOf: routeRegistrationLines(for: route, path: path, pipelines: pipelines))
+                contentsOf: routeRegistrationLines(for: route, path: path, index: index))
+            factories.append(
+                DeclSyntax(
+                    stringLiteral: routeFactory(
+                        for: route, path: path, pipelines: pipelines, index: index)))
         }
         let thunkBody = thunkLines.map { "    \($0)" }.joined(separator: "\n")
         let thunk: DeclSyntax = """
@@ -121,17 +126,33 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
 
         let parameterInit = parameterizedInitializer(
             properties: properties, access: access, declaration: declaration)
-        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
+        return [resolvingInit, parameterInit].compactMap { $0 } + factories + [thunk]
     }
 
-    /// The generated registration for one route. The qualifier embeds the
-    /// runtime-qualified controller name so two controllers may declare
-    /// colliding patterns without tripping Core's duplicate-registration
-    /// precondition — the Router reports the conflict as a proper startup
-    /// error naming both sources instead.
-    private static func routeRegistrationLines(
-        for route: ScannedRoute, path: String, pipelines: String?
-    ) -> [String] {
+    /// The name of one route's factory. Unique per route rather than per
+    /// method, because one method may carry several route attributes.
+    private static func factoryName(for route: ScannedRoute, index: Int) -> String {
+        "_flightRoute_\(route.methodName)_\(index)"
+    }
+
+    /// One route, as a factory taking the controller it should call.
+    ///
+    /// The whole registration lives here — path, kind, lanes, body mode, body
+    /// decoding, return encoding, upgrade shaping — parameterised by *how* the
+    /// controller is obtained and by nothing else. That parameter is the seam
+    /// COMPOSITION-MIGRATION.md §2.1a needs: today `_flightRegister` passes a
+    /// closure returning the instance the container resolved once, which is
+    /// exactly the behaviour there has always been. A generated composition
+    /// root passes one that constructs per request from a `FlightGraph`, and
+    /// nothing else has to move — in particular the handler thunk stays in
+    /// the macro, where the route scanner already lives, rather than being
+    /// reimplemented in the generator and drifting from it.
+    ///
+    /// `make` takes the context so a constructor can use request values; the
+    /// container path ignores it.
+    private static func routeFactory(
+        for route: ScannedRoute, path: String, pipelines: String?, index: Int
+    ) -> String {
         let kind = route.kind.isUpgrade ? ".upgrade(.webSocket)" : ".http"
 
         var call = "controller.\(route.methodName)(context"
@@ -140,13 +161,15 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         if route.isAsync { call = "await \(call)" }
         if route.isThrows { call = "try \(call)" }
 
-        var handlerLines: [String] = []
+        var handlerLines: [String] = ["let controller = try make(context)"]
         if let bodyType = route.bodyTypeText {
-            handlerLines.append("let body = try FlightWeb.decodeRequestBody(\(bodyType).self, from: context)")
+            handlerLines.append(
+                "let body = try FlightWeb.decodeRequestBody(\(bodyType).self, from: context)")
         }
         if route.kind.isUpgrade {
             handlerLines.append("let upgradeHandler = \(call)")
-            handlerLines.append("return FlightWeb.Response.upgrade(handler: upgradeHandler, context: context)")
+            handlerLines.append(
+                "return FlightWeb.Response.upgrade(handler: upgradeHandler, context: context)")
         } else if route.returnTypeText != nil {
             handlerLines.append("let result = \(call)")
             handlerLines.append("return try FlightWeb.encodeResponse(result, for: context)")
@@ -155,25 +178,48 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
             handlerLines.append("return FlightWeb.Response.noContent")
         }
 
-        var lines: [String] = []
-        lines.append("container.register(FlightWeb.RouteRegistration.self, qualifier: \"\(route.kind.httpMethod) \(path) @\" + String(reflecting: Self.self) + \".\(route.methodName)\", scope: .singleton) { c in")
-        lines.append("    let controller = try c.resolve(Self.self)")
         let pipelinesClause = pipelines.map { ", pipelines: \($0)" } ?? ""
-    let bodyModeClause: String
-    if route.isStreamingBody {
-        bodyModeClause = ", bodyMode: .streaming(maxBytes: \(route.maxBodyBytesText ?? "nil"))"
-    } else if let maxBytes = route.maxBodyBytesText {
-        bodyModeClause = ", bodyMode: .buffered(maxBytes: \(maxBytes))"
-    } else {
-        bodyModeClause = ""
-    }
-    lines.append("    return FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\"\(pipelinesClause)\(bodyModeClause)) { context in")
+        let bodyModeClause: String
+        if route.isStreamingBody {
+            bodyModeClause = ", bodyMode: .streaming(maxBytes: \(route.maxBodyBytesText ?? "nil"))"
+        } else if let maxBytes = route.maxBodyBytesText {
+            bodyModeClause = ", bodyMode: .buffered(maxBytes: \(maxBytes))"
+        } else {
+            bodyModeClause = ""
+        }
+
+        var lines: [String] = []
+        lines.append(
+            "static func \(factoryName(for: route, index: index))(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {"
+        )
+        lines.append(
+            "    FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\"\(pipelinesClause)\(bodyModeClause)) { context in"
+        )
         for line in handlerLines {
             lines.append("        \(line)")
         }
         lines.append("    }")
         lines.append("}")
-        return lines
+        return lines.joined(separator: "\n")
+    }
+
+    /// The registration that calls one route's factory. The qualifier embeds
+    /// the runtime-qualified controller name so two controllers may declare
+    /// colliding patterns without tripping Core's duplicate-registration
+    /// precondition — the Router reports the conflict as a proper startup
+    /// error naming both sources instead.
+    private static func routeRegistrationLines(
+        for route: ScannedRoute, path: String, index: Int
+    ) -> [String] {
+        [
+            "container.register(FlightWeb.RouteRegistration.self, qualifier: \"\(route.kind.httpMethod) \(path) @\" + String(reflecting: Self.self) + \".\(route.methodName)\", scope: .singleton) { c in",
+            // Resolved once, here, and handed to every request — the shape
+            // that has always been. §2.1a replaces this closure, and only
+            // this closure.
+            "    let controller = try c.resolve(Self.self)",
+            "    return Self.\(factoryName(for: route, index: index)) { _ in controller }",
+            "}",
+        ]
     }
 
     // MARK: - ExtensionMacro

@@ -41,7 +41,10 @@ import FlightCore
 /// wants almost nothing (static assets, health probes) names a bare lane
 /// alone. Referencing an undeclared lane fails when dispatch is built — at
 /// bootstrap, naming the route and the lane.
-@attached(member, names: named(init), named(_flightRegister))
+// `arbitrary` because one member per route is introduced, named after the
+// handler method — `_flightRoute_show_0`. Those names are not knowable from
+// the attribute alone, which is exactly what `arbitrary` is for.
+@attached(member, names: named(init), named(_flightRegister), arbitrary)
 @attached(extension, conformances: _FlightRegistrable)
 public macro Controller(
     _ path: String? = nil,

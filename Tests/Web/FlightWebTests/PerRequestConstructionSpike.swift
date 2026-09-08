@@ -88,6 +88,59 @@ struct PerRequestConstructionSpike {
         #expect(received == ["hello acme", "acme heard ping"])
         await socket.waitForServer()
     }
+
+    @Test("the generated route factory accepts a per-request constructor")
+    func generatedFactoryTakesAPerRequestMake() async throws {
+        // The seam itself, on a real `@Controller`. `_flightRegister` passes
+        // a closure returning the instance the container resolved once — the
+        // behaviour there has always been — and the whole route is defined in
+        // the factory, so a generated composition root replaces that closure
+        // and nothing else moves.
+        MacroInstances.reset()
+        let client = try TestClient(container: TestContainer.build { MacroSpikeModule() })
+
+        #expect(await client.get("/macro/tenant", headers: tenantHeader).bodyText == "tenant=acme")
+        #expect(await client.get("/macro/tenant").bodyText == "tenant=?")
+        // Two requests, two controllers — from a route the macro generated.
+        #expect(MacroInstances.count == 2)
+    }
+}
+
+@Controller("/macro")
+struct MacroSpikeController {
+    var tenant: String = "?"
+
+    init(tenant: String) {
+        self.tenant = tenant
+        MacroInstances.record()
+    }
+
+    @GetRoute("/tenant")
+    func show(_ context: RequestContext) -> String { "tenant=\(tenant)" }
+}
+
+/// Registers the macro's route with a *per-request* constructor instead of
+/// the resolved-once closure `_flightRegister` uses.
+private struct MacroSpikeModule: FlightModule {
+    func configure(_ container: Container) throws {
+        container.register(
+            RouteRegistration.self,
+            qualifier: "GET /macro/tenant @" + String(reflecting: MacroSpikeController.self)
+                + ".show",
+            scope: .singleton
+        ) { _ in
+            MacroSpikeController._flightRoute_show_0 { context in
+                MacroSpikeController(tenant: tenant(of: context))
+            }
+        }
+    }
+}
+
+private enum MacroInstances {
+    private static let value = Mutex(0)
+    static func reset() { value.withLock { $0 = 0 } }
+    static func record() { value.withLock { $0 += 1 } }
+    static var count: Int { value.withLock { $0 } }
 }
 
 // MARK: - The shape under test
