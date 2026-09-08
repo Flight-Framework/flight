@@ -177,6 +177,9 @@ struct Harness {
             "flight.channels.heartbeat-check-interval-seconds": "\(checkIntervalSeconds)",
         ])
         self.container = try TestContainer.build(configuration: configuration) {
+            // PubSub takes its configuration now, so it is supplied rather
+            // than instantiated from its type by the DAG walk.
+            try FlightPubSubModule(configuration: configuration)
             ChannelsFixtureModule()
         }
         self.client = try TestClient(container: container)

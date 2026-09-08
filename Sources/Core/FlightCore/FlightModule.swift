@@ -12,6 +12,18 @@ public protocol FlightModule {
     /// `Configuration` before any module configures), not through init.
     init()
 
+    /// False when this module takes what it provides as initializer
+    /// parameters, so `init()` cannot build a usable one.
+    ///
+    /// `init()` is still a protocol requirement while the type-based entry
+    /// points exist, which leaves a module that *needs* arguments with only
+    /// bad options for its `init()`: return something misconfigured, or trap.
+    /// This is the third option — say so, so the DAG walk can refuse before
+    /// calling it and name the fix. `FlightPubSubModule` is the first such
+    /// module (COMPOSITION-MIGRATION.md D11); the rest follow as they convert,
+    /// and the flag disappears with `init()` itself at the end of §9.
+    static var isTypeConstructible: Bool { get }
+
     /// Modules that must have already run `configure(_:)` before this one.
     /// Forms a DAG resolved once at bootstrap — deterministic and checkable,
     /// not "hope registration order happens to work."
@@ -90,6 +102,7 @@ public enum ServiceCompletionPolicy: Sendable, Equatable {
 
 extension FlightModule {
     public static var dependencies: [any FlightModule.Type] { [] }
+    public static var isTypeConstructible: Bool { true }
     public var service: (any Service)? { nil }
     public var serviceCompletion: ServiceCompletionPolicy { .failsApp }
     public var serviceShutdownPhase: ServiceShutdownPhase { .standard }

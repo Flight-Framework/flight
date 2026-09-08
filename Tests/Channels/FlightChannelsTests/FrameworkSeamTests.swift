@@ -103,8 +103,13 @@ struct FrameworkSeamTests {
             static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
             func configure(_ container: Container) throws {}
         }
+        // PubSub takes its configuration now, so it is built rather than
+        // instantiated from its type by the DAG walk.
+        let pubsub = try FlightPubSubModule(configuration: Configuration())
         for moduleType in try Flight.resolveModuleOrder([SeamModule.self]) {
-            try moduleType.init().configure(container)
+            let module: any FlightModule =
+                moduleType == FlightPubSubModule.self ? pubsub : moduleType.init()
+            try module.configure(container)
         }
         container.registerChannel("seam:*") { _ in SeamChannel(probe: probe) }
         container.registerChannelSocket("/socket")

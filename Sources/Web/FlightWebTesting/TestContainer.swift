@@ -14,6 +14,10 @@ public enum TestContainer {
 
     /// Lets `build { UserModule() }` and multi-statement module lists read
     /// naturally at test sites.
+    ///
+    /// The closure throws because a module that takes its configuration can
+    /// fail to build — `try FlightPubSubModule(configuration:)` in a block is
+    /// the ordinary case now.
     @resultBuilder
     public enum ModuleBuilder {
         public static func buildBlock(_ modules: any FlightModule...) -> [any FlightModule] {
@@ -41,7 +45,7 @@ public enum TestContainer {
     /// test module that listed its old ones.
     public static func build(
         configuration: Configuration = Configuration(),
-        @ModuleBuilder _ modules: () -> [any FlightModule],
+        @ModuleBuilder _ modules: () throws -> [any FlightModule],
         overriding: (Container) throws -> Void
     ) throws -> Container {
         try build(configuration: configuration, modules, applying: overriding)
@@ -49,17 +53,17 @@ public enum TestContainer {
 
     public static func build(
         configuration: Configuration = Configuration(),
-        @ModuleBuilder _ modules: () -> [any FlightModule]
+        @ModuleBuilder _ modules: () throws -> [any FlightModule]
     ) throws -> Container {
         try build(configuration: configuration, modules, applying: { _ in })
     }
 
     private static func build(
         configuration: Configuration,
-        _ modules: () -> [any FlightModule],
+        _ modules: () throws -> [any FlightModule],
         applying overrides: (Container) throws -> Void
     ) throws -> Container {
-        let instances = modules()
+        let instances = try modules()
         let container = Container()
         container.register(Configuration.self, scope: .singleton) { _ in configuration }
 
@@ -71,13 +75,12 @@ public enum TestContainer {
 
         // Same ordering rules as bootstrap (Flight Core §7 step 5), with the
         // caller's ready-made instances substituted where types match.
-        let byType = Dictionary(
-            instances.map { (ObjectIdentifier(type(of: $0)), $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
         let ordered = try Flight.resolveModuleOrder(instances.map { type(of: $0) })
-        for moduleType in ordered {
-            let module = byType[ObjectIdentifier(moduleType)] ?? moduleType.init()
+        // Transitive dependencies the block never named are built here, which
+        // is where a module that takes initializer parameters is refused —
+        // with a message saying to add the built instance to the block, rather
+        // than a trap from inside whatever `init()` the walk reached.
+        for module in try Flight.instantiateModules(ordered, supplying: instances) {
             try module.configure(container)
         }
 

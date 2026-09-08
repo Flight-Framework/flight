@@ -113,7 +113,11 @@ struct E2EModule: FlightModule {
 func withRunningChannelServer(
     _ body: @escaping @Sendable (_ port: Int) async throws -> Void
 ) async throws {
-    let container = try TestContainer.build { E2EModule() }
+    let configuration = Configuration()
+    let container = try TestContainer.build(configuration: configuration) {
+        try FlightPubSubModule(configuration: configuration)
+        E2EModule()
+    }
     let dispatch = try TestClient(container: container).dispatch
 
     let (ports, portContinuation) = AsyncStream<Int>.makeStream()

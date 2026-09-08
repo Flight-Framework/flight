@@ -202,13 +202,15 @@ struct ScannedPipelineLane {
 /// module graph rather than of file order.
 struct ScannedModule {
     let typeName: String
-    /// The parameter labels of the module's own initializer, if it declares
-    /// one — what the composer has to supply. Empty means `init()`, which is
-    /// every module that has not moved to owning its components yet.
-    let initializerLabels: [String]
-    /// Those parameters' types, positionally, so the composer can wire one
-    /// module's output into another's input.
-    let initializerTypes: [String]
+    /// Every initializer the module declares, as (labels, types).
+    ///
+    /// All of them, not the first: `ActuatorModule` declares `init()` *and*
+    /// `init(processEnvironment:)` — a test seam — and `FlightPubSubModule`
+    /// declares `init(configuration:adapter:)` *and* an `init()` that traps
+    /// because it cannot be built from its type. Neither "first" nor "prefer
+    /// `init()`" picks correctly in both cases. The composer chooses the one
+    /// it can actually supply.
+    let initializers: [(labels: [String], types: [String], throws: Bool)]
     /// Dependency type names as written, `.self` and any generic argument
     /// stripped: `PostgresDataModule<PrimaryDataSource>.self` is
     /// `PostgresDataModule`.
@@ -370,35 +372,25 @@ final class ModuleVisitor: SyntaxVisitor {
         // The initializer a composer would call. `init()` conformances are
         // the ordinary case today; a module that has moved to owning its
         // components declares what it needs instead.
-        var labels: [String] = []
-        var types: [String] = []
-        var declaresNoArgumentInit = false
+        var initializers: [(labels: [String], types: [String], throws: Bool)] = []
         for member in members.members {
             guard let initializer = member.decl.as(InitializerDeclSyntax.self) else { continue }
             let parameters = initializer.signature.parameterClause.parameters
-            if parameters.isEmpty {
-                // A module that still declares `init()` is constructed that
-                // way, whatever else it offers. `ActuatorModule` declares
-                // both it and `init(processEnvironment:)`, and the second is
-                // a test seam — picking the first parameterized initializer
-                // found chose the seam.
-                declaresNoArgumentInit = true
-                continue
-            }
-            if labels.isEmpty {
-                labels = parameters.map {
-                    $0.firstName.tokenKind == .wildcard ? "_" : $0.firstName.text
-                }
-                types = parameters.map { $0.type.trimmedDescription }
-            }
+            initializers.append(
+                (
+                    labels: parameters.map {
+                        $0.firstName.tokenKind == .wildcard ? "_" : $0.firstName.text
+                    },
+                    types: parameters.map { $0.type.trimmedDescription },
+                    throws: initializer.signature.effectSpecifiers?.throwsClause != nil
+                ))
         }
-        if declaresNoArgumentInit {
-            labels = []
-            types = []
-        }
+        // A module declaring none conforms through the protocol's own
+        // requirement, which is `init()`.
+        if initializers.isEmpty { initializers = [(labels: [], types: [], throws: false)] }
         modules.append(
             ScannedModule(
-                typeName: name, initializerLabels: labels, initializerTypes: types,
+                typeName: name, initializers: initializers,
                 dependencies: dependencies, module: module))
     }
 
@@ -1996,24 +1988,51 @@ func emitComposer(into out: inout String) {
     out += "func flightComposeModules(_ configuration: FlightCore.Configuration) throws\n"
     out += "    -> [any FlightCore.FlightModule]\n"
     out += "{\n"
+    /// The argument for one parameter, or nil when nothing can supply it.
+    ///
+    /// An optional parameter with no provider is *omittable* rather than
+    /// unsatisfiable — `adapter: (any DistributedPubSubAdapter)?` means "not
+    /// in this deployment", which is §2.6's mechanism (3).
+    func argument(label: String, type: String) -> String?? {
+        if baseName(type) == "Configuration" { return "\(label): configuration" }
+        if let source = provider(of: type) { return "\(label): \(binding(source))" }
+        if type.hasSuffix("?") { return String?.none }  // omittable
+        return nil  // unsatisfiable
+    }
+
     for name in includedModules {
         let module = byName[moduleKey(name)]
+        // The initializer the composer can actually supply, preferring the
+        // most specific. "First declared" picks a test seam; "prefer init()"
+        // picks a tombstone on a module that cannot be built from its type.
+        // What it can satisfy is the question that has one right answer.
         var arguments: [String] = []
-        for (label, type) in zip(module?.initializerLabels ?? [], module?.initializerTypes ?? []) {
-            if baseName(type) == "Configuration" {
-                arguments.append("\(label): configuration")
-            } else if let source = provider(of: type) {
-                arguments.append("\(label): \(binding(source))")
-            } else {
-                // Nothing in the included set provides it. Emitting the call
-                // anyway makes it a compile error naming the parameter, which
-                // is a better answer than silently omitting the module.
-                arguments.append("\(label): <#\(type)#>")
+        var satisfiable = false
+        var canThrow = false
+        for candidate in (module?.initializers ?? [(labels: [], types: [], throws: false)])
+            .sorted(by: { $0.labels.count > $1.labels.count })
+        {
+            var built: [String] = []
+            var ok = true
+            for (label, type) in zip(candidate.labels, candidate.types) {
+                guard let resolved = argument(label: label, type: type) else { ok = false; break }
+                if let resolved { built.append(resolved) }
+            }
+            if ok {
+                arguments = built
+                satisfiable = true
+                canThrow = candidate.throws
+                break
             }
         }
-        let call = "\(name)(\(arguments.joined(separator: ", ")))"
-        let needsTry = !(module?.initializerLabels.isEmpty ?? true)
-        out += "    let \(binding(name)) = \(needsTry ? "try " : "")\(call)\n"
+        if !satisfiable {
+            // Emitting the call anyway makes it a compile error naming the
+            // module, which beats silently omitting it from the application.
+            arguments = ["<#no initializer this composer can supply#>"]
+        }
+        // `try` only where the initializer throws: an unnecessary one is a
+        // warning in every consumer's build.
+        out += "    let \(binding(name)) = \(canThrow ? "try " : "")\(name)(\(arguments.joined(separator: ", ")))\n"
     }
     out += "    return [\n"
     for name in includedModules {

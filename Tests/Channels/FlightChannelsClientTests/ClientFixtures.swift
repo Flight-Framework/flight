@@ -63,6 +63,7 @@ struct ClientHarness {
             "flight.channels.heartbeat-check-interval-seconds": "0.03",
         ])
         self.container = try TestContainer.build(configuration: configuration) {
+            try FlightPubSubModule(configuration: configuration)
             ClientFixtureModule()
         }
         self.testClient = try TestClient(container: container)

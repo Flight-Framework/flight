@@ -195,4 +195,31 @@ public enum Flight {
     ) throws -> [any FlightModule.Type] {
         try _flightResolveModuleOrder(modules)
     }
+
+    /// Instances for `moduleTypes`, reusing anything in `supplying` and
+    /// building the rest with `init()`.
+    ///
+    /// This is the one place a module gets built from its type alone, so it is
+    /// the one place that can refuse. A module whose
+    /// ``FlightModule/isTypeConstructible`` is false has no usable `init()`,
+    /// and the walk reaches such a module most often as a *transitive*
+    /// dependency the caller never named — which is why the failure has to say
+    /// what to pass rather than trapping wherever the `init()` happens to be.
+    ///
+    /// - Throws: ``BootstrapError/moduleRequiresConstruction(module:)``.
+    public static func instantiateModules(
+        _ moduleTypes: [any FlightModule.Type],
+        supplying supplied: [any FlightModule] = []
+    ) throws -> [any FlightModule] {
+        let byType = Dictionary(
+            supplied.map { (ObjectIdentifier(type(of: $0)), $0) },
+            uniquingKeysWith: { first, _ in first })
+        return try moduleTypes.map { moduleType in
+            if let instance = byType[ObjectIdentifier(moduleType)] { return instance }
+            guard moduleType.isTypeConstructible else {
+                throw BootstrapError.moduleRequiresConstruction(module: moduleType.moduleName)
+            }
+            return moduleType.init()
+        }
+    }
 }

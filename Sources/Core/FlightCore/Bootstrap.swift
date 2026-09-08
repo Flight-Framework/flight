@@ -44,6 +44,10 @@ public enum BootstrapError: Error, CustomStringConvertible {
     /// registration. Give one of them a qualifier.
     case duplicateRegistration(String)
 
+    /// A module named only by its type takes what it provides as initializer
+    /// parameters — see ``FlightModule/isTypeConstructible``.
+    case moduleRequiresConstruction(module: String)
+
     public var description: String {
         switch self {
         case .moduleConfigurationFailed(let module, let underlying):
@@ -55,6 +59,18 @@ public enum BootstrapError: Error, CustomStringConvertible {
                 Duplicate registration for \(key). Two registrations claim the same type \
                 and qualifier — often a generated existential bridge colliding with a \
                 hand-written registration. Give one of them a qualifier.
+                """
+        case .moduleRequiresConstruction(let module):
+            return """
+                \(module) takes what it provides as initializer parameters, so it cannot be \
+                built from its type. It was reached by name or through the module dependency \
+                graph.
+
+                Build it and pass the instance instead of the type. An application gets this \
+                for free from the generated composition root — pass \
+                `composedBy: flightComposeModules` to Flight.run, which is what `flight new` \
+                writes. A test that names its own modules passes the built instance in the \
+                same list.
                 """
         }
     }
@@ -81,7 +97,8 @@ func _flightAssemble(
     // (COMPOSITION-MIGRATION.md D11).
     let ordered = try _flightResolveModuleOrder(modules)
     return try _flightAssemble(
-        configuration: configuration, moduleInstances: ordered.map { $0.init() })
+        configuration: configuration,
+        moduleInstances: Flight.instantiateModules(ordered))
 }
 
 /// The same assembly from modules already built and already ordered.

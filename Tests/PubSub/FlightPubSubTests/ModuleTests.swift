@@ -7,41 +7,33 @@ import FlightCore
 import FlightPubSub
 import FlightPubSubTesting
 
-/// What an adapter-providing module looks like (README "Writing an adapter
-/// module"): register the adapter component, depend on `FlightPubSubModule`,
-/// expose the relay as the module's service. The slot exists only because
-/// `FlightModule` conformances are instantiated by `assemble` with no
-/// arguments — tests park the cluster there first.
+/// What an adapter-providing module looks like now: provide an adapter. That
+/// is the whole contract.
 ///
-/// A task-local rather than a static: two suites in this file use this module,
-/// and `.serialized` orders the tests *inside* a suite, not the suites against
-/// each other. With one shared static, whichever suite cleared the slot first
-/// made the other's `freeze()` throw `ClusterSlotUnset` — a failure that
-/// depended on the filter you ran with. `assemble` builds every singleton
-/// synchronously on the calling task, so a task-local is visible where the
-/// factory needs it and belongs to exactly one test.
-private final class InMemoryAdapterModule: FlightModule {
-    @TaskLocal static var cluster: InMemoryCluster?
-    static var dependencies: [any FlightModule.Type] { [FlightPubSubModule.self] }
+/// It used to be three obligations — register the adapter component, declare
+/// `FlightPubSubModule` as a dependency, and remember to expose
+/// `PubSubRelayService` as the module's service — and forgetting the third
+/// gave a cluster that relayed nothing, silently. `FlightPubSubModule` takes
+/// the adapter and owns the relay, so an adapter module is now a *dependency*
+/// of PubSub rather than a dependent.
+///
+/// Note what is gone from this fixture: the `@TaskLocal` that existed only to
+/// smuggle a value past `init()`, and the held `Container`. Both were
+/// workarounds for a module that could not take what it needed.
+private struct InMemoryAdapterModule: FlightModule {
+    let adapter: any DistributedPubSubAdapter
 
-    struct ClusterSlotUnset: Error {}
-
-    private var container: Container?
-
-    init() {}
-
-    func configure(_ container: Container) throws {
-        self.container = container
-        container.register((any DistributedPubSubAdapter).self, scope: .singleton) { _ in
-            guard let cluster = InMemoryAdapterModule.cluster else {
-                throw ClusterSlotUnset()
-            }
-            return cluster.makeAdapter()
-        }
+    init(cluster: InMemoryCluster) {
+        self.adapter = cluster.makeAdapter()
     }
 
-    var service: (any Service)? {
-        container.map { PubSubRelayService(container: $0) }
+    init() {
+        preconditionFailure("InMemoryAdapterModule takes a cluster; construct it directly.")
+    }
+
+    func configure(_ container: Container) throws {
+        let adapter = self.adapter
+        container.register((any DistributedPubSubAdapter).self, scope: .singleton) { _ in adapter }
     }
 }
 
@@ -51,7 +43,10 @@ struct ModuleTests {
 
     @Test("local-only app: PubSub component is the local core, and no service is registered")
     func localOnly() async throws {
-        let app = try Flight.assemble(configuration: Configuration(), modules: [FlightPubSubModule.self])
+        let configuration = Configuration()
+        let app = try Flight.assemble(
+            configuration: configuration,
+            modules: [try FlightPubSubModule(configuration: configuration)])
 
         let pubsub = try app.container.resolve((any PubSub).self)
         #expect(pubsub is LocalPubSub)
@@ -70,15 +65,24 @@ struct ModuleTests {
 
     @Test("adapter module present: PubSub component is clustered, relay service collected")
     func withAdapter() async throws {
-        try await InMemoryAdapterModule.$cluster.withValue(InMemoryCluster()) {
-            // FlightPubSubModule arrives transitively via the adapter module's DAG.
-            let app = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+        do {
+            // The adapter is built first and handed to PubSub — the direction
+            // the old design had reversed.
+            let configuration = Configuration()
+            let adapterModule = InMemoryAdapterModule(cluster: InMemoryCluster())
+            let app = try Flight.assemble(
+                configuration: configuration,
+                modules: [
+                    adapterModule,
+                    try FlightPubSubModule(configuration: configuration, adapter: adapterModule.adapter),
+                ])
 
             let pubsub = try app.container.resolve((any PubSub).self)
             #expect(pubsub is ClusteredPubSub)
+            // The relay is PubSub's now: it is what holds both halves.
             #expect(app.services.count == 1)
-            #expect(app.services[0].moduleName == "InMemoryAdapterModule")
-            #expect(app.moduleOrder == ["FlightPubSubModule", "InMemoryAdapterModule"])
+            #expect(app.services[0].moduleName == "FlightPubSubModule")
+            #expect(app.moduleOrder == ["InMemoryAdapterModule", "FlightPubSubModule"])
 
             // The clustered component wraps the registered LocalPubSub — a subscriber
             // on the concrete local component sees messages published via `any PubSub`.
@@ -93,9 +97,22 @@ struct ModuleTests {
 
     @Test("two bootstrapped apps form a cluster; graceful shutdown ends both cleanly")
     func endToEndTwoApps() async throws {
-        try await InMemoryAdapterModule.$cluster.withValue(InMemoryCluster()) {
-            let appA = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
-            let appB = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+        do {
+            // One cluster, two apps, each with its own adapter drawn from it.
+            let cluster = InMemoryCluster()
+            let configuration = Configuration()
+            func app() throws -> AssembledApplication {
+                let adapterModule = InMemoryAdapterModule(cluster: cluster)
+                return try Flight.assemble(
+                    configuration: configuration,
+                    modules: [
+                        adapterModule,
+                        try FlightPubSubModule(
+                            configuration: configuration, adapter: adapterModule.adapter),
+                    ])
+            }
+            let appA = try app()
+            let appB = try app()
 
             func serviceGroup(for app: AssembledApplication, label: String) -> ServiceGroup {
                 ServiceGroup(configuration: .init(
@@ -124,10 +141,10 @@ struct ModuleTests {
         }
     }
 
-    @Test("FlightPubSubModule declares no dependencies and defaults to no service")
-    func moduleShape() {
+    @Test("FlightPubSubModule declares no dependencies, and has no service without an adapter")
+    func moduleShape() throws {
         #expect(FlightPubSubModule.dependencies.isEmpty)
-        #expect(FlightPubSubModule().service == nil)
+        #expect(try FlightPubSubModule(configuration: Configuration()).service == nil)
     }
 }
 
@@ -147,21 +164,26 @@ struct UnloadedAdapterTests {
         // The factory runs at freeze(), so what surfaces is a BootstrapError
         // carrying the message — assembly refuses, which is the contract.
         let error = #expect(throws: (any Error).self) {
-            try Flight.assemble(configuration: configuration, modules: [FlightPubSubModule.self])
+            try Flight.assemble(
+                configuration: configuration,
+                modules: [try FlightPubSubModule(configuration: configuration)])
         }
         let message = String(describing: try #require(error))
         #expect(message.contains("pubsub.valkey.url"))
-        // Not "FlightPubSubValkeyModule": that module exists nowhere, so the
-        // error told the operator to add something they could not obtain.
-        #expect(message.contains("DistributedPubSubAdapter"))
-        #expect(message.contains("none ships yet"))
+        // Names the module that actually provides it. The message used to say
+        // no adapter module shipped and to write your own, which stopped
+        // being true when flight-data grew FlightPubSubValkeyModule — so the
+        // error sent an operator to build something they already had.
+        #expect(message.contains("FlightPubSubValkeyModule"))
     }
 
     @Test("the generic adapter key is watched too")
     func genericAdapterKeyIsWatched() throws {
         let configuration = Configuration(values: ["pubsub.adapter.url": "nats://127.0.0.1:4222"])
         let error = #expect(throws: (any Error).self) {
-            try Flight.assemble(configuration: configuration, modules: [FlightPubSubModule.self])
+            try Flight.assemble(
+                configuration: configuration,
+                modules: [try FlightPubSubModule(configuration: configuration)])
         }
         #expect(String(describing: try #require(error)).contains("pubsub.adapter.url"))
     }
@@ -181,21 +203,27 @@ struct UnloadedAdapterTests {
 
     @Test("an adapter module present reads its own configuration — no cross-check fires")
     func configuredAndLoaded() async throws {
-        try await InMemoryAdapterModule.$cluster.withValue(InMemoryCluster()) {
-            // Same configuration as the failing case. The adapter here is not the
-            // Valkey one, but presence is what the check is about: something
-            // registered an adapter, so the fallback branch never runs.
-            let configuration = Configuration(values: ["pubsub.valkey.url": "valkey://127.0.0.1:6379"])
-            let app = try Flight.assemble(configuration: configuration, modules: [InMemoryAdapterModule.self])
+        // Same configuration as the failing case. The adapter here is not the
+        // Valkey one, but that is what the check is about: an adapter *was*
+        // supplied, so the fallback branch — and its cross-check — never runs.
+        let configuration = Configuration(values: ["pubsub.valkey.url": "valkey://127.0.0.1:6379"])
+        let adapterModule = InMemoryAdapterModule(cluster: InMemoryCluster())
+        let app = try Flight.assemble(
+            configuration: configuration,
+            modules: [
+                adapterModule,
+                try FlightPubSubModule(configuration: configuration, adapter: adapterModule.adapter),
+            ])
 
-            #expect(try app.container.resolve((any PubSub).self) is ClusteredPubSub)
-    
-        }
+        #expect(try app.container.resolve((any PubSub).self) is ClusteredPubSub)
     }
 
     @Test("no adapter and no configuration is the ordinary single-node app")
     func neitherConfiguredNorLoaded() throws {
-        let app = try Flight.assemble(configuration: Configuration(), modules: [FlightPubSubModule.self])
+        let configuration = Configuration()
+        let app = try Flight.assemble(
+            configuration: configuration,
+            modules: [try FlightPubSubModule(configuration: configuration)])
         #expect(try app.container.resolve((any PubSub).self) is LocalPubSub)
     }
 }

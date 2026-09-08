@@ -48,12 +48,14 @@ struct MultiNodeTests {
             }
             let container = Container()
             container.register(Configuration.self, scope: .singleton) { _ in Configuration() }
-            container.register((any DistributedPubSubAdapter).self, scope: .singleton) { _ in
-                cluster.makeAdapter()
-            }
             container.register(ChannelEvents.self, scope: .singleton) { _ in ChannelEvents() }
+            // The adapter is handed to PubSub rather than registered for it
+            // to find — the direction the conversion reversed.
+            let pubsub = try FlightPubSubModule(
+                configuration: Configuration(), adapter: cluster.makeAdapter())
             for moduleType in try Flight.resolveModuleOrder([NodeModule.self]) {
-                let module = moduleType.init()
+                let module: any FlightModule =
+                    moduleType == FlightPubSubModule.self ? pubsub : moduleType.init()
                 try module.configure(container)
             }
             container.registerChannel("room:*") { container in

@@ -57,8 +57,13 @@ final class PresenceNode: Sendable {
         }
 
         var services: [any Service] = []
+        // PubSub takes its configuration, so it is built here and
+        // substituted for the type the DAG walk would otherwise instantiate.
+        let pubsub = try FlightPubSubModule(
+            configuration: Configuration(values: values), adapter: adapter)
         for moduleType in try Flight.resolveModuleOrder([NodeModule.self]) {
-            let module = moduleType.init()
+            let module: any FlightModule =
+                moduleType == FlightPubSubModule.self ? pubsub : moduleType.init()
             try module.configure(container)
             if let service = module.service { services.append(service) }
         }

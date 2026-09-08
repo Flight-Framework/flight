@@ -20,9 +20,13 @@ multi-node story needs. Modeled on
 import FlightCore
 import FlightPubSub
 
-try await Flight.bootstrap(
+// `modules:` says which subsystems the application includes; the generated
+// composition root says how they are built, which is what lets PubSub take
+// its configuration. `flight new` writes the `composedBy:` argument.
+try await Flight.run(
     configuration: .load(),
-    modules: [FlightPubSubModule.self, AppModule.self]
+    modules: [FlightPubSubModule.self, AppModule.self],
+    composedBy: flightComposeModules
 )
 
 // Anywhere components are wired:
@@ -100,12 +104,13 @@ pubsub:
   broadcast_timeout: 5s       # or `never` to wait for the adapter indefinitely
 ```
 
-They were constructor arguments until 0.13.0, which meant they did not
-exist: `Flight.bootstrap` and `Flight.assemble` both take
-`[any FlightModule.Type]` and instantiate with `init()`, so nothing a
-deployment wrote could reach them — the example here passed a module instance
-and did not compile. They are deployment knobs, so they live in `flight.yaml`
-with the other deployment knobs.
+They are deployment knobs, so they live in `flight.yaml` with the other
+deployment knobs — `FlightPubSubModule(configuration:)` reads them at
+construction, before `configure(_:)` runs. Until 0.13.0 they were constructor
+arguments that could not be reached: both entry points took
+`[any FlightModule.Type]` and instantiated with `init()`, so nothing a
+deployment wrote could set them, and the example here passed a module instance
+and did not compile.
 
 A malformed value fails bootstrap rather than falling back: a node told to
 bound its buffers at 1024 and silently running unbounded is the bug the
@@ -113,10 +118,16 @@ setting exists to prevent.
 
 ## Multi-node
 
-Consumers never change: they code against `any PubSub`. A deployment
-becomes multi-node by registering a `DistributedPubSubAdapter` component —
-`FlightPubSubModule`'s `any PubSub` factory then composes a `ClusteredPubSub`
-around the same local core instead of returning it bare.
+Consumers never change: they code against `any PubSub`. A deployment becomes
+multi-node by handing `FlightPubSubModule` an adapter — it then builds a
+`ClusteredPubSub` around the same local core instead of projecting it bare,
+and owns the relay that feeds it. No adapter means single node, which is the
+90% case and the default.
+
+Whether there is an adapter is a fact about how the application was composed,
+so it is an initializer argument rather than something discovered by asking
+the container at `freeze()`. See "Writing an adapter module" below for what
+changed and why.
 
 `ClusteredPubSub` stamps every outgoing broadcast with an origin-node ID
 (reserved metadata key `flight.pubsub.origin`) and drops self-originated
@@ -126,14 +137,53 @@ before delivery: subscribers see identical metadata at zero hops or one.
 
 ### Writing an adapter module
 
-An adapter package provides one `FlightModule` that:
+An adapter package provides one `FlightModule` that provides an adapter. That
+is the whole contract:
 
-1. registers its `(any DistributedPubSubAdapter).self` component,
-2. declares `FlightPubSubModule.self` in `dependencies`,
-3. exposes `PubSubRelayService(container:)` — composed with any connection
-   service of its own — as its `service` (the local core has no service;
-   the relay and the connection are the distributed deployment's
-   long-running half).
+```swift
+public struct MyAdapterModule: FlightModule {
+    public let adapter: any DistributedPubSubAdapter
+
+    public init(configuration: Configuration) throws {
+        self.adapter = MyAdapter(url: try configuration.require("pubsub.mine.url"))
+    }
+
+    public static var isTypeConstructible: Bool { false }
+    public init() { preconditionFailure("MyAdapterModule takes its configuration.") }
+
+    public func configure(_ container: Container) throws {
+        let adapter = self.adapter
+        container.register((any DistributedPubSubAdapter).self, scope: .singleton) { _ in adapter }
+    }
+
+    /// Only a connection of its own, if it has one. The relay is not yours.
+    public var service: (any Service)? { nil }
+}
+```
+
+The composition root hands the adapter to PubSub:
+
+```swift
+let myAdapter = try MyAdapterModule(configuration: configuration)
+let pubsub = try FlightPubSubModule(configuration: configuration, adapter: myAdapter.adapter)
+```
+
+which `flight new`'s `composedBy: flightComposeModules` writes for you.
+
+**This direction is the reverse of what it used to be**, and the reversal is
+the point. An adapter module used to declare `FlightPubSubModule` in
+`dependencies` and expose `PubSubRelayService` as its own service — because
+PubSub decided at `freeze()` whether it was clustered by asking the container
+whether anyone had registered an adapter, a runtime scan answering a question
+about how the application was assembled. That put three obligations on an
+adapter author, and forgetting the third gave a cluster that relayed nothing,
+with no error and no symptom until production.
+
+Now an adapter module is a *dependency* of `FlightPubSubModule`. It provides
+an adapter and stops. PubSub takes it, builds the bus around it, and owns the
+relay — because PubSub is what holds both halves the relay needs, the adapter
+to drain and the local core to drain it into. The failure mode is gone rather
+than documented: there is nothing left to forget.
 
 `Tests/PubSub/FlightPubSubTests/ModuleTests.swift` contains a complete working
 example (`InMemoryAdapterModule`), including two bootstrapped apps forming a

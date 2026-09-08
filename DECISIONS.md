@@ -7,6 +7,49 @@ wrong, say so and it changes.
 
 ---
 
+## D13 — A converted module says it cannot be built from its type; the walk refuses
+
+**Chosen.** `FlightModule` gains `static var isTypeConstructible: Bool`,
+defaulting true. A module that takes what it provides sets it false, and every
+path that builds a module from a type — `Flight.assemble(modules:)`,
+`TestContainer.build`, both through the new `Flight.instantiateModules` —
+checks it and throws `BootstrapError.moduleRequiresConstruction`, naming the
+module and saying to pass the built instance or `composedBy:`.
+
+**Why.** The PubSub conversion's `init()` had to do *something*, and trapping
+was the only honest option: returning a misconfigured module is worse. But the
+trap fires from wherever the dependency walk happens to reach it, and the walk
+reaches a converted module most often as a **transitive** dependency the
+caller never named. The demo's `BootstrapTests` lists `AppModule`,
+`FlightSecurityModule`, `ActuatorModule` — none of them PubSub — and got a
+`preconditionFailure` from `PubSubModule.swift:91` with no indication of which
+of its three modules pulled PubSub in. A crash is also unrecoverable, so a
+test suite cannot assert on it and CI reports a signal rather than a failure.
+A thrown error at the one place a type becomes an instance costs one static
+property, and turns the worst 3am failure in this migration into a sentence.
+
+**What it also buys.** The flag is a machine-readable record of which modules
+have converted, which the remaining six conversions can be checked against.
+
+**Cost of reversing.** Small and shrinking. `isTypeConstructible` exists only
+while `init()` does; both disappear together when §9 removes the type-based
+entry points, at which point the compiler enforces what this flag currently
+enforces at runtime.
+
+**Alternative — change the protocol requirement to `init(configuration:)`.**
+Then the walk could build every module, since the configuration is always in
+hand, and `BootstrapTests` would need no change at all. Rejected because it
+only defers the problem by one module: D11 says a module holds what it
+provides, so `FlightChannelsModule` will take a bus, `FlightPresenceModule` a
+store — values no configuration can supply. The requirement would break again
+at the next conversion, having cost an explicit `init(configuration:)` on
+every module in flight, flight-data, and every template.
+
+**Alternative — let it trap.** Free, and what shipped for one afternoon. The
+demo's failure above is the argument against it.
+
+---
+
 ## D12 — Converting modules is one coordinated change, not seven local ones
 
 **What I expected.** After D11 and the generated composer, converting each

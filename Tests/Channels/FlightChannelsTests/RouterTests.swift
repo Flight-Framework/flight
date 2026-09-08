@@ -1,5 +1,6 @@
 import FlightChannels
 import FlightCore
+import FlightPubSub
 import FlightWebTesting
 import Testing
 
@@ -65,7 +66,10 @@ struct RouterTests {
             }
         }
         #expect(throws: (any Error).self) {
-            try TestContainer.build { BadPatternModule() }
+            try TestContainer.build {
+                try FlightPubSubModule(configuration: Configuration())
+                BadPatternModule()
+            }
         }
     }
 
