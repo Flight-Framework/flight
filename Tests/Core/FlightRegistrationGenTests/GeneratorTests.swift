@@ -177,8 +177,16 @@ struct GeneratorTests {
         #expect(
             body == """
                 public func flightRegisterAll(_ container: FlightCore.Container) throws {
-                    try EnglishGreeter._flightRegister(container)
-                    try Welcomer._flightRegister(container)
+                    container.register(FlightGraph.self, scope: .singleton) { c in
+                        try makeFlightGraph(c)
+                    }
+
+                    container.register(EnglishGreeter.self, scope: .singleton, stereotype: .service) { c in
+                        try c.resolve(FlightGraph.self).englishGreeter
+                    }
+                    container.register(Welcomer.self, scope: .singleton) { c in
+                        try c.resolve(FlightGraph.self).welcomer
+                    }
 
                     // Existential bridges (demand-driven): each `@Inject var _: (any P)`
                     // with exactly one scanned conformer resolves through that conformer,
@@ -204,7 +212,12 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
-        #expect(result.generated.contains("try Ordinary._flightRegister(container)"))
+        // Ordinary is a graph node, so its registration projects onto the
+        // graph rather than calling its own thunk.
+        #expect(result.generated.contains("try c.resolve(FlightGraph.self).ordinary"))
+        #expect(
+            !result.generated.contains("let gated: Gated"),
+            "a module-registered type is not a graph node either")
         #expect(
             !result.generated.contains("try Gated._flightRegister(container)"),
             "a module-registered type must not be registered by the scan")
@@ -694,14 +707,13 @@ struct GeneratorTests {
             result.generated.contains("SocketController(validator: graph.tokenValidator)"))
     }
 
-    @Test("the graph projects the container's components rather than rebuilding them")
+    @Test("the graph constructs; the container projects onto it")
     func graphProjectsRatherThanRebuilds() throws {
-        // While both wiring mechanisms are live, the container is what
-        // constructs. A graph that built its own copies would give an
-        // application two of every component — a route terminal reaching one
-        // through the graph, a channel or a job reaching the other through
-        // the container. Harmless for a stateless repository; a silent
-        // split-brain for anything holding state.
+        // One construction, in one place. Both mechanisms building would
+        // give an application two of every component — a route terminal
+        // reaching one through the graph, a channel or a job reaching the
+        // other through the container. Harmless for a stateless repository;
+        // a silent split-brain for anything holding state.
         let result = try generate([
             "Sources.swift": """
             import FlightWeb
@@ -716,13 +728,14 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
-        #expect(
-            result.generated.contains("userService: container.resolve(UserService.self)"),
-            "makeFlightGraph must resolve, not construct")
-        // The composing initializer stays — it is the shape this becomes
-        // once the container stops constructing — and is type-checked on
-        // every build even though nothing calls it yet.
+        // The graph constructs; the container projects onto it.
         #expect(result.generated.contains("self.userService = UserService()"))
+        #expect(
+            result.generated.contains("try c.resolve(FlightGraph.self).userService"),
+            "the container registration must project, not construct a second copy")
+        #expect(
+            !result.generated.contains("try UserService._flightRegister"),
+            "a projected component must not also be constructed by its own thunk")
     }
 
     // MARK: - Undeclared lanes
