@@ -102,6 +102,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         // controller, one public route". Saying nothing inherits.
         let controllerPipelines = RouteScanning.pipelines(of: node)
         var factories: [DeclSyntax] = []
+        if !combinedRoutes.isEmpty { thunkLines.append("guard includingRoutes else { return }") }
         for (index, (route, path)) in combinedRoutes.enumerated() {
             let pipelines = RouteScanning.resolvedPipelines(
                 route: route.pipelinesText, controller: controllerPipelines)
@@ -118,15 +119,32 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
                         for: route, path: path, pipelines: pipelines, index: index)))
         }
         let thunkBody = thunkLines.map { "    \($0)" }.joined(separator: "\n")
+        // `includingRoutes` defaults to true, so every existing caller —
+        // tests, hand-wired modules, anything registering a controller
+        // directly — keeps getting its routes.
+        //
+        // The generated composition root passes false and registers the
+        // routes itself, with a controller constructed per request instead of
+        // resolved once (COMPOSITION-MIGRATION.md §2.1a). Without the
+        // parameter the two would both register, and the freeze would fail on
+        // a duplicate.
+        // Two overloads, not one with a default: `_FlightRegistrable`
+        // requires exactly `_flightRegister(_:)`, and a method with an extra
+        // defaulted parameter does not satisfy it.
         let thunk: DeclSyntax = """
         \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
+            try _flightRegister(container, includingRoutes: true)
+        }
+        """
+        let routesThunk: DeclSyntax = """
+        \(raw: access)static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
         \(raw: thunkBody)
         }
         """
 
         let parameterInit = parameterizedInitializer(
             properties: properties, access: access, declaration: declaration)
-        return [resolvingInit, parameterInit].compactMap { $0 } + factories + [thunk]
+        return [resolvingInit, parameterInit].compactMap { $0 } + factories + [thunk, routesThunk]
     }
 
     /// The name of one route's factory. Unique per route rather than per

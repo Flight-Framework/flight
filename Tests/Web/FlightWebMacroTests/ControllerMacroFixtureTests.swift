@@ -59,8 +59,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /health @" + String(reflecting: Self.self) + ".health", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -135,8 +142,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 public static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                public static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "POST /users @" + String(reflecting: Self.self) + ".createUser", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -195,8 +209,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /chat/:roomId @" + String(reflecting: Self.self) + ".chat", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -237,6 +258,10 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
@@ -279,6 +304,10 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
@@ -321,6 +350,10 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
@@ -427,8 +460,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET users @" + String(reflecting: Self.self) + ".handler", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -495,8 +535,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /users @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -550,8 +597,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /users/:id @" + String(reflecting: Self.self) + ".show", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -600,8 +654,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /health @" + String(reflecting: Self.self) + ".health", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -648,8 +709,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /:id @" + String(reflecting: Self.self) + ".show", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -702,8 +770,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /x @" + String(reflecting: Self.self) + ".handler", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -863,6 +938,10 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
@@ -910,6 +989,10 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
@@ -966,8 +1049,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard/admin @" + String(reflecting: Self.self) + ".admin", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -1021,8 +1111,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -1076,8 +1173,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
@@ -1138,8 +1242,15 @@ struct ControllerMacroFixtureTests {
                 }
 
                 static func _flightRegister(_ container: FlightCore.Container) throws {
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
                     container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)

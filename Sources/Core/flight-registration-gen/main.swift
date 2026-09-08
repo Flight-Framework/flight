@@ -1452,7 +1452,13 @@ if autoRegistered.isEmpty {
             component.module == manifest.targetModuleName
             ? component.typeName
             : "\(component.module).\(component.typeName)"
-        out += "    try \(qualified)._flightRegister(container)\n"
+        // A controller's routes come from `flightRegisterRoutes` below, with
+        // a per-request controller; registering them here too would fail the
+        // freeze on a duplicate.
+        let routesClause =
+            stereotype(forAttribute: component.attributeName) == "controller"
+            ? ", includingRoutes: false" : ""
+        out += "    try \(qualified)._flightRegister(container\(routesClause))\n"
     }
 }
 if !moduleRegistered.isEmpty {
@@ -1493,6 +1499,13 @@ if !bridges.isEmpty {
         out += "        \(resolveCall)\n"
         out += "    }\n"
     }
+}
+if !routes.isEmpty {
+    out += "\n"
+    out += "    // Routes last: their controllers are constructed per\n"
+    out += "    // request from the graph, which needs every component\n"
+    out += "    // registered first.\n"
+    out += "    try flightRegisterRoutes(container)\n"
 }
 out += "}\n"
 
@@ -1602,10 +1615,10 @@ func emitFlightGraph(into out: inout String) {
     out += "/// Every component this module declares, constructed once, in\n"
     out += "/// dependency order, without a container.\n"
     out += "///\n"
-    out += "/// Emitted but not yet called: `flightRegisterAll` above is still\n"
-    out += "/// what boots an application. This is the shape it becomes\n"
-    out += "/// (COMPOSITION-MIGRATION.md §2.1), compiled on every build so the\n"
-    out += "/// two cannot drift silently.\n"
+    out += "/// The shape registration is becoming (COMPOSITION-MIGRATION.md\n"
+    out += "/// §2.1). Route controllers are built from it per request; every\n"
+    out += "/// other component is still registered, so both mechanisms are\n"
+    out += "/// live and compiled together.\n"
     out += "///\n"
     out += "/// Internal, not public: an application's components are internal by\n"
     out += "/// default, and a public struct cannot expose them. The composition\n"
@@ -1672,10 +1685,8 @@ func emitFlightGraph(into out: inout String) {
     out += "///\n"
     out += "/// The bridge between the two wiring mechanisms while both exist:\n"
     out += "/// the graph's root parameters are the components modules register,\n"
-    out += "/// so they resolve exactly as they always have. Nothing calls this\n"
-    out += "/// yet — dispatch still builds controllers the container's way.\n"
+    out += "/// so they resolve exactly as they always have.\n"
     out += "func makeFlightGraph(_ container: FlightCore.Container) throws -> FlightGraph {\n"
-    out += "    try FlightGraph(\n"
     var resolved: [String] = []
     if needsConfiguration {
         resolved.append("configuration: container.resolve(FlightCore.Configuration.self)")
@@ -1686,8 +1697,13 @@ func emitFlightGraph(into out: inout String) {
             ? dependency : "(\(dependency))"
         resolved.append("\(suppliedBinding(dependency)): container.resolve(\(metatype).self)")
     }
-    out += resolved.map { "        \($0)" }.joined(separator: ",\n") + "\n"
-    out += "    )\n"
+    if resolved.isEmpty {
+        out += "    try FlightGraph()\n"
+    } else {
+        out += "    try FlightGraph(\n"
+        out += resolved.map { "        \($0)" }.joined(separator: ",\n") + "\n"
+        out += "    )\n"
+    }
     out += "}\n"
 
     // Route registrations with a per-request controller (§2.1a).
@@ -1710,11 +1726,12 @@ func emitFlightGraph(into out: inout String) {
     out += "/// Registers every route, with its controller constructed per\n"
     out += "/// request from ``FlightGraph`` rather than resolved once.\n"
     out += "///\n"
-    out += "/// Not called yet: running this *and* `flightRegisterAll` would\n"
-    out += "/// register every route twice and fail the freeze. It compiles on\n"
-    out += "/// every build, so the constructor labels, the graph's property\n"
-    out += "/// names and the generated factory names are checked against each\n"
-    out += "/// other continuously rather than at the flip.\n"
+    out += "/// Called by `flightRegisterAll`, which passes\n"
+    out += "/// `includingRoutes: false` to every controller's own thunk so the\n"
+    out += "/// two do not both register and fail the freeze on a duplicate. A\n"
+    out += "/// controller registered directly — a test, a hand-wired module —\n"
+    out += "/// still gets its routes the resolved-once way, which is why the\n"
+    out += "/// parameter defaults to true.\n"
     out += "func flightRegisterRoutes(_ container: FlightCore.Container) throws {\n"
     out += "    container.register(FlightGraph.self, scope: .singleton) { c in\n"
     out += "        try makeFlightGraph(c)\n"
