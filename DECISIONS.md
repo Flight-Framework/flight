@@ -7,6 +7,68 @@ wrong, say so and it changes.
 
 ---
 
+## D12 — Converting modules is one coordinated change, not seven local ones
+
+**What I expected.** After D11 and the generated composer, converting each
+framework module looked mechanical: take inputs in `init`, hold components as
+properties, have `configure` project them. Both mechanisms stay live, so each
+conversion is local and non-breaking.
+
+**What happened.** I converted `FlightPubSubModule` — the best candidate: no
+service, no held container, two components, and a doc comment that names the
+exact constraint D11 removes ("they used to be `init` parameters, which meant
+they did not exist"). The conversion itself was clean and the module reads
+better. Then the suite trapped, and the reason is structural rather than
+incidental.
+
+**The finding: converting a module inverts its dependency direction, and the
+inversions are mutual.**
+
+`FlightPubSubModule` composes by *presence* today: its `(any PubSub)` factory
+runs at `freeze()` and asks the container whether anyone registered a
+`DistributedPubSubAdapter`. An adapter module therefore declares
+`FlightPubSubModule` as a *dependency*, registers its adapter, and exposes
+`PubSubRelayService(container:)` as its service.
+
+Taking the adapter as an initializer parameter inverts that: the adapter must
+exist *before* the bus that wraps it, so the adapter module becomes a
+dependency **of** PubSub. But the relay needs the bus — which PubSub now
+builds later. The two need each other, in opposite directions, and the knot
+only unties by moving the relay from the adapter module to PubSub. That is
+defensible, arguably better ("an adapter module provides an adapter; that is
+all"), and it rewrites a documented, tested contract: `Docs/pubsub.md`'s
+"Writing an adapter module", plus the suite asserting
+`app.services[0].moduleName == "InMemoryAdapterModule"` and the transitive
+DAG order.
+
+Every other module has the same shape:
+
+| Module | Needs, from where |
+|---|---|
+| Channels, Presence | `(any PubSub)` — so blocked behind PubSub |
+| Security | `(any TokenValidator)`, which the *application* registers — inverts app→framework |
+| Actuator | its controller holds the container (§2.9's introspection) |
+| Web, Scheduler | their services resolve post-freeze, which is §3's wrapper category |
+
+**So the order is: decide who provides what, once, across all seven.** The
+container is what has been absorbing these inversions — late binding is
+exactly what a registry buys, and removing it means every "someone will
+register this later" becomes an explicit direction. That is the migration's
+real remaining content, and it is a design pass rather than a conversion pass.
+
+**Reverted**, deliberately: a half-converted PubSub with a trapping `init()`
+would have broken every consumer's tests for no delivered benefit, and the
+adapter contract deserves a decision rather than a side effect.
+
+**What I would do next, if it were mine to choose:** take the seven modules
+as one exercise, write down who provides what and in which direction — the
+relay question is the template — and only then convert, PubSub first because
+everything else waits on it. I would not start that without agreement on the
+adapter direction, because it changes a documented extension point that
+someone outside this repository may already have built against.
+
+---
+
 ## D11 — A module is a value that holds what it provides
 
 **The question.** `FlightModule.configure(_ container: Container)` is the last
