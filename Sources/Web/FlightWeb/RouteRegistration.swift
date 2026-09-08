@@ -385,12 +385,6 @@ extension Container {
             .map(\.element)
     }
 
-    /// Every lane that has at least one declared entry — what dispatch
-    /// validates route references against.
-    public func declaredMiddlewareLanes() throws -> Set<PipelineLane> {
-        Set(try collect(MiddlewareRegistration.self).map(\.lane))
-    }
-
     private func collect<T: Sendable>(_ type: T.Type) throws -> [T] {
         try collectRegistrations(of: type)
     }
