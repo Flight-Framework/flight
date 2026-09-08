@@ -34,7 +34,7 @@ struct ModuleTests {
 
     @Test("FlightOIDCModule supplies the validator and owns JWKS maintenance")
     func oidcModuleSuppliesValidator() throws {
-        let oidc = FlightOIDCModule()
+        let oidc = try FlightOIDCModule(configuration: minimalConfig)
         let container = try TestContainer.build(configuration: minimalConfig) {
             oidc
         }
@@ -53,13 +53,15 @@ struct ModuleTests {
 
     @Test("missing OIDC configuration fails at startup, not first request")
     func missingConfiguration() {
+        // Earlier than it used to be: the validator is built when the module
+        // is, so bad configuration fails at composition rather than at
+        // freeze().
         #expect(throws: (any Error).self) {
-            try TestContainer.build { FlightOIDCModule() }
+            try FlightOIDCModule(configuration: Configuration())
         }
         #expect(throws: (any Error).self) {
-            try TestContainer.build(
-                configuration: Configuration(values: ["security.oidc.issuer": testIssuer])
-            ) { FlightOIDCModule() }
+            try FlightOIDCModule(
+                configuration: Configuration(values: ["security.oidc.issuer": testIssuer]))
         }
     }
 
@@ -146,14 +148,9 @@ struct ModuleTests {
         let configuration = try OIDCSecurityConfiguration(issuer: testIssuer, audience: testAudience)
         let validator = OIDCTokenValidator(configuration: configuration, jwksSource: source)
 
-        let container = Container()
-        // The service resolves the concrete type now: it belongs to
-        // FlightOIDCModule, which registered it, so there is nothing to
-        // discover and no cast that can fail.
-        container.register(OIDCTokenValidator.self, scope: .singleton) { _ in validator }
-        try container.freeze()
-
-        let service = JWKSMaintenanceService(container: container)
+        // The service takes the validator it maintains — no container, and
+        // so nothing to discover and no cast that can fail.
+        let service = JWKSMaintenanceService(validator: validator)
         let run = Task { try await service.run() }
 
         // Poll until the pre-warm fetch lands.

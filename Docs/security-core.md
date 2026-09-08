@@ -246,9 +246,12 @@ For every request bearing `Authorization: Bearer <jwt>`:
 the `Authentication` middleware — but registers **no validator**. How tokens
 are validated is chosen by listing a module:
 
-- **`FlightOIDCModule`** for OIDC/JWT. It registers `OIDCTokenValidator` from
-  `security.oidc.*` and owns the JWKS maintenance service. It depends on
-  `FlightSecurityModule`, so listing it alone is enough.
+- **`FlightOIDCModule`** for OIDC/JWT. It builds `OIDCTokenValidator` from
+  `security.oidc.*` in its own initializer and owns the JWKS maintenance
+  service, which takes that validator directly. It depends on
+  `FlightSecurityModule`, so listing it alone is enough. Because the validator
+  is built when the module is, bad `security.oidc.*` configuration fails at
+  composition rather than at `freeze()`.
 - **A module of your own** that registers `(any TokenValidator)`, for session
   cookies, API keys, mTLS, HMAC, or anything else:
 

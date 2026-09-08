@@ -95,26 +95,40 @@ public final class FlightOIDCModule: FlightModule {
         [FlightSecurityModule.self]
     }
 
-    private var container: Container?
+    /// `security.oidc.*`, read once at composition.
+    public let settings: OIDCSecurityConfiguration
 
-    public init() {}
+    /// The validator, concretely — and what the JWKS refresher maintains.
+    public let validator: OIDCTokenValidator
+
+    public init(configuration: Configuration) throws {
+        let settings = try OIDCSecurityConfiguration(configuration: configuration)
+        self.settings = settings
+        self.validator = OIDCTokenValidator(configuration: settings)
+    }
+
+    /// This module takes its configuration, so it cannot be built from its
+    /// type — every supported path checks this and throws first.
+    public static var isTypeConstructible: Bool { false }
+
+    public init() {
+        preconditionFailure(
+            "FlightOIDCModule takes its configuration in init(configuration:), so it cannot be "
+                + "instantiated from its type. Pass `composedBy: flightComposeModules` to "
+                + "Flight.run — `flight new` writes that argument — or construct the module "
+                + "yourself and use the entry point taking module instances.")
+    }
 
     public func configure(_ container: Container) throws {
-        self.container = container
-
-        container.register(OIDCSecurityConfiguration.self, scope: .singleton) { c in
-            try OIDCSecurityConfiguration(configuration: c.resolve(Configuration.self))
-        }
-        container.register(OIDCTokenValidator.self, scope: .singleton) { c in
-            OIDCTokenValidator(configuration: try c.resolve(OIDCSecurityConfiguration.self))
-        }
-        container.register((any TokenValidator).self, scope: .singleton) { c in
-            try c.resolve(OIDCTokenValidator.self)
-        }
+        let settings = self.settings
+        let validator = self.validator
+        container.register(OIDCSecurityConfiguration.self, scope: .singleton) { _ in settings }
+        container.register(OIDCTokenValidator.self, scope: .singleton) { _ in validator }
+        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
     }
 
     public var service: (any Service)? {
-        container.map { JWKSMaintenanceService(container: $0) }
+        JWKSMaintenanceService(validator: validator)
     }
 }
 
@@ -124,23 +138,26 @@ public final class FlightOIDCModule: FlightModule {
 /// token validation falls back to lazy fetching (and stale-serving), so an
 /// IdP blip never takes the app down.
 ///
-/// Holds the container only because `FlightModule.service` is read before
-/// `freeze()`, so the validator cannot be handed over at construction. That
-/// indirection goes away with composition; see COMPOSITION-MIGRATION.md §3.
+/// Takes the validator it maintains. It used to hold a `Container` and
+/// resolve at `run()`, because `FlightModule.service` is read before
+/// `freeze()` and the validator did not exist yet — the indirection
+/// COMPOSITION-MIGRATION.md §3 said would go away with composition.
+/// `FlightOIDCModule` builds the validator in its own initializer, so there
+/// is nothing left to look up.
 final class JWKSMaintenanceService: Service {
-    private let container: Container
+    private let validator: OIDCTokenValidator
     private let logger = Logger(label: "flight.security.jwks")
 
-    init(container: Container) {
-        self.container = container
+    init(validator: OIDCTokenValidator) {
+        self.validator = validator
     }
 
     func run() async throws {
-        // Unconditional now: this service belongs to FlightOIDCModule, which
-        // registered the validator it maintains. Previously it lived on the
-        // security module, could not know whether OIDC was in play, and had
-        // to park forever when it wasn't.
-        let validator = try container.resolve(OIDCTokenValidator.self)
+        // Unconditional: this service belongs to FlightOIDCModule, which owns
+        // the validator it maintains. Previously it lived on the security
+        // module, could not know whether OIDC was in play, and had to park
+        // forever when it wasn't.
+        let validator = self.validator
         let interval = Duration.seconds(max(validator.keyRefreshInterval, 60))
         do {
             try await cancelWhenGracefulShutdown {
