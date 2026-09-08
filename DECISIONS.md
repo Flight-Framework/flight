@@ -7,6 +7,98 @@ wrong, say so and it changes.
 
 ---
 
+## D11 — A module is a value that holds what it provides
+
+**The question.** `FlightModule.configure(_ container: Container)` is the last
+thing keeping `Container` alive: 15 imperative registrations, the 7 framework
+`context.resolve` sites that depend on them, and everything on §3's list that
+those hold up. What replaces it, such that an optional subsystem's components
+reach the generated graph *only when the application included that module*?
+
+**Chosen.** A module stops registering components and starts **owning** them.
+It declares what it needs as initializer parameters and what it provides as
+stored properties:
+
+```swift
+public struct FlightChannelsModule: FlightModule {
+    public static var dependencies: [any FlightModule.Type] { [FlightPubSubModule.self] }
+
+    public let router: ChannelRouter
+    public let broadcaster: ChannelBroadcaster
+
+    public init(configuration: Configuration, pubsub: any PubSub) throws {
+        let settings = try ChannelsConfiguration(configuration: configuration)
+        self.router = ChannelRouter(settings: settings)
+        self.broadcaster = ChannelBroadcaster(pubsub: pubsub)
+    }
+}
+```
+
+`FlightGraph` then holds the modules the application listed, and reaching a
+framework component is `graph.channels.broadcaster` — two field loads, no
+dictionary, no lock. Modules are nodes in the same graph as components,
+ordered by the same `dependencies` DAG the runtime already resolves, taking
+each other's products as parameters.
+
+**Why this one.** It is what someone with no DI background would write. A
+module is a struct with `let` properties and an `init`; the docs sentence is
+"a module is a value that holds what it provides", and the follow-up question
+"how do I get at what it provides" answers itself. There is no registry, no
+bag, no lifetime vocabulary, and no second concept to learn — the mechanism a
+module uses is the mechanism a component already uses.
+
+It also deletes rather than adds:
+
+- **Conditional inclusion stops being a runtime question.** The bootstrap
+  list is a literal in the application's own source, which the generator
+  already scans, and the `dependencies` DAG is already resolved there for
+  lane ordering. A module the app did not list is simply not a property.
+  That is what `flight:module-registered` exists to work around, and the
+  marker goes with it.
+- **The `service` timing workaround dissolves.** Modules hold a container
+  today *only* because `service` is read before `freeze()`, so resolution has
+  to be deferred into `run()` — §3 counts those wrappers as the largest
+  category on the deletion list. A module that already holds its components
+  can build its service from them directly.
+- **The awkward cases get easier, not harder.** `(any PubSub)` falling back
+  to a local implementation, and `PresenceTracker`'s three-way mode choice,
+  are today container scans that ask "did anyone register an adapter". They
+  become `init(adapter: (any DistributedPubSubAdapter)?)` and a `switch` —
+  ordinary Swift, in the open, testable by calling it.
+
+**Alternatives.**
+
+- *Annotate framework components with their module* (`@Component(module:
+  FlightChannelsModule.self)`). Smaller change, keeps `configure`. Rejected:
+  it adds a concept — a back-reference from component to module — to preserve
+  a mechanism we are trying to remove, and it does not touch the `service`
+  workaround or the container-scan branches.
+- *Attribute components by the Swift module they are declared in.* Needs no
+  syntax at all and is tempting, but FlightSecurityCore declares both
+  `FlightSecurityModule` and `FlightOIDCModule`; an app including only the
+  first would get an OIDC validator built with no configuration. Too coarse
+  by exactly the case §2.8 was built around.
+- *Scan each `configure` body and transplant its registrations into the
+  graph.* No new syntax, and it is the shape I reached for first. Rejected:
+  a factory body is arbitrary Swift, so this is a source-to-source rewrite of
+  `c.resolve(T.self)` into graph references — the "arbitrary wiring is
+  genuinely lost" case §2.6 already identified, dressed up as automation.
+
+**What it costs.** `init()` becomes an initializer with parameters, so
+`Flight.bootstrap(modules: [Type.self])` cannot instantiate modules itself —
+the generated composition root does, which is the same shift §2.8 declined to
+make for the token validator alone and is now paid for once, for everything.
+That is a breaking change to the first thing a new user encounters, and it is
+the reason this is a decision rather than a refactor.
+
+**Actuator's `FLIGHT_ENV` is a separate half, and stays separate.** The
+module holding an `ActuatorController` is unconditional; whether its *routes*
+install is the runtime question. That is §2.9a's install predicate — static
+manifest entry, boolean evaluated once at boot — and it keeps the property
+that a disabled actuator has no route rather than a route that 404s.
+
+---
+
 ## D10 — Per-request construction is not shipped until the terminal can pass request values
 
 **Context.** Step 6's spike proves per-request construction works for all
