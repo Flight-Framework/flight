@@ -7,8 +7,8 @@ import Testing
 @Suite("Topic patterns and routing")
 struct RouterTests {
 
-    private func registration(_ pattern: String) throws -> ChannelRegistration {
-        ChannelRegistration(pattern: try TopicPattern(parsing: pattern)) { CatchAllChannel() }
+    private func registration(_ pattern: String) -> ChannelRegistration {
+        ChannelRegistration(pattern) { _ in CatchAllChannel() }
     }
 
     @Test("pattern language: exact, trailing wildcard, catch-all — nothing else")
@@ -30,20 +30,20 @@ struct RouterTests {
     @Test("most specific wins: exact over wildcard, longer prefix over shorter")
     func specificity() throws {
         let router = try ChannelRouter(registrations: [
-            try registration("*"),
-            try registration("room:*"),
-            try registration("room:admin:*"),
-            try registration("room:admin:hq"),
+            registration("*"),
+            registration("room:*"),
+            registration("room:admin:*"),
+            registration("room:admin:hq"),
         ])
-        #expect(router.match("room:admin:hq")?.pattern.description == "room:admin:hq")
-        #expect(router.match("room:admin:1")?.pattern.description == "room:admin:*")
-        #expect(router.match("room:7")?.pattern.description == "room:*")
-        #expect(router.match("elsewhere")?.pattern.description == "*")
+        #expect(router.match("room:admin:hq")?.topicPattern == "room:admin:hq")
+        #expect(router.match("room:admin:1")?.topicPattern == "room:admin:*")
+        #expect(router.match("room:7")?.topicPattern == "room:*")
+        #expect(router.match("elsewhere")?.topicPattern == "*")
     }
 
     @Test("no match is nil, not a crash")
     func noMatch() throws {
-        let router = try ChannelRouter(registrations: [try registration("room:*")])
+        let router = try ChannelRouter(registrations: [registration("room:*")])
         #expect(router.match("game:1") == nil)
     }
 
@@ -51,25 +51,29 @@ struct RouterTests {
     func duplicates() throws {
         #expect(throws: ChannelsError.duplicateTopicPattern("room:*")) {
             try ChannelRouter(registrations: [
-                try registration("room:*"),
-                try registration("room:*"),
+                registration("room:*"),
+                registration("room:*"),
             ])
         }
     }
 
-    @Test("an invalid pattern registered via a module fails the app at freeze()")
-    func invalidPatternFailsBootstrap() {
+    @Test("an invalid pattern declared by a module fails composition")
+    func invalidPatternFailsBootstrap() throws {
         struct BadPatternModule: FlightModule {
-            static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
-            func configure(_ container: Container) throws {
-                container.registerChannel("bad*pattern") { _ in CatchAllChannel() }
-            }
+            let channels = [ChannelRegistration("bad*pattern") { _ in CatchAllChannel() }]
+            func configure(_ container: Container) throws {}
         }
-        #expect(throws: (any Error).self) {
-            try TestContainer.build {
-                try FlightPubSubModule(configuration: Configuration())
-                BadPatternModule()
-            }
+        // Earlier than it used to be: this was a freeze() failure, because the
+        // router was built from whatever the container had collected. The
+        // router is now built when Channels is, so a malformed pattern fails
+        // before there is a container at all.
+        let configuration = Configuration()
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        #expect(throws: ChannelsError.self) {
+            try FlightChannelsModule(
+                bus: pubsub.bus,
+                configuration: configuration,
+                channels: BadPatternModule().channels)
         }
     }
 
@@ -78,7 +82,7 @@ struct RouterTests {
         let harness = try Harness()
         let router = try harness.container.resolve(ChannelRouter.self)
         #expect(router.match("room:1") != nil)
-        #expect(router.match("lobby")?.pattern.description == "lobby")
+        #expect(router.match("lobby")?.topicPattern == "lobby")
         _ = try harness.container.resolve(ChannelBroadcaster.self)
         let configuration = try harness.container.resolve(ChannelsConfiguration.self)
         #expect(configuration.heartbeatTimeout == .seconds(5))

@@ -121,25 +121,29 @@ struct CatchAllChannel: Channel {
 /// `"…:member"` / `"…:admin"` suffixes grant roles (":" because "+" in a
 /// query decodes as a space).
 struct ChannelsFixtureModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] {
-        [FlightChannelsModule.self]
+    /// Declared as values, so this module no longer depends on
+    /// `FlightChannelsModule` — it is the other way round now.
+    let channels: [ChannelRegistration]
+
+    init() {
+        self.channels = [
+            ChannelRegistration("room:*", source: "ChannelsFixtureModule") { context in
+                RoomChannel(
+                    broadcaster: try context.resolve(ChannelBroadcaster.self),
+                    events: try context.resolve(ChannelEvents.self)
+                )
+            },
+            ChannelRegistration("lobby", source: "ChannelsFixtureModule") { _ in
+                LobbyChannel()
+            },
+            ChannelRegistration("*", source: "ChannelsFixtureModule") { _ in
+                CatchAllChannel()
+            },
+        ]
     }
 
     func configure(_ container: Container) throws {
         container.register(ChannelEvents.self, scope: .singleton) { _ in ChannelEvents() }
-
-        container.registerChannel("room:*", source: "ChannelsFixtureModule") { container in
-            RoomChannel(
-                broadcaster: try container.resolve(ChannelBroadcaster.self),
-                events: try container.resolve(ChannelEvents.self)
-            )
-        }
-        container.registerChannel("lobby", source: "ChannelsFixtureModule") { _ in
-            LobbyChannel()
-        }
-        container.registerChannel("*", source: "ChannelsFixtureModule") { _ in
-            CatchAllChannel()
-        }
 
         container.registerChannelSocket("/socket") { context in
             principal(from: context)
@@ -176,11 +180,17 @@ struct Harness {
             "flight.channels.heartbeat-timeout-seconds": "\(heartbeatTimeoutSeconds)",
             "flight.channels.heartbeat-check-interval-seconds": "\(checkIntervalSeconds)",
         ])
+        // The wiring, written out: this is what the generated composition
+        // root does for an application. PubSub's bus and the fixture's
+        // declared channels are what Channels is built from, so all three are
+        // constructed here rather than instantiated from their types.
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let fixture = ChannelsFixtureModule()
         self.container = try TestContainer.build(configuration: configuration) {
-            // PubSub takes its configuration now, so it is supplied rather
-            // than instantiated from its type by the DAG walk.
-            try FlightPubSubModule(configuration: configuration)
-            ChannelsFixtureModule()
+            pubsub
+            fixture
+            try FlightChannelsModule(
+                bus: pubsub.bus, configuration: configuration, channels: fixture.channels)
         }
         self.client = try TestClient(container: container)
     }

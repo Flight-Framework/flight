@@ -98,12 +98,13 @@ struct WireChannel: Channel {
 }
 
 struct E2EModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("wire:*") { context in
+            WireChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
+        }
+    ]
 
     func configure(_ container: Container) throws {
-        container.registerChannel("wire:*") { container in
-            WireChannel(broadcaster: try container.resolve(ChannelBroadcaster.self))
-        }
         container.registerChannelSocket("/socket")
     }
 }
@@ -114,9 +115,13 @@ func withRunningChannelServer(
     _ body: @escaping @Sendable (_ port: Int) async throws -> Void
 ) async throws {
     let configuration = Configuration()
+    let pubsub = try FlightPubSubModule(configuration: configuration)
+    let app = E2EModule()
     let container = try TestContainer.build(configuration: configuration) {
-        try FlightPubSubModule(configuration: configuration)
-        E2EModule()
+        pubsub
+        app
+        try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: app.channels)
     }
     let dispatch = try TestClient(container: container).dispatch
 

@@ -97,21 +97,18 @@ struct FrameworkSeamTests {
 
     private func harness() throws -> (client: TestClient, probe: SeamProbe) {
         let probe = SeamProbe()
+        let configuration = Configuration()
         let container = Container()
-        container.register(Configuration.self, scope: .singleton) { _ in Configuration() }
-        struct SeamModule: FlightModule {
-            static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
-            func configure(_ container: Container) throws {}
-        }
-        // PubSub takes its configuration now, so it is built rather than
-        // instantiated from its type by the DAG walk.
-        let pubsub = try FlightPubSubModule(configuration: Configuration())
-        for moduleType in try Flight.resolveModuleOrder([SeamModule.self]) {
-            let module: any FlightModule =
-                moduleType == FlightPubSubModule.self ? pubsub : moduleType.init()
-            try module.configure(container)
-        }
-        container.registerChannel("seam:*") { _ in SeamChannel(probe: probe) }
+        container.register(Configuration.self, scope: .singleton) { _ in configuration }
+        // Both modules take what they provide, so both are built here and
+        // configured directly — no type-based walk to substitute into.
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus,
+            configuration: configuration,
+            channels: [ChannelRegistration("seam:*") { _ in SeamChannel(probe: probe) }])
+        try pubsub.configure(container)
+        try channels.configure(container)
         container.registerChannelSocket("/socket")
         try container.freeze()
         return (try TestClient(container: container), probe)

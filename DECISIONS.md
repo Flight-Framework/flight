@@ -7,6 +7,62 @@ wrong, say so and it changes.
 
 ---
 
+## D15 — An aggregate parameter concatenates; that is what keeps extensions open
+
+**Chosen.** A parameter typed `[T]` is an *aggregate*: the composer collects
+every included module's `[T]` property and concatenates them in module order,
+rather than demanding exactly one provider. `[K: V]` is not an aggregate.
+
+**Why.** D14 treats two providers of one type as an error, which is right for a
+value — two modules offering an adapter means the application must say which.
+It is exactly wrong for a *contribution*. Channels, routes and scheduled jobs
+are all "every module that has one, please", and refusing the second provider
+would mean only one module in an application could ever declare a channel.
+
+This is the whole extension seam. A package flight has never heard of writes
+`public let channels: [ChannelRegistration]` and is wired in without the
+application enumerating it — the same openness `container.registerChannel`
+gave, minus the container and minus the post-`freeze()` collection that made
+it a cycle.
+
+**Cost of reversing.** The rule is four lines in the composer; the cost is in
+what depends on it — routes and scheduled jobs are meant to follow.
+
+**Alternative — one provider, and let the app merge them.** `FlightChannelsModule(channels: a.channels + b.channels)` written by hand in the composition root. Honest, and it makes adding an extension an edit to the application rather than adding a package. That is the property that matters most for extensions, so it loses.
+
+---
+
+## D16 — Channels' cycle was module granularity, not values
+
+**Chosen.** `ChannelRegistration` is a value a module holds, `FlightChannelsModule(bus:configuration:channels:)` builds the router in `init`, and the factory takes the `RequestContext` the socket was upgraded from. `Container.registerChannel` and `collectChannelRegistrations` are gone.
+
+**Why.** The reported cycle was: a module declaring a channel needs the `ChannelBroadcaster` that Channels provides, and Channels needs the declarations that module contributes. But the *values* form a chain — `bus -> ChannelBroadcaster -> RoomChannel` — with nothing circular in it. The cycle existed only because one module both provided the broadcaster and aggregated the declarations. Declaring a channel does not require having a broadcaster; *creating* one does, and that happens per join. Splitting those two moments dissolves it, with no phase system and no laziness.
+
+**What it bought beyond the cycle.** Malformed and duplicate patterns now fail
+when Channels is constructed, which is before the container is frozen rather
+than during `freeze()`. The router is immutable from birth instead of being
+assembled from whatever the container had collected.
+
+**Why the factory takes `RequestContext`.** It is the shape a route terminal
+already has, so when per-request construction lands (D10) channels convert
+through the same path rather than needing their own. Holding it for the
+socket's life is safe because ``Lifetime`` has exactly one case: every
+component is a singleton, so resolving later is the same lookup.
+
+**Why the pattern is parsed by `ChannelRouter`, not at the declaration.**
+`FlightModule` requires a *non-throwing* `init()`, so a module that had to
+`try` to state its own channels could not conform. Parsing in the router keeps
+declaration non-throwing and puts every pattern failure in one pass at
+composition.
+
+**What `dependencies` means now.** Inclusion, not ordering. `AppModule` still
+lists `FlightChannelsModule` — that is what pulls Channels into the
+application — while the composer builds `AppModule` *first*, because Channels
+takes its channels. The two meanings the property used to conflate are now
+separate, and only the composer needs to know the second.
+
+---
+
 ## D14 — The composer wires modules by value flow, and orders them by it too
 
 **Chosen.** A module's public stored properties are what it *provides*. The

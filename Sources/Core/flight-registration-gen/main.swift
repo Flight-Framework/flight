@@ -1081,6 +1081,27 @@ func providedTypeKey(_ typeText: String) -> String {
     return moduleKey(text)
 }
 
+/// `[T]` and `Array<T>` -> `T`; anything else -> nil.
+///
+/// Both spellings, because a module author writes whichever reads better and
+/// the composer has only source text to go on.
+func arrayElementType(_ typeText: String) -> String? {
+    var text = typeText.trimmingCharacters(in: .whitespaces)
+    while text.hasSuffix("?") || text.hasSuffix("!") {
+        text = String(text.dropLast()).trimmingCharacters(in: .whitespaces)
+    }
+    if text.hasPrefix("["), text.hasSuffix("]") {
+        let inner = String(text.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+        // `[K: V]` is a dictionary, not an aggregate of contributions.
+        return inner.contains(":") ? nil : inner
+    }
+    if text.hasPrefix("Array<"), text.hasSuffix(">") {
+        return String(text.dropFirst("Array<".count).dropLast())
+            .trimmingCharacters(in: .whitespaces)
+    }
+    return nil
+}
+
 struct SynthesizedBridge {
     /// The protocol name as written at the demand site (module qualification
     /// preserved) — re-embedded verbatim in the generated register call.
@@ -2044,6 +2065,36 @@ func emitComposer(into out: inout String) {
     /// of itself. Without that, `ActuatorModule`'s `init(environment:)` looks
     /// satisfiable by `ActuatorModule.environment` and the composer emits
     /// `let actuatorModule = ActuatorModule(environment: actuatorModule.environment)`.
+    /// Every module contributing to an aggregate parameter, in module order.
+    ///
+    /// An aggregate is a parameter typed `[T]`, and it is the one place where
+    /// several providers are right rather than ambiguous: channels, routes,
+    /// scheduled jobs. Each is a *contribution*, and the aggregator wants all
+    /// of them.
+    ///
+    /// This is what keeps the extension surface open. A module in a package
+    /// flight has never heard of exposes `let channels: [ChannelRegistration]`
+    /// and is wired in without the application enumerating it — the same
+    /// openness `container.registerChannel` gave, without the container and
+    /// without the post-`freeze()` collection that made it a cycle.
+    func contributors(to type: String, for consumer: String)
+        -> [(expression: String, module: String)]
+    {
+        guard let element = arrayElementType(type) else { return [] }
+        let wanted = providedTypeKey(element)
+        var found: [(expression: String, module: String)] = []
+        for name in includedModules where moduleKey(name) != moduleKey(consumer) {
+            guard let module = byName[moduleKey(name)] else { continue }
+            for property in module.provides {
+                guard let provided = arrayElementType(property.type),
+                      providedTypeKey(provided) == wanted
+                else { continue }
+                found.append(("\(binding(name)).\(property.name)", name))
+            }
+        }
+        return found
+    }
+
     func provider(of type: String, for consumer: String) -> (expression: String, module: String)? {
         let wanted = providedTypeKey(type)
         let candidates = includedModules.filter { moduleKey($0) != moduleKey(consumer) }
@@ -2091,6 +2142,14 @@ func emitComposer(into out: inout String) {
         label: String, type: String, for consumer: String, needing needed: inout Set<String>
     ) -> String?? {
         if baseName(type) == "Configuration" { return "\(label): configuration" }
+        // Aggregates first: `[T]` is a collection of contributions, not a
+        // single value some one module provides.
+        if arrayElementType(type) != nil {
+            let sources = contributors(to: type, for: consumer)
+            guard !sources.isEmpty else { return String?.none }  // nobody contributed
+            for source in sources { needed.insert(moduleKey(source.module)) }
+            return "\(label): \(sources.map(\.expression).joined(separator: " + "))"
+        }
         if let source = provider(of: type, for: consumer) {
             needed.insert(moduleKey(source.module))
             return "\(label): \(source.expression)"

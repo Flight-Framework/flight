@@ -39,12 +39,13 @@ struct CounterChannel: Channel {
 }
 
 struct ClientFixtureModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("counter:*") { context in
+            CounterChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
+        }
+    ]
 
     func configure(_ container: Container) throws {
-        container.registerChannel("counter:*") { container in
-            CounterChannel(broadcaster: try container.resolve(ChannelBroadcaster.self))
-        }
         container.registerChannelSocket("/socket")
     }
 }
@@ -62,9 +63,13 @@ struct ClientHarness {
             "flight.channels.heartbeat-timeout-seconds": "\(heartbeatTimeoutSeconds)",
             "flight.channels.heartbeat-check-interval-seconds": "0.03",
         ])
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let fixture = ClientFixtureModule()
         self.container = try TestContainer.build(configuration: configuration) {
-            try FlightPubSubModule(configuration: configuration)
-            ClientFixtureModule()
+            pubsub
+            fixture
+            try FlightChannelsModule(
+                bus: pubsub.bus, configuration: configuration, channels: fixture.channels)
         }
         self.testClient = try TestClient(container: container)
         self.transport = transportDecorator(InMemoryChannelTransport(testClient: testClient))

@@ -43,8 +43,8 @@ public struct BroadcastFrame: Sendable, Equatable, Codable {
 /// Registered as a singleton by `FlightChannelsModule`; resolve it from any
 /// channel factory or service:
 ///
-///     container.registerChannel("room:*") { c in
-///         RoomChannel(broadcaster: try c.resolve(ChannelBroadcaster.self))
+///     try ChannelRegistration("room:*") { context in
+///         RoomChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
 ///     }
 public struct ChannelBroadcaster: Sendable {
     /// Metadata key carrying the originating socket's `id` for

@@ -36,18 +36,24 @@ internal actor SocketSession {
     private var lastActivity = ContinuousClock.now
     private var isTornDown = false
 
+    /// The request the socket was upgraded from, handed to a channel factory
+    /// at join time — the same value a route terminal receives.
+    private let context: RequestContext
+
     internal init(
         router: ChannelRouter,
         pubsub: any PubSub,
         socket: Socket,
         outbound: AsyncStream<String>.Continuation,
-        logger: Logger
+        logger: Logger,
+        context: RequestContext
     ) {
         self.router = router
         self.pubsub = pubsub
         self.socket = socket
         self.outbound = outbound
         self.logger = logger
+        self.context = context
     }
 
     // MARK: - Liveness
@@ -114,7 +120,7 @@ internal actor SocketSession {
 
         let channel: any Channel
         do {
-            channel = try registration.makeChannel()
+            channel = try registration.makeChannel(context)
         } catch {
             logger.error("channel factory failed", metadata: [
                 "topic": "\(topic)", "source": "\(registration.source)", "error": "\(error)",

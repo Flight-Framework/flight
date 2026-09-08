@@ -10,44 +10,88 @@ import HTTPTypes
 ///
 /// - `ChannelsConfiguration` — heartbeat settings, read from the app
 ///   configuration once.
-/// - `ChannelRouter` — built at `freeze()` from every `ChannelRegistration`
-///   any module registered; duplicate or malformed topic patterns fail the
-///   app at bootstrap, before the socket route ever serves.
+/// - `ChannelRouter` — built at composition from every `ChannelRegistration`
+///   any module declared; duplicate or malformed topic patterns fail before
+///   the container is frozen, let alone before the socket route serves.
 /// - `ChannelBroadcaster` — the broadcast seam over `any PubSub`.
 ///
-/// An app module declares the dependency, registers its channels, and mounts
-/// the socket route:
+/// An app module *declares* its channels as a value and mounts the socket
+/// route. It no longer depends on this module: a channel is declared without
+/// a broadcaster, and given one when it is created.
 ///
 ///     struct AppModule: FlightModule {
-///         static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
+///         let channels: [ChannelRegistration]
+///         init() throws {
+///             self.channels = [
+///                 try ChannelRegistration("room:*", source: "AppModule") { context in
+///                     RoomChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
+///                 }
+///             ]
+///         }
 ///         func configure(_ container: Container) throws {
-///             container.registerChannel("room:*") { c in
-///                 RoomChannel(broadcaster: try c.resolve(ChannelBroadcaster.self))
-///             }
 ///             container.registerChannelSocket("/socket")
 ///         }
 ///     }
+///
+/// The composer collects `channels` from every module declaring any and
+/// passes them here, so an extension package contributes without the
+/// application listing it.
 public struct FlightChannelsModule: FlightModule {
     public static var dependencies: [any FlightModule.Type] {
         [FlightPubSubModule.self]
     }
 
-    public init() {}
+    /// Heartbeat and buffering settings, read once at composition.
+    public let settings: ChannelsConfiguration
 
+    /// The broadcast seam over `any PubSub`.
+    public let broadcaster: ChannelBroadcaster
+
+    /// Built here, from the channels every module declared — not at
+    /// `freeze()` from what the container happened to hold. Duplicate or
+    /// malformed topic patterns therefore fail composition, which is earlier
+    /// than bootstrap and much earlier than the first join.
+    public let router: ChannelRouter
+
+    /// - Parameters:
+    ///   - bus: The application's PubSub, from `FlightPubSubModule.bus`.
+    ///   - configuration: For `flight.channels.*`.
+    ///   - channels: Every declared channel, from every module that declares
+    ///     any. The composer concatenates them — see `ChannelRegistration`
+    ///     for why they are values rather than container registrations, and
+    ///     what cycle that removes.
+    public init(
+        bus: any PubSub,
+        configuration: Configuration,
+        channels: [ChannelRegistration] = []
+    ) throws {
+        self.settings = try ChannelsConfiguration(configuration: configuration)
+        self.broadcaster = ChannelBroadcaster(pubsub: bus)
+        self.router = try ChannelRouter(registrations: channels)
+    }
+
+    /// This module takes what it provides, so it cannot be built from its
+    /// type — every supported path checks this and throws first.
+    public static var isTypeConstructible: Bool { false }
+
+    public init() {
+        preconditionFailure(
+            "FlightChannelsModule takes its bus, configuration and channels in "
+                + "init(bus:configuration:channels:), so it cannot be instantiated from its type. "
+                + "Pass `composedBy: flightComposeModules` to Flight.run — `flight new` writes "
+                + "that argument — or construct the module yourself and use the entry point "
+                + "taking module instances.")
+    }
+
+    /// Projects what this module already holds. Nothing is built here, and in
+    /// particular the router is not: it exists before any container does.
     public func configure(_ container: Container) throws {
-        container.register(ChannelsConfiguration.self, scope: .singleton) { container in
-            try ChannelsConfiguration(configuration: container.resolve(Configuration.self))
-        }
-        // The factory runs at freeze(), after every module's configure —
-        // so registrations from modules that depend on this one are all
-        // visible (the same post-configure collection Web's route table
-        // relies on).
-        container.register(ChannelRouter.self, scope: .singleton) { container in
-            try ChannelRouter(registrations: container.collectChannelRegistrations())
-        }
-        container.register(ChannelBroadcaster.self, scope: .singleton) { container in
-            ChannelBroadcaster(pubsub: try container.resolve((any PubSub).self))
-        }
+        let settings = self.settings
+        let broadcaster = self.broadcaster
+        let router = self.router
+        container.register(ChannelsConfiguration.self, scope: .singleton) { _ in settings }
+        container.register(ChannelRouter.self, scope: .singleton) { _ in router }
+        container.register(ChannelBroadcaster.self, scope: .singleton) { _ in broadcaster }
     }
 }
 

@@ -858,6 +858,99 @@ struct GeneratorTests {
         #expect(valkey.lowerBound < pubsub.lowerBound)
     }
 
+    @Test("an array parameter collects from every contributing module, in order")
+    func composerConcatenatesAggregates() throws {
+        // The extension seam: two modules contribute channels, neither knows
+        // about the other, and the aggregator takes all of them. Several
+        // providers of one type is the *right* answer here, which is why an
+        // aggregate is not treated as the ambiguity a scalar would be.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct ChatModule: FlightModule {
+            let channels: [ChannelRegistration]
+            func configure(_ container: Container) throws {}
+            }
+            struct NotificationsModule: FlightModule {
+            let channels: [ChannelRegistration]
+            func configure(_ container: Container) throws {}
+            }
+            struct FlightChannelsModule: FlightModule {
+            init(channels: [ChannelRegistration] = []) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(),
+            modules: [FlightChannelsModule.self, ChatModule.self, NotificationsModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains(
+                "let flightChannelsModule = try FlightChannelsModule(channels: chatModule.channels + notificationsModule.channels)"
+            ))
+        // Both contributors are built before the aggregator, though the
+        // application listed the aggregator first.
+        let chat = try #require(result.generated.range(of: "let chatModule ="))
+        let channels = try #require(result.generated.range(of: "let flightChannelsModule ="))
+        #expect(chat.lowerBound < channels.lowerBound)
+    }
+
+    @Test("an aggregate nobody contributes to is omitted")
+    func composerOmitsEmptyAggregates() throws {
+        // The ordinary app with no channels at all. `[]` is the default, so
+        // the parameter is simply not passed.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct FlightChannelsModule: FlightModule {
+            init(channels: [ChannelRegistration] = []) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [FlightChannelsModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("let flightChannelsModule = try FlightChannelsModule()"))
+    }
+
+    @Test("a dictionary parameter is not an aggregate")
+    func composerDoesNotAggregateDictionaries() throws {
+        // `[String: String]` is one value, and ActuatorModule's `environment`
+        // is exactly that shape.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct EnvModule: FlightModule {
+            let environment: [String: String]
+            func configure(_ container: Container) throws {}
+            }
+            struct ConsumerModule: FlightModule {
+            init(environment: [String: String]) {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(), modules: [EnvModule.self, ConsumerModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains(
+                "let consumerModule = ConsumerModule(environment: envModule.environment)"))
+    }
+
     @Test("a module is never built out of its own property")
     func composerExcludesSelfAsProvider() throws {
         // ActuatorModule's real shape: a stored `environment` and an

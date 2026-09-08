@@ -42,28 +42,28 @@ struct MultiNodeTests {
         let client: TestClient
 
         init(cluster: InMemoryCluster) throws {
-            struct NodeModule: FlightModule {
-                static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
-                func configure(_ container: Container) throws {}
-            }
+            let configuration = Configuration()
             let container = Container()
-            container.register(Configuration.self, scope: .singleton) { _ in Configuration() }
+            container.register(Configuration.self, scope: .singleton) { _ in configuration }
             container.register(ChannelEvents.self, scope: .singleton) { _ in ChannelEvents() }
             // The adapter is handed to PubSub rather than registered for it
-            // to find — the direction the conversion reversed.
+            // to find, and PubSub's bus is handed to Channels along with this
+            // node's declared channels — the whole node, wired explicitly.
             let pubsub = try FlightPubSubModule(
-                configuration: Configuration(), adapter: cluster.makeAdapter())
-            for moduleType in try Flight.resolveModuleOrder([NodeModule.self]) {
-                let module: any FlightModule =
-                    moduleType == FlightPubSubModule.self ? pubsub : moduleType.init()
-                try module.configure(container)
-            }
-            container.registerChannel("room:*") { container in
-                RoomChannel(
-                    broadcaster: try container.resolve(ChannelBroadcaster.self),
-                    events: try container.resolve(ChannelEvents.self)
-                )
-            }
+                configuration: configuration, adapter: cluster.makeAdapter())
+            let channels = try FlightChannelsModule(
+                bus: pubsub.bus,
+                configuration: configuration,
+                channels: [
+                    ChannelRegistration("room:*") { context in
+                        RoomChannel(
+                            broadcaster: try context.resolve(ChannelBroadcaster.self),
+                            events: try context.resolve(ChannelEvents.self)
+                        )
+                    }
+                ])
+            try pubsub.configure(container)
+            try channels.configure(container)
             container.registerChannelSocket("/socket")
             try container.freeze()
             self.container = container

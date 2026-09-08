@@ -24,8 +24,8 @@ import struct Foundation.UUID
 ///     struct AppModule: FlightModule {
 ///         static var dependencies: [any FlightModule.Type] { [FlightPresenceModule.self] }
 ///         func configure(_ container: Container) throws {
-///             container.registerChannel("room:*") { c in
-///                 RoomChannel(presence: try c.resolve((any Presence).self))
+///             try ChannelRegistration("room:*") { context in
+///                 RoomChannel(presence: try context.resolve((any Presence).self))
 ///             }
 ///             container.registerChannelSocket("/socket")
 ///         }

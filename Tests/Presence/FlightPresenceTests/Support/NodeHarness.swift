@@ -57,20 +57,29 @@ final class PresenceNode: Sendable {
         }
 
         var services: [any Service] = []
-        // PubSub takes its configuration, so it is built here and
-        // substituted for the type the DAG walk would otherwise instantiate.
+        // Both PubSub and Channels take what they provide, so both are built
+        // here and substituted for the types the DAG walk would otherwise
+        // instantiate. This node's one channel is declared as a value, which
+        // is what Channels is built from.
+        let nodeConfiguration = Configuration(values: values)
         let pubsub = try FlightPubSubModule(
-            configuration: Configuration(values: values), adapter: adapter)
-        for moduleType in try Flight.resolveModuleOrder([NodeModule.self]) {
-            let module: any FlightModule =
-                moduleType == FlightPubSubModule.self ? pubsub : moduleType.init()
+            configuration: nodeConfiguration, adapter: adapter)
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus,
+            configuration: nodeConfiguration,
+            channels: [
+                ChannelRegistration("room:*") { context in
+                    PresenceRoomChannel(presence: try context.resolve((any Presence).self))
+                }
+            ])
+        let supplied = try Flight.instantiateModules(
+            try Flight.resolveModuleOrder([NodeModule.self]),
+            supplying: [pubsub, channels])
+        for module in supplied {
             try module.configure(container)
             if let service = module.service { services.append(service) }
         }
 
-        container.registerChannel("room:*") { container in
-            PresenceRoomChannel(presence: try container.resolve((any Presence).self))
-        }
         // Upgrade-time authentication (Channels): `?user=` names the
         // principal; absent means an anonymous (watch-only) socket.
         container.registerChannelSocket("/socket") { context in
