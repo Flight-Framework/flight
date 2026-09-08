@@ -100,9 +100,17 @@ struct LifecycleTests {
 
     @Test("a silent socket is closed past the heartbeat timeout — and channels leave")
     func heartbeatTimeout() async throws {
-        let harness = try Harness(heartbeatTimeoutSeconds: 0.15, checkIntervalSeconds: 0.03)
+        // The watchdog's clock starts at connect, not at join, so this window
+        // has to cover the handshake and the join round-trip as well as the
+        // silence being tested. At 0.15s it did not, on a cold or loaded
+        // machine: the socket was closed before the join landed, so no channel
+        // was ever joined and the leave assertion below failed instead — a
+        // race that read as a heartbeat bug. Still well under a second.
+        let harness = try Harness(heartbeatTimeoutSeconds: 0.5, checkIntervalSeconds: 0.03)
         let wire = try await harness.wire("/socket?token=alice")
-        _ = try await wire.join("room:1")
+        // Asserted, not discarded: if the join lost that race, this says so
+        // here rather than three lines later.
+        #expect(try await wire.join("room:1") != nil, "the join must land before the watchdog")
 
         // Send nothing. The watchdog must close us.
         var closeCode: WebSocketCloseCode?
