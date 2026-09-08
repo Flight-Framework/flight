@@ -1658,8 +1658,30 @@ out += """
     /// Registers every @Component visible from \(manifest.targetModuleName)
     /// (its own sources plus all Flight-based dependency modules). Call this
     /// from a FlightModule's configure(_:) or directly before freeze().
-    public func flightRegisterAll(_ container: FlightCore.Container) throws {
+
     """
+// The graph is built by the composition root and handed in, so the parameter
+// exists exactly when there is a graph to hand.
+if graphRegistrable.isEmpty {
+    out += "public func flightRegisterAll(_ container: FlightCore.Container) throws {\n"
+} else {
+    out += """
+        /// - Parameter graph: Every component, already constructed — the
+        ///   composition root builds it and passes it here. It used to be built
+        ///   from the container at `freeze()`, so an application's components
+        ///   were constructed by a factory rather than at the one place that
+        ///   knows how the application is assembled.
+        ///
+        /// Internal rather than public: `FlightGraph` is internal — an
+        /// application's components are internal by default and a public type
+        /// cannot expose them — and the composition root is in this module
+        /// too, so nothing needs either to be public.
+        func flightRegisterAll(
+            _ container: FlightCore.Container, graph: FlightGraph
+        ) throws {
+
+        """
+}
 // The graph first: every projected registration below resolves it, and an
 // application with components but no routes needs it just as much as one
 // with routes. Registration is deferred either way — nothing is constructed
@@ -1672,10 +1694,9 @@ out += """
 // type nothing registered, which the skeleton template caught and a richer
 // one could not.
 if !graphRegistrable.isEmpty {
-    out += "\n"
-    out += "    container.register(FlightGraph.self, scope: .singleton) { c in\n"
-    out += "        try makeFlightGraph(c)\n"
-    out += "    }\n"
+    out += "    // Projected, not built: route terminals resolve it to reach root\n"
+    out += "    // inputs, and they see the instance the composition root made.\n"
+    out += "    container.register(FlightGraph.self, scope: .singleton) { _ in graph }\n"
 }
 if autoRegistered.isEmpty {
     out += "\n    // No @Component types found in scope.\n"
@@ -1696,8 +1717,8 @@ if autoRegistered.isEmpty {
             let qualifierArgument = component.qualifierText.map { ", qualifier: \($0)" } ?? ""
             let stereotypeArgument = kind == "component" ? "" : ", stereotype: .\(kind)"
             out +=
-                "    container.register(\(qualified).self\(qualifierArgument), scope: .singleton\(stereotypeArgument)) { c in\n"
-            out += "        try c.resolve(FlightGraph.self).\(binding)\n"
+                "    container.register(\(qualified).self\(qualifierArgument), scope: .singleton\(stereotypeArgument)) { _ in\n"
+            out += "        graph.\(binding)\n"
             out += "    }\n"
         } else {
             // Its own thunk still constructs it. `@Settings` validates after
@@ -1762,6 +1783,21 @@ if !routes.isEmpty {
     out += "    try flightRegisterRoutes(container)\n"
 }
 out += "}\n"
+
+/// What `FlightGraph`'s initializer takes, published by `emitFlightGraph` for
+/// the composer to wire.
+///
+/// The graph's roots are exactly the things modules provide — a data source, a
+/// token validator — so once a module holds what it provides, the composition
+/// root can build the graph rather than a container factory building it at
+/// `freeze()`.
+struct GraphRoots {
+    var emitted = false
+    var needsConfiguration = false
+    /// (label, type as written), in initializer order.
+    var supplied: [(label: String, type: String)] = []
+}
+var graphRoots = GraphRoots()
 
 // MARK: - FlightGraph (§2.1, emitted unused)
 //
@@ -1855,6 +1891,13 @@ func emitFlightGraph(into out: inout String) {
     }
 
     let needsConfiguration = constructed.contains { !$0.configValues.isEmpty }
+
+    // Published for `emitComposer`, which builds the graph from module
+    // properties rather than leaving it to a container factory at freeze().
+    graphRoots = GraphRoots(
+        emitted: true,
+        needsConfiguration: needsConfiguration,
+        supplied: supplied.map { (label: suppliedBinding($0), type: $0) })
 
     out += "\n"
     out += "/// Every component this module declares, constructed once, in\n"
@@ -2142,6 +2185,13 @@ func emitComposer(into out: inout String) {
         label: String, type: String, for consumer: String, needing needed: inout Set<String>
     ) -> String?? {
         if baseName(type) == "Configuration" { return "\(label): configuration" }
+        // The graph is a value the composition root builds, not a module, so
+        // it is not in `includedModules` — but a module can take it, and the
+        // application's own module does.
+        if graphRoots.emitted, providedTypeKey(type) == "FlightGraph" {
+            needed.insert("FlightGraph")
+            return "\(label): flightGraph"
+        }
         // Aggregates first: `[T]` is a collection of contributions, not a
         // single value some one module provides.
         if arrayElementType(type) != nil {
@@ -2168,6 +2218,39 @@ func emitComposer(into out: inout String) {
     }
 
     var constructions: [Construction] = []
+
+    // The graph, built here rather than by a container factory at freeze().
+    //
+    // Its roots are the components modules provide, so they are matched the
+    // same way a module's initializer parameters are — which is the whole
+    // reason a module now *holds* what it provides. Sorted with the modules
+    // below, because it both needs them (its roots) and is needed by them
+    // (the application's module registers from it).
+    if graphRoots.emitted {
+        var arguments: [String] = []
+        var needs: Set<String> = []
+        if graphRoots.needsConfiguration { arguments.append("configuration: configuration") }
+        for root in graphRoots.supplied {
+            if let source = provider(of: root.type, for: "FlightGraph") {
+                needs.insert(moduleKey(source.module))
+                arguments.append("\(root.label): \(source.expression)")
+            } else {
+                arguments.append("\(root.label): <#nothing provides \(root.type)#>")
+                compositionDiagnostics.append(
+                    "The component graph needs \(root.type), and no module in this application "
+                        + "provides it. A module that owns it should expose it as a stored "
+                        + "property, which is how the composition root finds it.")
+            }
+        }
+        constructions.append(
+            Construction(
+                name: "FlightGraph",
+                statement:
+                    "    let flightGraph = try FlightGraph(\(arguments.joined(separator: ", ")))",
+                needs: needs,
+                arguments: arguments))
+    }
+
     for name in includedModules {
         let module = byName[moduleKey(name)]
         // The initializer the composer can actually supply, preferring the
@@ -2257,7 +2340,7 @@ func emitComposer(into out: inout String) {
     // so it must not reappear here. An aggregate is reported when some scanned
     // module *would* take it and is not in this application — which names the
     // module to add rather than merely observing that a property went unused.
-    let consumed = Set(constructions.flatMap { $0.arguments })
+    let consumed = Set(constructions.flatMap(\.arguments))
     for name in includedModules {
         guard let module = byName[moduleKey(name)] else { continue }
         for property in module.provides {
@@ -2285,7 +2368,7 @@ func emitComposer(into out: inout String) {
         out += construction.statement + "\n"
     }
     out += "    return [\n"
-    for construction in ordered {
+    for construction in ordered where construction.name != "FlightGraph" {
         out += "        \(binding(construction.name)),\n"
     }
     out += "    ]\n"

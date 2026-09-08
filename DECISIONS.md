@@ -7,6 +7,63 @@ wrong, say so and it changes.
 
 ---
 
+## D18 — The composition root builds the component graph
+
+**Chosen.** The generated composer builds `FlightGraph`, wiring its roots from
+module properties by the same type matching a module's own initializer
+parameters go through, and sorting it among the modules — after those providing
+its roots, before those registering from it. `flightRegisterAll` takes the
+graph (`flightRegisterAll(_:graph:)`) and projects from it;
+`container.register(FlightGraph.self) { _ in graph }` replaces
+`{ c in try makeFlightGraph(c) }`.
+
+**Why.** Components were *already* projected from the graph — the registration
+for each read `try c.resolve(FlightGraph.self).x` — so the graph was already
+the single construction point. Only the graph's own construction still happened
+at `freeze()`, from a container factory. Its roots are things modules provide
+(a pool, a token validator), which is exactly what D14's value flow matches now
+that a module holds what it provides. Nothing else had to move.
+
+**What it unblocks.** This was the shared blocker under Web, Scheduler and
+Actuator. A route terminal, a scheduled job and an actuator endpoint all need
+components at *invocation* time; with the graph a composition value, they can
+capture it instead of resolving it.
+
+**Consequences.**
+- `flightRegisterAll` is internal rather than public, because `FlightGraph` is
+  internal — deliberately, since an application's components are internal by
+  default and a public type cannot expose them. Nothing outside the target
+  called it.
+- An application module now takes the graph, so it declares
+  `init(graph:)`, `isTypeConstructible = false`, and a trapping `init()`.
+- A graph root nothing provides is a build error naming the type, and a module
+  that both needs the graph and provides one of its roots is a composition
+  cycle the build refuses by name. The demo hit the second: its
+  `(any TokenValidator)` was registered inside `AppModule`, and splitting it
+  into `DemoAuthModule` is the honest shape anyway — choosing how tokens are
+  validated is a deployment decision, which is what "a real deployment lists
+  `FlightOIDCModule` instead" already said.
+
+**Alternative — keep `makeFlightGraph(container)` and leave the graph at
+freeze.** Zero churn, and it keeps three modules blocked forever: a container
+factory cannot see what the composition root knows.
+
+---
+
+## D19 — Postgres owns its pool
+
+**Chosen.** `PostgresDataModule(configuration:)` builds `PostgresDataSource` in
+its initializer and exposes it as `dataSource`; `PostgresPoolService` takes the
+pool and loses both its `Container` and the `Name` generic parameter that
+existed only to rebuild a qualifier for the lookup.
+
+**Why.** The demo's graph needs a `PostgresDataSource` root, and a graph built
+at composition can only be handed things that exist at composition. A bad URL
+or pool size now fails when the module is built rather than at `freeze()` —
+earlier, and at the place that chose the URL.
+
+---
+
 ## D17 — Presence takes its adapter and monitor as arguments, and its service loses the container
 
 **Chosen.** `FlightPresenceModule(configuration:localBus:gossipBus:adapter:membershipMonitor:)`.

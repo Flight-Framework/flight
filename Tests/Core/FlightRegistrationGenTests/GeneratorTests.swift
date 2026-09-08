@@ -165,7 +165,8 @@ struct GeneratorTests {
         // manifest that follows has its own golden test — one assertion over
         // both would fail on every manifest field, which is not what this is
         // watching for.
-        let marker = "public func flightRegisterAll"
+        // Internal, not public: it takes `FlightGraph`, which is internal.
+        let marker = "func flightRegisterAll("
         let start = try #require(result.generated.range(of: marker)).lowerBound
         // The manifest's own doc comment precedes its declaration, so the
         // boundary is that comment, not the `public enum`.
@@ -176,16 +177,18 @@ struct GeneratorTests {
             .trimmingCharacters(in: .newlines)
         #expect(
             body == """
-                public func flightRegisterAll(_ container: FlightCore.Container) throws {
-                    container.register(FlightGraph.self, scope: .singleton) { c in
-                        try makeFlightGraph(c)
-                    }
+                func flightRegisterAll(
+                    _ container: FlightCore.Container, graph: FlightGraph
+                ) throws {
+                    // Projected, not built: route terminals resolve it to reach root
+                    // inputs, and they see the instance the composition root made.
+                    container.register(FlightGraph.self, scope: .singleton) { _ in graph }
 
-                    container.register(EnglishGreeter.self, scope: .singleton, stereotype: .service) { c in
-                        try c.resolve(FlightGraph.self).englishGreeter
+                    container.register(EnglishGreeter.self, scope: .singleton, stereotype: .service) { _ in
+                        graph.englishGreeter
                     }
-                    container.register(Welcomer.self, scope: .singleton) { c in
-                        try c.resolve(FlightGraph.self).welcomer
+                    container.register(Welcomer.self, scope: .singleton) { _ in
+                        graph.welcomer
                     }
 
                     // Existential bridges (demand-driven): each `@Inject var _: (any P)`
@@ -214,7 +217,7 @@ struct GeneratorTests {
         #expect(result.exitCode == 0)
         // Ordinary is a graph node, so its registration projects onto the
         // graph rather than calling its own thunk.
-        #expect(result.generated.contains("try c.resolve(FlightGraph.self).ordinary"))
+        #expect(result.generated.contains("graph.ordinary"))
         #expect(
             !result.generated.contains("let gated: Gated"),
             "a module-registered type is not a graph node either")
@@ -731,7 +734,7 @@ struct GeneratorTests {
         // The graph constructs; the container projects onto it.
         #expect(result.generated.contains("let userService = userService ?? UserService()"))
         #expect(
-            result.generated.contains("try c.resolve(FlightGraph.self).userService"),
+            result.generated.contains("graph.userService"),
             "the container registration must project, not construct a second copy")
         #expect(
             !result.generated.contains("try UserService._flightRegister"),
@@ -920,6 +923,70 @@ struct GeneratorTests {
         ])
         #expect(result.exitCode == 0)
         #expect(result.generated.contains("let flightChannelsModule = try FlightChannelsModule()"))
+    }
+
+    @Test("the composition root builds the graph from what modules provide")
+    func composerBuildsTheGraph() throws {
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct PoolModule: FlightModule {
+            let dataSource: DataSource
+            init() { self.dataSource = DataSource() }
+            func configure(_ container: Container) throws {}
+            }
+            struct AppModule: FlightModule {
+            let graph: FlightGraph
+            init(graph: FlightGraph) { self.graph = graph }
+            func configure(_ container: Container) throws {}
+            }
+            @Repository struct UserRepository { @Inject var pool: DataSource }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(), modules: [AppModule.self, PoolModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        // The graph's root is a module's property, matched by type — the same
+        // rule a module's own initializer parameters go through.
+        #expect(
+            result.generated.contains(
+                "let flightGraph = try FlightGraph(dataSource: poolModule.dataSource)"))
+        // And it sorts between them: after the module providing its root,
+        // before the module that registers from it.
+        let pool = try #require(result.generated.range(of: "let poolModule ="))
+        let graph = try #require(result.generated.range(of: "let flightGraph ="))
+        let app = try #require(result.generated.range(of: "let appModule ="))
+        #expect(pool.lowerBound < graph.lowerBound)
+        #expect(graph.lowerBound < app.lowerBound)
+        // The graph is a value, not a module: it is not in the returned list.
+        let returned = try #require(result.generated.range(of: "return ["))
+        #expect(!result.generated[returned.lowerBound...].contains("flightGraph,"))
+    }
+
+    @Test("a graph root nothing provides is a build error naming the type")
+    func composerReportsMissingGraphRoot() throws {
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct AppModule: FlightModule {
+            let graph: FlightGraph
+            init(graph: FlightGraph) { self.graph = graph }
+            func configure(_ container: Container) throws {}
+            }
+            @Repository struct UserRepository { @Inject var pool: DataSource }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [AppModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.generated.contains("#error("))
+        #expect(result.generated.contains("The component graph needs DataSource"))
     }
 
     @Test("a contribution nothing collects is a build error naming the module to add")
