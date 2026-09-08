@@ -215,6 +215,15 @@ struct ScannedModule {
     /// stripped: `PostgresDataModule<PrimaryDataSource>.self` is
     /// `PostgresDataModule`.
     let dependencies: [String]
+    /// The module's public stored properties — what it *provides*.
+    ///
+    /// D11 says a module is a value that holds what it provides, which makes
+    /// its stored properties the outputs of the composition graph:
+    /// `FlightPubSubValkeyModule.adapter` is what
+    /// `FlightPubSubModule(configuration:adapter:)` takes. Matching them by
+    /// type is how one module's output becomes another's input without either
+    /// naming the other.
+    let provides: [(name: String, type: String)]
     let module: String
 }
 
@@ -388,10 +397,32 @@ final class ModuleVisitor: SyntaxVisitor {
         // A module declaring none conforms through the protocol's own
         // requirement, which is `init()`.
         if initializers.isEmpty { initializers = [(labels: [], types: [], throws: false)] }
+        // Stored properties, with an explicit type and reachable from the
+        // composition root. Computed ones are excluded because `var service:
+        // (any Service)?` is one, and a module's service is bootstrap's to
+        // collect, not another module's to take.
+        var provides: [(name: String, type: String)] = []
+        for member in members.members {
+            guard let variable = member.decl.as(VariableDeclSyntax.self),
+                  !variable.modifiers.contains(where: {
+                      $0.name.tokenKind == .keyword(.static)
+                          || $0.name.tokenKind == .keyword(.private)
+                          || $0.name.tokenKind == .keyword(.fileprivate)
+                  })
+            else { continue }
+            for binding in variable.bindings {
+                guard binding.accessorBlock == nil,
+                      let type = binding.typeAnnotation?.type.trimmedDescription,
+                      let identifier = binding.pattern.as(IdentifierPatternSyntax.self)?
+                          .identifier.text
+                else { continue }
+                provides.append((name: identifier, type: type))
+            }
+        }
         modules.append(
             ScannedModule(
                 typeName: name, initializers: initializers,
-                dependencies: dependencies, module: module))
+                dependencies: dependencies, provides: provides, module: module))
     }
 
     /// The elements of the array literal a `dependencies` property returns,
@@ -1025,6 +1056,29 @@ func existentialProtocolName(_ typeText: String) -> String? {
         name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." })
     else { return nil }
     return name
+}
+
+/// The key two types are matched on when one is provided and the other
+/// demanded: base name, with optionality, parentheses, `any`, and generic
+/// arguments stripped.
+///
+/// `existentialProtocolName` deliberately refuses an optional — it decides
+/// whether to synthesize a bridge, and `(any P)?` is not a registrable
+/// component. Composition asks a different question: `adapter: (any
+/// DistributedPubSubAdapter)?` and `let adapter: any DistributedPubSubAdapter`
+/// are the same seam, and the `?` only says the parameter may be omitted.
+func providedTypeKey(_ typeText: String) -> String {
+    var text = typeText.trimmingCharacters(in: .whitespaces)
+    while text.hasSuffix("?") || text.hasSuffix("!") {
+        text = String(text.dropLast()).trimmingCharacters(in: .whitespaces)
+    }
+    while text.hasPrefix("("), text.hasSuffix(")") {
+        text = String(text.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+    }
+    if text.hasPrefix("any ") {
+        text = String(text.dropFirst("any ".count)).trimmingCharacters(in: .whitespaces)
+    }
+    return moduleKey(text)
 }
 
 struct SynthesizedBridge {
@@ -1971,12 +2025,52 @@ func emitComposer(into out: inout String) {
         let name = moduleKey(text)
         return name.prefix(1).lowercased() + name.dropFirst()
     }
-    /// The module whose type matches a parameter — how one module's output
-    /// becomes another's input. Matched by type name, the same way the
-    /// component graph matches an existential to its single conformer.
-    func provider(of type: String) -> String? {
-        let wanted = moduleKey(existentialProtocolName(type) ?? type)
-        return includedModules.first { moduleKey($0) == wanted }
+    // Carried into the generated file as `#error`, rather than to stderr.
+    // A composition that cannot be wired should fail the consumer's build with
+    // the reason attached, at a line their compiler points at — not as a
+    // warning scrolled past on the way to a confusing type error.
+    var compositionDiagnostics: [String] = []
+    /// Where a parameter's value comes from: another module, or a property of
+    /// one. This is how one module's output becomes another's input, and
+    /// neither module names the other — the type is the whole connection.
+    ///
+    /// Two shapes, tried in that order. A parameter whose type *is* a module
+    /// takes that module. Otherwise the parameter is matched against the
+    /// public stored properties of every included module, which is what
+    /// carries `FlightPubSubValkeyModule.adapter` into
+    /// `FlightPubSubModule(configuration:adapter:)`.
+    ///
+    /// `consumer` is excluded from both searches: a module cannot be built out
+    /// of itself. Without that, `ActuatorModule`'s `init(environment:)` looks
+    /// satisfiable by `ActuatorModule.environment` and the composer emits
+    /// `let actuatorModule = ActuatorModule(environment: actuatorModule.environment)`.
+    func provider(of type: String, for consumer: String) -> (expression: String, module: String)? {
+        let wanted = providedTypeKey(type)
+        let candidates = includedModules.filter { moduleKey($0) != moduleKey(consumer) }
+        if let module = candidates.first(where: { moduleKey($0) == wanted }) {
+            return (binding(module), module)
+        }
+        var matches: [(expression: String, module: String)] = []
+        for name in candidates {
+            guard let module = byName[moduleKey(name)] else { continue }
+            for property in module.provides where providedTypeKey(property.type) == wanted {
+                matches.append(("\(binding(name)).\(property.name)", name))
+            }
+        }
+        switch matches.count {
+        case 0: return nil
+        case 1: return matches[0]
+        default:
+            // Ambiguity is a composition error, not something to guess at: two
+            // modules offering the same type means the application has to say
+            // which. Reported, and left to fail the build at the call site.
+            compositionDiagnostics.append(
+                "Composition is ambiguous: "
+                    + matches.map(\.expression).sorted().joined(separator: " and ")
+                    + " both provide \(wanted). Remove one, or give the consuming module an "
+                    + "initializer that names which it wants.")
+            return nil
+        }
     }
 
     out += "\n"
@@ -1993,13 +2087,26 @@ func emitComposer(into out: inout String) {
     /// An optional parameter with no provider is *omittable* rather than
     /// unsatisfiable — `adapter: (any DistributedPubSubAdapter)?` means "not
     /// in this deployment", which is §2.6's mechanism (3).
-    func argument(label: String, type: String) -> String?? {
+    func argument(
+        label: String, type: String, for consumer: String, needing needed: inout Set<String>
+    ) -> String?? {
         if baseName(type) == "Configuration" { return "\(label): configuration" }
-        if let source = provider(of: type) { return "\(label): \(binding(source))" }
+        if let source = provider(of: type, for: consumer) {
+            needed.insert(moduleKey(source.module))
+            return "\(label): \(source.expression)"
+        }
         if type.hasSuffix("?") { return String?.none }  // omittable
         return nil  // unsatisfiable
     }
 
+    /// One module's construction, and which other modules it had to draw on.
+    struct Construction {
+        let name: String
+        let statement: String
+        let needs: Set<String>
+    }
+
+    var constructions: [Construction] = []
     for name in includedModules {
         let module = byName[moduleKey(name)]
         // The initializer the composer can actually supply, preferring the
@@ -2009,19 +2116,25 @@ func emitComposer(into out: inout String) {
         var arguments: [String] = []
         var satisfiable = false
         var canThrow = false
+        var needs: Set<String> = []
         for candidate in (module?.initializers ?? [(labels: [], types: [], throws: false)])
             .sorted(by: { $0.labels.count > $1.labels.count })
         {
             var built: [String] = []
+            var candidateNeeds: Set<String> = []
             var ok = true
             for (label, type) in zip(candidate.labels, candidate.types) {
-                guard let resolved = argument(label: label, type: type) else { ok = false; break }
+                guard
+                    let resolved = argument(
+                        label: label, type: type, for: name, needing: &candidateNeeds)
+                else { ok = false; break }
                 if let resolved { built.append(resolved) }
             }
             if ok {
                 arguments = built
                 satisfiable = true
                 canThrow = candidate.throws
+                needs = candidateNeeds
                 break
             }
         }
@@ -2032,14 +2145,62 @@ func emitComposer(into out: inout String) {
         }
         // `try` only where the initializer throws: an unnecessary one is a
         // warning in every consumer's build.
-        out += "    let \(binding(name)) = \(canThrow ? "try " : "")\(name)(\(arguments.joined(separator: ", ")))\n"
+        constructions.append(
+            Construction(
+                name: name,
+                statement:
+                    "    let \(binding(name)) = \(canThrow ? "try " : "")\(name)(\(arguments.joined(separator: ", ")))",
+                needs: needs))
+    }
+
+    // A provider has to be built before whoever draws on it, and that ordering
+    // no longer comes from `dependencies`: inverting the PubSub adapter
+    // direction means `FlightPubSubValkeyModule` is a dependency of
+    // `FlightPubSubModule` that flight cannot declare, because flight does not
+    // know flight-data exists. The value flow says it instead — B takes a
+    // property of A, therefore A first — which is the real edge, and the one
+    // `dependencies` was always an approximation of.
+    //
+    // A stable sort over the declared order, so a module needing nothing stays
+    // exactly where the module graph put it.
+    var ordered: [Construction] = []
+    var placed: Set<String> = []
+    var remaining = constructions
+    while !remaining.isEmpty {
+        guard
+            let index = remaining.firstIndex(where: {
+                $0.needs.isSubset(of: placed)
+            })
+        else {
+            // A cycle: two modules each wanting something the other holds.
+            // Emit the rest in declared order so the failure is Swift's
+            // "used before initialized" at a named line, not a silent
+            // reordering that happens to compile.
+            compositionDiagnostics.append(
+                "Modules "
+                    + remaining.map(\.name).sorted().joined(separator: ", ")
+                    + " form a composition cycle: each needs a value another holds. Break it by "
+                    + "moving the shared value into a module both can take it from.")
+            ordered.append(contentsOf: remaining)
+            break
+        }
+        let next = remaining.remove(at: index)
+        placed.insert(moduleKey(next.name))
+        ordered.append(next)
+    }
+
+    for construction in ordered {
+        out += construction.statement + "\n"
     }
     out += "    return [\n"
-    for name in includedModules {
-        out += "        \(binding(name)),\n"
+    for construction in ordered {
+        out += "        \(binding(construction.name)),\n"
     }
     out += "    ]\n"
     out += "}\n"
+    for diagnostic in compositionDiagnostics {
+        out += "#error(\"\(diagnostic.replacingOccurrences(of: "\"", with: "'"))\")\n"
+    }
 }
 
 // MARK: - Static route manifest

@@ -7,6 +7,53 @@ wrong, say so and it changes.
 
 ---
 
+## D14 — The composer wires modules by value flow, and orders them by it too
+
+**Chosen.** A module's public stored properties are what it *provides*. The
+generated composer matches a module's initializer parameters against those
+properties by type — emitting `flightPubSubValkeyModule.adapter` for
+`FlightPubSubModule(configuration:adapter:)` — and topologically orders the
+modules by the edges that match creates, on top of the declared-dependency
+order.
+
+**Why.** Inverting the adapter direction left an edge that `dependencies`
+structurally cannot express: `FlightPubSubValkeyModule` must be built and
+configured before `FlightPubSubModule`, but flight cannot declare a dependency
+on flight-data, and flight-data declaring the reverse is exactly the coupling
+the inversion removed. Something had to carry that ordering, and the value flow
+already does — B takes a property of A, therefore A first. That is the real
+edge; `dependencies` was always an approximation of it, hand-maintained.
+
+Without this the composer omitted `adapter:` as an unsatisfiable optional, so a
+clustered application composed as single-node. Not silently — PubSub's
+`requireNoUnloadedAdapter` sees `pubsub.valkey.url` and fails assembly — but
+the failure would have said "you configured Valkey and did not load its
+module" to someone who had loaded it.
+
+**Consequences.** Neither module names the other; the type is the whole
+connection, which is what lets an adapter live in a package flight has never
+heard of. Two modules providing the same type is refused rather than guessed
+at, and a cycle is reported — both as `#error` in the generated file, so the
+consumer's compiler points at the reason instead of at a downstream type error.
+
+**What it cost to get right.** Matching by type made a module's own property a
+candidate for its own parameter, and the composer emitted
+`ActuatorModule(environment: actuatorModule.environment)`. The generator's own
+fixtures did not catch it; building the demo template did. There is now a test.
+
+**Alternative — declare the edge in `dependencies` after all.** Would mean
+either flight depending on flight-data, or the adapter module depending on
+PubSub, which is the coupling this whole change removes.
+
+**Alternative — match by conformance rather than by written type.** Would let
+`FlightPubSubValkeyModule` expose the concrete `ValkeyPubSubAdapter`. Rejected:
+the generator scans source text and its conformance map only covers scanned
+`@Component` types, so a plain adapter struct is invisible to it. Requiring the
+provider to publish the existential is one word in the declaration and states
+the contract — "provides an adapter", not "provides a Valkey adapter".
+
+---
+
 ## D13 — A converted module says it cannot be built from its type; the walk refuses
 
 **Chosen.** `FlightModule` gains `static var isTypeConstructible: Bool`,

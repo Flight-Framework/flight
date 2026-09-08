@@ -820,6 +820,161 @@ struct GeneratorTests {
             ))
     }
 
+    @Test("a module's property is wired into another module's parameter")
+    func composerWiresProvidedProperties() throws {
+        // The adapter shape: the provider declares no dependency on the
+        // consumer and the consumer cannot name the provider — flight does not
+        // know flight-data exists. The type is the whole connection.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct ValkeyModule: FlightModule {
+            let adapter: any DistributedPubSubAdapter
+            init(configuration: Configuration) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            struct PubSubModule: FlightModule {
+            init(configuration: Configuration, adapter: (any DistributedPubSubAdapter)? = nil) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(), modules: [PubSubModule.self, ValkeyModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains(
+                "let pubSubModule = try PubSubModule(configuration: configuration, adapter: valkeyModule.adapter)"
+            ))
+        // And the provider is built first, though nothing declared that edge:
+        // the application listed PubSub first, and neither module names the
+        // other in `dependencies`.
+        let valkey = try #require(result.generated.range(of: "let valkeyModule ="))
+        let pubsub = try #require(result.generated.range(of: "let pubSubModule ="))
+        #expect(valkey.lowerBound < pubsub.lowerBound)
+    }
+
+    @Test("a module is never built out of its own property")
+    func composerExcludesSelfAsProvider() throws {
+        // ActuatorModule's real shape: a stored `environment` and an
+        // `init(environment:)` test seam. Matching providers by type made that
+        // initializer look satisfiable by the module's own property, and the
+        // composer emitted
+        // `let actuatorModule = ActuatorModule(environment: actuatorModule.environment)`.
+        // Caught by the demo template, not by these fixtures.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct ActuatorModule: FlightModule {
+            let environment: [String: String]
+            init() { self.environment = [:] }
+            init(environment: [String: String]) { self.environment = environment }
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [ActuatorModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("let actuatorModule = ActuatorModule()"))
+        #expect(!result.generated.contains("actuatorModule.environment"))
+    }
+
+    @Test("an optional parameter nothing provides is omitted, not failed")
+    func composerOmitsUnprovidedOptionals() throws {
+        // The single-node deployment: same PubSub module, no adapter module.
+        // "Not in this deployment" has to compose, because it is the 90% case.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct PubSubModule: FlightModule {
+            init(configuration: Configuration, adapter: (any DistributedPubSubAdapter)? = nil) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [PubSubModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains("let pubSubModule = try PubSubModule(configuration: configuration)"))
+    }
+
+    @Test("two modules providing the same type is a build error naming both")
+    func composerRefusesAmbiguousProviders() throws {
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct ValkeyModule: FlightModule {
+            let adapter: any DistributedPubSubAdapter
+            init(configuration: Configuration) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            struct NatsModule: FlightModule {
+            let adapter: any DistributedPubSubAdapter
+            init(configuration: Configuration) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            struct PubSubModule: FlightModule {
+            init(configuration: Configuration, adapter: (any DistributedPubSubAdapter)? = nil) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(),
+            modules: [PubSubModule.self, ValkeyModule.self, NatsModule.self])
+            }
+            }
+            """
+        ])
+        // The generated file carries the reason, so the consumer's compiler
+        // points at it. Silently picking one would give a cluster wired to the
+        // wrong transport.
+        #expect(result.generated.contains("#error("))
+        #expect(result.generated.contains("Composition is ambiguous"))
+        #expect(result.generated.contains("natsModule.adapter"))
+        #expect(result.generated.contains("valkeyModule.adapter"))
+    }
+
+    @Test("a module's computed service is not something another module can take")
+    func composerIgnoresComputedProperties() throws {
+        // `var service: (any Service)?` is bootstrap's to collect. Treating it
+        // as a provided value would let one module take another's service and
+        // run it twice.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct ProviderModule: FlightModule {
+            var service: (any Service)? { nil }
+            func configure(_ container: Container) throws {}
+            }
+            struct ConsumerModule: FlightModule {
+            init(service: (any Service)? = nil) {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(), modules: [ProviderModule.self, ConsumerModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("let consumerModule = ConsumerModule()"))
+    }
+
     @Test("a generic module keeps its type argument")
     func genericModuleKeepsItsArgument() throws {
         // `FlightWebModule<FlightTransport>` is one module named with the
