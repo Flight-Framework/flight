@@ -134,18 +134,7 @@ public struct ScheduledJobRegistration: Sendable {
 extension Container {
     /// Every registered scheduled job, in registration order (post-freeze).
     public func collectScheduledJobs() throws -> [ScheduledJobRegistration] {
-        // Core's public `allRegistrations()` carries (typeName, qualifier),
-        // which is exactly enough to enumerate one type's registrations
-        // without new Core API.
-        //
-        // This is the second copy of these five lines — FlightWeb has the
-        // same helper, privately, for routes and middleware. A third
-        // consumer is the point at which it should be promoted into Core
-        // rather than copied again.
-        let typeName = String(reflecting: ScheduledJobRegistration.self)
-        return try allRegistrations()
-            .filter { $0.typeName == typeName }
-            .map { try resolve(ScheduledJobRegistration.self, qualifier: $0.qualifier) }
+        try collectRegistrations(of: ScheduledJobRegistration.self)
     }
 
     /// Registers a scheduled job by hand — the escape hatch beside the

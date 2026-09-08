@@ -922,6 +922,61 @@ struct GeneratorTests {
         #expect(result.generated.contains("let flightChannelsModule = try FlightChannelsModule()"))
     }
 
+    @Test("a contribution nothing collects is a build error naming the module to add")
+    func composerRefusesUnconsumedContributions() throws {
+        // The footgun the aggregate rule would otherwise introduce: declaring
+        // channels while leaving Channels out of the application composes
+        // fine, starts fine, and finds no route at the first join. Exactly the
+        // silence the PubSub inversion existed to remove.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct FlightChannelsModule: FlightModule {
+            init(channels: [ChannelRegistration] = []) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            struct ChatModule: FlightModule {
+            let channels: [ChannelRegistration] = []
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [ChatModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.generated.contains("#error("))
+        #expect(result.generated.contains("ChatModule.channels is declared but nothing"))
+        // Names what to add, rather than only observing that it went unused.
+        #expect(result.generated.contains("FlightChannelsModule"))
+    }
+
+    @Test("a collected contribution is not reported")
+    func composerAcceptsConsumedContributions() throws {
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            struct FlightChannelsModule: FlightModule {
+            init(channels: [ChannelRegistration] = []) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            struct ChatModule: FlightModule {
+            let channels: [ChannelRegistration] = []
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(), modules: [ChatModule.self, FlightChannelsModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(!result.generated.contains("#error("))
+    }
+
     @Test("a dictionary parameter is not an aggregate")
     func composerDoesNotAggregateDictionaries() throws {
         // `[String: String]` is one value, and ActuatorModule's `environment`

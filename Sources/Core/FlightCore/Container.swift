@@ -303,6 +303,24 @@ public final class Container: @unchecked Sendable {
 
     // MARK: - Introspection
 
+    /// Every registration of `type`, resolved, in registration order.
+    ///
+    /// The shape a *contribution* is collected in: several modules each
+    /// register one, and whoever aggregates them wants all of them.
+    /// ``allRegistrations()`` carries (typeName, qualifier), which is exactly
+    /// enough to enumerate one type's registrations.
+    ///
+    /// This lived privately in FlightWeb, again in `collectAssetMounts`, and a
+    /// third time in FlightScheduler, each with a comment noting that a third
+    /// consumer was when it should move here. Post-`freeze()` only, like any
+    /// resolution.
+    public func collectRegistrations<T: Sendable>(of type: T.Type) throws -> [T] {
+        let typeName = String(reflecting: type)
+        return try allRegistrations()
+            .filter { $0.typeName == typeName }
+            .map { try resolve(type, qualifier: $0.qualifier) }
+    }
+
     public func allRegistrations() -> [ComponentDescriptor] {
         if let frozen = frozenStorage {
             return frozen.order.compactMap { frozen.registrations[$0]?.descriptor }

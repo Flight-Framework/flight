@@ -170,10 +170,7 @@ extension Container {
 
     /// All mounts, in registration order (post-freeze).
     public func collectAssetMounts() throws -> [AssetMountRegistration] {
-        let typeName = String(reflecting: AssetMountRegistration.self)
-        return try allRegistrations()
-            .filter { $0.typeName == typeName }
-            .map { try resolve(AssetMountRegistration.self, qualifier: $0.qualifier) }
+        try collectRegistrations(of: AssetMountRegistration.self)
     }
 }
 

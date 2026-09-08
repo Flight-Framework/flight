@@ -362,13 +362,7 @@ extension Container {
         Set(try collect(MiddlewareRegistration.self).map(\.lane))
     }
 
-    /// Resolves every component of `type` via introspection — Core's public
-    /// `allRegistrations()` carries (typeName, qualifier), which is exactly
-    /// enough to enumerate one type's registrations without any new Core API.
     private func collect<T: Sendable>(_ type: T.Type) throws -> [T] {
-        let typeName = String(reflecting: type)
-        return try allRegistrations()
-            .filter { $0.typeName == typeName }
-            .map { try resolve(type, qualifier: $0.qualifier) }
+        try collectRegistrations(of: type)
     }
 }

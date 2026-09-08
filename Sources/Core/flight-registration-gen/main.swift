@@ -2163,6 +2163,8 @@ func emitComposer(into out: inout String) {
         let name: String
         let statement: String
         let needs: Set<String>
+        /// Kept so an unconsumed contribution can be spotted below.
+        let arguments: [String]
     }
 
     var constructions: [Construction] = []
@@ -2209,7 +2211,8 @@ func emitComposer(into out: inout String) {
                 name: name,
                 statement:
                     "    let \(binding(name)) = \(canThrow ? "try " : "")\(name)(\(arguments.joined(separator: ", ")))",
-                needs: needs))
+                needs: needs,
+                arguments: arguments))
     }
 
     // A provider has to be built before whoever draws on it, and that ordering
@@ -2246,6 +2249,36 @@ func emitComposer(into out: inout String) {
         let next = remaining.remove(at: index)
         placed.insert(moduleKey(next.name))
         ordered.append(next)
+    }
+
+    // A contribution nobody collects is silent: the module declaring channels
+    // composes fine, the application starts, and the first join finds no
+    // route. That is the failure mode the PubSub inversion existed to remove,
+    // so it must not reappear here. An aggregate is reported when some scanned
+    // module *would* take it and is not in this application — which names the
+    // module to add rather than merely observing that a property went unused.
+    let consumed = Set(constructions.flatMap { $0.arguments })
+    for name in includedModules {
+        guard let module = byName[moduleKey(name)] else { continue }
+        for property in module.provides {
+            guard let element = arrayElementType(property.type) else { continue }
+            let expression = "\(binding(name)).\(property.name)"
+            guard !consumed.contains(where: { $0.contains(expression) }) else { continue }
+            let aggregators = moduleGraph.filter { candidate in
+                !includedModules.contains { moduleKey($0) == moduleKey(candidate.typeName) }
+                    && candidate.initializers.contains { initializer in
+                        initializer.types.contains {
+                            arrayElementType($0).map(providedTypeKey) == providedTypeKey(element)
+                        }
+                    }
+            }
+            guard !aggregators.isEmpty else { continue }
+            compositionDiagnostics.append(
+                "\(name).\(property.name) is declared but nothing in this application collects "
+                    + "it. Add "
+                    + aggregators.map(\.typeName).sorted().joined(separator: " or ")
+                    + " to the modules: list.")
+        }
     }
 
     for construction in ordered {
