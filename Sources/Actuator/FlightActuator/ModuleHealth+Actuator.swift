@@ -46,12 +46,13 @@ extension ModuleHealth {
 }
 
 extension Lifetime {
-    /// "singleton" | "transient" | "scoped".
+    /// "singleton" — the only lifetime there is. Kept as a method rather
+    /// than folded into the caller because the dashboard column is a
+    /// component's lifetime, and that column outlives this enum having one
+    /// case.
     public var actuatorLabel: String {
         switch self {
         case .singleton: return "singleton"
-        case .transient: return "transient"
-        case .scoped: return "scoped"
         }
     }
 }

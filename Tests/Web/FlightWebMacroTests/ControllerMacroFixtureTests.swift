@@ -47,15 +47,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_health_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/health", kind: .http, source: String(reflecting: Self.self) + ".health") { context in
+                        let controller = try make(context)
+                        let result = try await controller.health(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /health @" + String(reflecting: Self.self) + ".health", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/health", kind: .http, source: String(reflecting: Self.self) + ".health") { context in
-                            let result = try await controller.health(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_health_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -103,23 +120,48 @@ struct ControllerMacroFixtureTests {
                     self.userService = try container.resolve(UserService.self)
                 }
 
+                public init(userService: UserService) {
+                    self.userService = userService
+                }
+
+                static func _flightRoute_createUser_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "POST", path: "/users", kind: .http, source: String(reflecting: Self.self) + ".createUser") { context in
+                        let controller = try make(context)
+                        let body = try FlightWeb.decodeRequestBody(CreateUserRequest.self, from: context)
+                        let result = try await controller.createUser(context, body: body)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
+                static func _flightRoute_deleteUser_1(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "DELETE", path: "/users/:id", kind: .http, source: String(reflecting: Self.self) + ".deleteUser") { context in
+                        let controller = try make(context)
+                        try controller.deleteUser(context)
+                        return FlightWeb.Response.noContent
+                    }
+                }
+
                 public static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                public static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "POST /users @" + String(reflecting: Self.self) + ".createUser", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "POST", path: "/users", kind: .http, source: String(reflecting: Self.self) + ".createUser") { context in
-                            let body = try FlightWeb.decodeRequestBody(CreateUserRequest.self, from: context)
-                            let result = try await controller.createUser(context, body: body)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_createUser_0 { _ in
+                            controller
                         }
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "DELETE /users/:id @" + String(reflecting: Self.self) + ".deleteUser", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "DELETE", path: "/users/:id", kind: .http, source: String(reflecting: Self.self) + ".deleteUser") { context in
-                            try controller.deleteUser(context)
-                            return FlightWeb.Response.noContent
+                        return Self._flightRoute_deleteUser_1 { _ in
+                            controller
                         }
                     }
                 }
@@ -155,15 +197,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_chat_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/chat/:roomId", kind: .upgrade(.webSocket), source: String(reflecting: Self.self) + ".chat") { context in
+                        let controller = try make(context)
+                        let upgradeHandler = try await controller.chat(context)
+                        return FlightWeb.Response.upgrade(handler: upgradeHandler, context: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /chat/:roomId @" + String(reflecting: Self.self) + ".chat", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/chat/:roomId", kind: .upgrade(.webSocket), source: String(reflecting: Self.self) + ".chat") { context in
-                            let upgradeHandler = try await controller.chat(context)
-                            return FlightWeb.Response.upgrade(handler: upgradeHandler, context: context)
+                        return Self._flightRoute_chat_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -195,8 +254,15 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
                 }
@@ -234,8 +300,15 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
                 }
@@ -273,8 +346,15 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
                 }
@@ -368,15 +448,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_handler_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "users", kind: .http, source: String(reflecting: Self.self) + ".handler") { context in
+                        let controller = try make(context)
+                        let result = controller.handler(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET users @" + String(reflecting: Self.self) + ".handler", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "users", kind: .http, source: String(reflecting: Self.self) + ".handler") { context in
-                            let result = controller.handler(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_handler_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -418,22 +515,46 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_index_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/users", kind: .http, source: String(reflecting: Self.self) + ".index") { context in
+                        let controller = try make(context)
+                        let result = controller.index(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
+                static func _flightRoute_show_1(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/users/:id", kind: .http, source: String(reflecting: Self.self) + ".show") { context in
+                        let controller = try make(context)
+                        let result = controller.show(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /users @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/users", kind: .http, source: String(reflecting: Self.self) + ".index") { context in
-                            let result = controller.index(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_index_0 { _ in
+                            controller
                         }
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /users/:id @" + String(reflecting: Self.self) + ".show", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/users/:id", kind: .http, source: String(reflecting: Self.self) + ".show") { context in
-                            let result = controller.show(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_show_1 { _ in
+                            controller
                         }
                     }
                 }
@@ -464,15 +585,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_show_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/users/:id", kind: .http, source: String(reflecting: Self.self) + ".show") { context in
+                        let controller = try make(context)
+                        let result = controller.show(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /users/:id @" + String(reflecting: Self.self) + ".show", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/users/:id", kind: .http, source: String(reflecting: Self.self) + ".show") { context in
-                            let result = controller.show(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_show_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -504,15 +642,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_health_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/health", kind: .http, source: String(reflecting: Self.self) + ".health") { context in
+                        let controller = try make(context)
+                        let result = controller.health(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /health @" + String(reflecting: Self.self) + ".health", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/health", kind: .http, source: String(reflecting: Self.self) + ".health") { context in
-                            let result = controller.health(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_health_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -542,15 +697,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_show_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/:id", kind: .http, source: String(reflecting: Self.self) + ".show") { context in
+                        let controller = try make(context)
+                        let result = controller.show(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /:id @" + String(reflecting: Self.self) + ".show", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/:id", kind: .http, source: String(reflecting: Self.self) + ".show") { context in
-                            let result = controller.show(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_show_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -586,15 +758,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_handler_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/x", kind: .http, source: String(reflecting: Self.self) + ".handler") { context in
+                        let controller = try make(context)
+                        let result = controller.handler(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /x @" + String(reflecting: Self.self) + ".handler", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/x", kind: .http, source: String(reflecting: Self.self) + ".handler") { context in
-                            let result = controller.handler(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_handler_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -745,8 +934,15 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
                 }
@@ -789,8 +985,15 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
                     }
                 }
@@ -834,15 +1037,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_admin_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/dashboard/admin", kind: .http, source: String(reflecting: Self.self) + ".admin", pipelines: [.authenticated]) { context in
+                        let controller = try make(context)
+                        let result = controller.admin(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard/admin @" + String(reflecting: Self.self) + ".admin", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard/admin", kind: .http, source: String(reflecting: Self.self) + ".admin", pipelines: [.authenticated]) { context in
-                            let result = controller.admin(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_admin_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -879,15 +1099,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_index_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: [.public]) { context in
+                        let controller = try make(context)
+                        let result = controller.index(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: [.public]) { context in
-                            let result = controller.index(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_index_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -924,15 +1161,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_index_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: ["metrics"]) { context in
+                        let controller = try make(context)
+                        let result = controller.index(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: ["metrics"]) { context in
-                            let result = controller.index(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_index_0 { _ in
+                            controller
                         }
                     }
                 }
@@ -976,15 +1230,32 @@ struct ControllerMacroFixtureTests {
                 internal init(_flight container: FlightCore.Container) throws {
                 }
 
+                init() {
+                }
+
+                static func _flightRoute_index_0(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {
+                    FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: [.authentication]) { context in
+                        let controller = try make(context)
+                        let result = controller.index(context)
+                        return try FlightWeb.encodeResponse(result, for: context)
+                    }
+                }
+
                 static func _flightRegister(_ container: FlightCore.Container) throws {
-                    container.register(Self.self, scope: .singleton) { c in
+                    try _flightRegister(container, includingRoutes: true)
+                }
+
+                static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
+                    container.register(Self.self, scope: .singleton, stereotype: .controller) { c in
                         try Self(_flight: c)
+                    }
+                    guard includingRoutes else {
+                        return
                     }
                     container.register(FlightWeb.RouteRegistration.self, qualifier: "GET /dashboard @" + String(reflecting: Self.self) + ".index", scope: .singleton) { c in
                         let controller = try c.resolve(Self.self)
-                        return FlightWeb.RouteRegistration(method: "GET", path: "/dashboard", kind: .http, source: String(reflecting: Self.self) + ".index", pipelines: [.authentication]) { context in
-                            let result = controller.index(context)
-                            return try FlightWeb.encodeResponse(result, for: context)
+                        return Self._flightRoute_index_0 { _ in
+                            controller
                         }
                     }
                 }

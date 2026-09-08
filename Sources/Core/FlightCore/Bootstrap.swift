@@ -73,24 +73,45 @@ func _flightAssemble(
     configuration: Configuration,
     modules: [any FlightModule.Type]
 ) throws -> AssembledApplication {
+    // Step 5, and the reason this overload exists: a module named only as a
+    // type has to be instantiated here, so it must be constructible with no
+    // arguments. The instance overload below is for a caller that already
+    // built them — which is what a generated composition root does, and what
+    // lets a module take what it needs as initializer parameters
+    // (COMPOSITION-MIGRATION.md D11).
+    let ordered = try _flightResolveModuleOrder(modules)
+    return try _flightAssemble(
+        configuration: configuration, moduleInstances: ordered.map { $0.init() })
+}
+
+/// The same assembly from modules already built and already ordered.
+///
+/// Ordered, because resolving the DAG is what the type-based overload uses
+/// the types *for*: given instances, there is nothing left to sort by. A
+/// caller supplying these has the order already — a generated composition
+/// root gets it from the same `dependencies` walk, at build time — and
+/// supplying them out of order is the one mistake this signature cannot
+/// catch. That is the trade: the DAG moves to the build, and with it the
+/// requirement that a module be constructible with no arguments.
+func _flightAssemble(
+    configuration: Configuration,
+    moduleInstances instances: [any FlightModule]
+) throws -> AssembledApplication {
     let container = Container()  // step 4
 
-    let ordered = try _flightResolveModuleOrder(modules)  // step 5
-    container.beginHealthTracking(moduleNames: ordered.map { $0.moduleName })
+    let names = instances.map { type(of: $0).moduleName }
+    container.beginHealthTracking(moduleNames: names)
 
     // Configuration is itself a component: modules read config values by resolving
     // it (directly or via @ConfigValue-generated code) during configure.
     container.register(Configuration.self, scope: .singleton) { _ in configuration }
-
-    let instances = ordered.map { $0.init() }
 
     var services:
         [(
             moduleName: String, service: any Service, completion: ServiceCompletionPolicy,
             phase: ServiceShutdownPhase
         )] = []
-    for (moduleType, module) in zip(ordered, instances) {  // step 6
-        let name = moduleType.moduleName
+    for (name, module) in zip(names, instances) {  // step 6
         container.currentSourceModule = name
         do {
             try module.configure(container)
@@ -143,7 +164,7 @@ func _flightAssemble(
     return AssembledApplication(
         container: container,
         services: wrapped,
-        moduleOrder: ordered.map { $0.moduleName }
+        moduleOrder: names
     )
 }
 

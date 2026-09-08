@@ -1,4 +1,6 @@
+import FlightRouteScan
 import SwiftDiagnostics
+import FlightMacroSupport
 import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
@@ -27,30 +29,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
 
     // MARK: - Injected-property model (mirrors ComponentMacro)
 
-    struct InjectedProperty {
-        enum Kind {
-            case inject(qualifier: String?)
-            case configValue(key: String, defaultValue: String?)
-        }
-        let name: String
-        let typeText: String
-        let kind: Kind
-        let node: VariableDeclSyntax
-
-        /// The type as written, parenthesized where `.self` would otherwise
-        /// bind to the wrong thing — `any P.self` parses as `any (P.self)`.
-        /// Mirrors `ComponentMacro.InjectedProperty.metatypeBase`.
-        var metatypeBase: String {
-            if typeText.hasPrefix("(") && typeText.hasSuffix(")") { return typeText }
-            if typeText.hasPrefix("any ") || typeText.hasPrefix("some ")
-                || typeText.contains(" & ")
-            {
-                return "(\(typeText))"
-            }
-            return typeText
-        }
-    }
-
     // MARK: - MemberMacro
 
     public static func expansion(
@@ -65,7 +43,8 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         guard validateQualifierDisambiguation(properties, in: context) else { return [] }
         guard validateNonInjectedStorage(declaration, injected: properties, in: context) else { return [] }
 
-        let basePath = parseBasePath(node, in: context)
+        let basePath = RouteScanning.basePath(
+            of: node, diagnostics: MacroRouteDiagnostics(context: context))
         let routes = collectRoutes(from: declaration, in: context)
         let combinedRoutes = routes.map { route in
             (route: route, path: RouteScanning.combinePaths(basePath, route.path))
@@ -108,8 +87,12 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         // 2. Registration thunk: the controller component, then its routes —
         //    ordered so eager route construction at freeze() can resolve the
         //    controller mid-freeze (Flight Core §2.1).
+        // `stereotype: .controller` is what Actuator groups the dashboard
+        // by. Omitting it defaulted every controller to `.component`, so the
+        // "Controllers" section listed only ActuatorController — the one
+        // controller registered by hand, which passed the argument.
         var thunkLines: [String] = [
-            "container.register(Self.self, scope: .singleton) { c in",
+            "container.register(Self.self, scope: .singleton, stereotype: .controller) { c in",
             "    try Self(_flight: c)",
             "}",
         ]
@@ -117,35 +100,77 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         // adding to it — the only rule that can express both "public
         // controller, one authenticated route" and "authenticated
         // controller, one public route". Saying nothing inherits.
-        let controllerPipelines = parsePipelines(node)
-        for (route, path) in combinedRoutes {
-            let pipelines = route.pipelinesText ?? controllerPipelines
+        let controllerPipelines = RouteScanning.pipelines(of: node)
+        var factories: [DeclSyntax] = []
+        if !combinedRoutes.isEmpty { thunkLines.append("guard includingRoutes else { return }") }
+        for (index, (route, path)) in combinedRoutes.enumerated() {
+            let pipelines = RouteScanning.resolvedPipelines(
+                route: route.pipelinesText, controller: controllerPipelines)
             if let routePipelines = route.pipelinesText {
                 diagnoseSecurityNarrowing(
                     controller: controllerPipelines, route: routePipelines,
                     at: route.attribute, method: route.methodName, in: context)
             }
             thunkLines.append(
-                contentsOf: routeRegistrationLines(for: route, path: path, pipelines: pipelines))
+                contentsOf: routeRegistrationLines(for: route, path: path, index: index))
+            factories.append(
+                DeclSyntax(
+                    stringLiteral: routeFactory(
+                        for: route, path: path, pipelines: pipelines, index: index)))
         }
         let thunkBody = thunkLines.map { "    \($0)" }.joined(separator: "\n")
+        // `includingRoutes` defaults to true, so every existing caller —
+        // tests, hand-wired modules, anything registering a controller
+        // directly — keeps getting its routes.
+        //
+        // The generated composition root passes false and registers the
+        // routes itself, with a controller constructed per request instead of
+        // resolved once (COMPOSITION-MIGRATION.md §2.1a). Without the
+        // parameter the two would both register, and the freeze would fail on
+        // a duplicate.
+        // Two overloads, not one with a default: `_FlightRegistrable`
+        // requires exactly `_flightRegister(_:)`, and a method with an extra
+        // defaulted parameter does not satisfy it.
         let thunk: DeclSyntax = """
         \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
+            try _flightRegister(container, includingRoutes: true)
+        }
+        """
+        let routesThunk: DeclSyntax = """
+        \(raw: access)static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
         \(raw: thunkBody)
         }
         """
 
-        return [resolvingInit, thunk]
+        let parameterInit = parameterizedInitializer(
+            properties: properties, access: access, declaration: declaration)
+        return [resolvingInit, parameterInit].compactMap { $0 } + factories + [thunk, routesThunk]
     }
 
-    /// The generated registration for one route. The qualifier embeds the
-    /// runtime-qualified controller name so two controllers may declare
-    /// colliding patterns without tripping Core's duplicate-registration
-    /// precondition — the Router reports the conflict as a proper startup
-    /// error naming both sources instead.
-    private static func routeRegistrationLines(
-        for route: ScannedRoute, path: String, pipelines: String?
-    ) -> [String] {
+    /// The name of one route's factory. Unique per route rather than per
+    /// method, because one method may carry several route attributes.
+    private static func factoryName(for route: ScannedRoute, index: Int) -> String {
+        "_flightRoute_\(route.methodName)_\(index)"
+    }
+
+    /// One route, as a factory taking the controller it should call.
+    ///
+    /// The whole registration lives here — path, kind, lanes, body mode, body
+    /// decoding, return encoding, upgrade shaping — parameterised by *how* the
+    /// controller is obtained and by nothing else. That parameter is the seam
+    /// COMPOSITION-MIGRATION.md §2.1a needs: today `_flightRegister` passes a
+    /// closure returning the instance the container resolved once, which is
+    /// exactly the behaviour there has always been. A generated composition
+    /// root passes one that constructs per request from a `FlightGraph`, and
+    /// nothing else has to move — in particular the handler thunk stays in
+    /// the macro, where the route scanner already lives, rather than being
+    /// reimplemented in the generator and drifting from it.
+    ///
+    /// `make` takes the context so a constructor can use request values; the
+    /// container path ignores it.
+    private static func routeFactory(
+        for route: ScannedRoute, path: String, pipelines: String?, index: Int
+    ) -> String {
         let kind = route.kind.isUpgrade ? ".upgrade(.webSocket)" : ".http"
 
         var call = "controller.\(route.methodName)(context"
@@ -154,13 +179,15 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         if route.isAsync { call = "await \(call)" }
         if route.isThrows { call = "try \(call)" }
 
-        var handlerLines: [String] = []
+        var handlerLines: [String] = ["let controller = try make(context)"]
         if let bodyType = route.bodyTypeText {
-            handlerLines.append("let body = try FlightWeb.decodeRequestBody(\(bodyType).self, from: context)")
+            handlerLines.append(
+                "let body = try FlightWeb.decodeRequestBody(\(bodyType).self, from: context)")
         }
         if route.kind.isUpgrade {
             handlerLines.append("let upgradeHandler = \(call)")
-            handlerLines.append("return FlightWeb.Response.upgrade(handler: upgradeHandler, context: context)")
+            handlerLines.append(
+                "return FlightWeb.Response.upgrade(handler: upgradeHandler, context: context)")
         } else if route.returnTypeText != nil {
             handlerLines.append("let result = \(call)")
             handlerLines.append("return try FlightWeb.encodeResponse(result, for: context)")
@@ -169,25 +196,48 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
             handlerLines.append("return FlightWeb.Response.noContent")
         }
 
-        var lines: [String] = []
-        lines.append("container.register(FlightWeb.RouteRegistration.self, qualifier: \"\(route.kind.httpMethod) \(path) @\" + String(reflecting: Self.self) + \".\(route.methodName)\", scope: .singleton) { c in")
-        lines.append("    let controller = try c.resolve(Self.self)")
         let pipelinesClause = pipelines.map { ", pipelines: \($0)" } ?? ""
-    let bodyModeClause: String
-    if route.isStreamingBody {
-        bodyModeClause = ", bodyMode: .streaming(maxBytes: \(route.maxBodyBytesText ?? "nil"))"
-    } else if let maxBytes = route.maxBodyBytesText {
-        bodyModeClause = ", bodyMode: .buffered(maxBytes: \(maxBytes))"
-    } else {
-        bodyModeClause = ""
-    }
-    lines.append("    return FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\"\(pipelinesClause)\(bodyModeClause)) { context in")
+        let bodyModeClause: String
+        if route.isStreamingBody {
+            bodyModeClause = ", bodyMode: .streaming(maxBytes: \(route.maxBodyBytesText ?? "nil"))"
+        } else if let maxBytes = route.maxBodyBytesText {
+            bodyModeClause = ", bodyMode: .buffered(maxBytes: \(maxBytes))"
+        } else {
+            bodyModeClause = ""
+        }
+
+        var lines: [String] = []
+        lines.append(
+            "static func \(factoryName(for: route, index: index))(_ make: @escaping @Sendable (FlightWeb.RequestContext) throws -> Self) -> FlightWeb.RouteRegistration {"
+        )
+        lines.append(
+            "    FlightWeb.RouteRegistration(method: \"\(route.kind.httpMethod)\", path: \"\(path)\", kind: \(kind), source: String(reflecting: Self.self) + \".\(route.methodName)\"\(pipelinesClause)\(bodyModeClause)) { context in"
+        )
         for line in handlerLines {
             lines.append("        \(line)")
         }
         lines.append("    }")
         lines.append("}")
-        return lines
+        return lines.joined(separator: "\n")
+    }
+
+    /// The registration that calls one route's factory. The qualifier embeds
+    /// the runtime-qualified controller name so two controllers may declare
+    /// colliding patterns without tripping Core's duplicate-registration
+    /// precondition — the Router reports the conflict as a proper startup
+    /// error naming both sources instead.
+    private static func routeRegistrationLines(
+        for route: ScannedRoute, path: String, index: Int
+    ) -> [String] {
+        [
+            "container.register(FlightWeb.RouteRegistration.self, qualifier: \"\(route.kind.httpMethod) \(path) @\" + String(reflecting: Self.self) + \".\(route.methodName)\", scope: .singleton) { c in",
+            // Resolved once, here, and handed to every request — the shape
+            // that has always been. §2.1a replaces this closure, and only
+            // this closure.
+            "    let controller = try c.resolve(Self.self)",
+            "    return Self.\(factoryName(for: route, index: index)) { _ in controller }",
+            "}",
+        ]
     }
 
     // MARK: - ExtensionMacro
@@ -216,7 +266,9 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         var routes: [ScannedRoute] = []
         for member in declaration.memberBlock.members {
             guard let function = member.decl.as(FunctionDeclSyntax.self) else { continue }
-            routes.append(contentsOf: RouteScanning.scanRoutes(of: function, in: context))
+            routes.append(
+                contentsOf: RouteScanning.scanRoutes(
+                    of: function, diagnostics: MacroRouteDiagnostics(context: context)))
         }
         return routes
     }
@@ -249,13 +301,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// every generated RouteRegistration — or nil for the default lane.
     /// Verbatim like @Component's `scope:`: the expression is evaluated in
     /// the expansion, so `[.defaultLane, "admin"]` and a constant both work.
-    private static func parsePipelines(_ node: AttributeSyntax) -> String? {
-        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self) else { return nil }
-        for argument in arguments where argument.label?.text == "pipelines" {
-            return argument.expression.trimmedDescription
-        }
-        return nil
-    }
 
     /// The canonical security lanes, in every spelling a declaration site can
     /// use. A macro sees source text and nothing else — it cannot resolve
@@ -339,45 +384,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// the macro declaration's doc comment). Returns `""` for "no base path":
     /// omitted, explicit `nil`, empty string, and bare `"/"` are all the
     /// identity element for `RouteScanning.combinePaths`.
-    private static func parseBasePath(
-        _ node: AttributeSyntax,
-        in context: some MacroExpansionContext
-    ) -> String {
-        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self),
-              let first = arguments.first, first.label == nil
-        else { return "" }
-        if first.expression.trimmedDescription == "nil" { return "" }
-        guard let literal = first.expression.as(StringLiteralExprSyntax.self) else {
-            context.diagnoseError(
-                "controller.path.nonliteral",
-                "@Controller's path must be a string literal — the route table is built at compile time (§4).",
-                at: first.expression
-            )
-            return ""
-        }
-        var path = ""
-        for segment in literal.segments {
-            guard let text = segment.as(StringSegmentSyntax.self) else {
-                context.diagnoseError(
-                    "controller.path.nonliteral",
-                    "@Controller's path must be a plain string literal, with no interpolation.",
-                    at: first.expression
-                )
-                return ""
-            }
-            path += text.content.text
-        }
-        guard !path.isEmpty, path != "/" else { return "" }
-        guard path.hasPrefix("/") else {
-            context.diagnoseError(
-                "controller.path",
-                "@Controller path '\(path)' must start with '/'.",
-                at: node
-            )
-            return ""
-        }
-        return path
-    }
 
     // MARK: - Validation (mirrors ComponentMacro)
 

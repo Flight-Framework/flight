@@ -1,6 +1,7 @@
 import SwiftDiagnostics
 import SwiftSyntax
 import SwiftSyntaxBuilder
+import FlightMacroSupport
 import SwiftSyntaxMacros
 
 /// The shared expansion behind `@Component` and its stereotypes. Each conforming macro generates:
@@ -44,38 +45,6 @@ public struct RepositoryMacro: RegistrationMacro {
 
 // MARK: - Injected-property model
 // (File scope — nested types are not permitted in protocol extensions.)
-
-struct InjectedProperty {
-    enum Kind {
-        case inject(qualifier: String?)
-        /// `defaultValue` is the `default:` argument's source text,
-        /// re-embedded verbatim in the expansion (nil = required key).
-        case configValue(key: String, defaultValue: String?)
-    }
-    let name: String
-    let typeText: String
-    let kind: Kind
-    let node: VariableDeclSyntax
-
-    /// The type as written, parenthesized where `.self` would otherwise bind
-    /// to the wrong thing.
-    ///
-    /// `any P.self` parses as `any (P.self)`, so the expansion for
-    /// `@Inject var bus: any PubSub` — the spelling every doc page uses —
-    /// failed with "'self' is not a member type of protocol PubSub",
-    /// reported inside the macro expansion rather than at the property. The
-    /// parenthesized spelling `(any PubSub)` worked, which is why the
-    /// framework's own components are written that way; nothing said so.
-    var metatypeBase: String {
-        if typeText.hasPrefix("(") && typeText.hasSuffix(")") { return typeText }
-        if typeText.hasPrefix("any ") || typeText.hasPrefix("some ")
-            || typeText.contains(" & ")
-        {
-            return "(\(typeText))"
-        }
-        return typeText
-    }
-}
 
 extension RegistrationMacro {
 
@@ -137,6 +106,12 @@ extension RegistrationMacro {
             internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
             """
 
+        // 1b. Constructor injection, shared with @Controller, @Middleware
+        // and @Scheduler — they expand to the same shape and the rule is
+        // one rule.
+        let parameterInit = parameterizedInitializer(
+            properties: properties, access: access, declaration: declaration)
+
         // 2. Registration thunk. Stereotypes differ from @Component only in
         // the trailing stereotype: argument.
         let stereotypeSuffix = stereotypeArgument.map { ", stereotype: \($0)" } ?? ""
@@ -155,7 +130,7 @@ extension RegistrationMacro {
             }
             """
 
-        return [resolvingInit, thunk]
+        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
     }
 
     // MARK: - ExtensionMacro

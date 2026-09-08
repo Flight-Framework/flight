@@ -4,10 +4,6 @@ import ServiceContextModule
 
 /// Everything a middleware or handler needs about one in-flight request (§2).
 ///
-/// `scope` is `let`, deliberately: a request's scope lifetime is fixed for
-/// the duration of that request, and nothing about middleware processing can
-/// swap it out mid-flight.
-///
 /// Design delta, recorded in README: the doc's sketch has no container
 /// reference, but a `Scope` is only usable through
 /// `Container.resolve(_:in:)` — so the context carries the container
@@ -18,17 +14,16 @@ import ServiceContextModule
 public struct RequestContext: Sendable {
     public let request: Request
     public var pathParameters: [String: String]
-    public var response: Response
 
-    /// Opened once per request by Flight Web's dispatch closure — Flight Web
-    /// is the first thing to interpret a Scope's lifetime as "one request";
-    /// Core never learns this interpretation exists (Flight Core §3).
+    /// What authentication decided about this request, written by the
+    /// authentication middleware into the copy it passes downstream.
     ///
-    /// Delta note: the scope is created directly rather than through
-    /// `Container.withScope`, because streaming and upgrade responses outlive
-    /// the dispatch call — the scope ends when the request's last reference
-    /// (context, stream, or connection handler) is released.
-    public let scope: Scope
+    /// Flight Web stores it and never reads it: the seam exists so an
+    /// identity can ride the request without `RequestContext` depending on
+    /// the package that defines one. `.anonymous` until something says
+    /// otherwise, so a request through a pipeline with no authentication
+    /// behaves exactly as it did before.
+    public var identity: RequestIdentity
 
     /// Structured logging, present from the very first request this framework
     /// ever handles — dispatch stamps request metadata (request ID, method,
@@ -44,16 +39,14 @@ public struct RequestContext: Sendable {
     public init(
         request: Request,
         pathParameters: [String: String] = [:],
-        response: Response = .notFound,
-        scope: Scope,
+        identity: RequestIdentity = .anonymous,
         logger: Logger,
         tracingContext: ServiceContext = .topLevel,
         container: Container
     ) {
         self.request = request
         self.pathParameters = pathParameters
-        self.response = response
-        self.scope = scope
+        self.identity = identity
         self.logger = logger
         self.tracingContext = tracingContext
         self.container = container
@@ -63,10 +56,14 @@ public struct RequestContext: Sendable {
         pathParameters[name]
     }
 
-    /// Resolves a component against this request's scope. `.scoped` components live
-    /// exactly as long as the request; `.singleton`/`.transient` components behave
-    /// as they would from any other resolution site (Flight Core §3).
+    /// Resolves a component from the application's container.
+    ///
+    /// A service-locator seam, and on the way out: the composition migration
+    /// replaces it with construction in the generated route terminal, where
+    /// a controller's dependencies arrive as initializer arguments instead
+    /// (COMPOSITION-MIGRATION.md §2.1a). It no longer takes a scope, because
+    /// there are no longer any scoped components to resolve.
     public func resolve<T: Sendable>(_ type: T.Type = T.self, qualifier: String? = nil) throws -> T {
-        try container.resolve(type, qualifier: qualifier, in: scope)
+        try container.resolve(type, qualifier: qualifier)
     }
 }

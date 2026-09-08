@@ -25,7 +25,7 @@ final class MacroConsumer: Sendable {
     @Inject let clock: MacroClock
 }
 
-@Component(scope: .transient)
+@Component
 final class MacroTransient: Sendable {}
 
 @Repository
@@ -100,17 +100,6 @@ struct MacroIntegrationTests {
         #expect(byName.first { $0.key.contains("MacroClock") }?.value == .component)
         #expect(byName.first { $0.key.contains("MacroRepository") }?.value == .repository)
         #expect(byName.first { $0.key.contains("MacroService") }?.value == .service)
-    }
-
-    @Test("@Component(scope: .transient) registers transient")
-    func transientScope() throws {
-        let container = Container()
-        try MacroTransient._flightRegister(container)
-        try container.freeze()
-
-        let first = try container.resolve(MacroTransient.self)
-        let second = try container.resolve(MacroTransient.self)
-        #expect(first !== second)
     }
 
     @Test("@ConfigValue resolves through the Configuration component")

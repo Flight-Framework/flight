@@ -41,28 +41,6 @@ struct CycleDetectionTests {
         }
     }
 
-    @Test("transient cycle surfaces at resolve() post-freeze")
-    func transientCyclePostFreeze() throws {
-        let container = Container()
-        container.register(Ouro.self, scope: .transient) { c in
-            Ouro(other: try c.resolve(Boros.self))
-        }
-        container.register(Boros.self, scope: .transient) { c in
-            Boros(other: try c.resolve(Ouro.self))
-        }
-        try container.freeze()  // no singletons — freeze constructs nothing
-
-        do {
-            _ = try container.resolve(Ouro.self)
-            Issue.record("expected circularDependency")
-        } catch let error as ResolutionError {
-            guard case .circularDependency = error else {
-                Issue.record("expected circularDependency, got \(error)")
-                return
-            }
-        }
-    }
-
     @Test("module dependency cycle is rejected with the chain named")
     func moduleCycle() {
         do {

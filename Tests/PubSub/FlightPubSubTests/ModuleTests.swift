@@ -9,11 +9,19 @@ import FlightPubSubTesting
 
 /// What an adapter-providing module looks like (README "Writing an adapter
 /// module"): register the adapter component, depend on `FlightPubSubModule`,
-/// expose the relay as the module's service. The static slot exists only
-/// because `FlightModule` conformances are instantiated by `assemble` with
-/// no arguments — tests park the cluster there first.
+/// expose the relay as the module's service. The slot exists only because
+/// `FlightModule` conformances are instantiated by `assemble` with no
+/// arguments — tests park the cluster there first.
+///
+/// A task-local rather than a static: two suites in this file use this module,
+/// and `.serialized` orders the tests *inside* a suite, not the suites against
+/// each other. With one shared static, whichever suite cleared the slot first
+/// made the other's `freeze()` throw `ClusterSlotUnset` — a failure that
+/// depended on the filter you ran with. `assemble` builds every singleton
+/// synchronously on the calling task, so a task-local is visible where the
+/// factory needs it and belongs to exactly one test.
 private final class InMemoryAdapterModule: FlightModule {
-    static let clusterSlot = Mutex<InMemoryCluster?>(nil)
+    @TaskLocal static var cluster: InMemoryCluster?
     static var dependencies: [any FlightModule.Type] { [FlightPubSubModule.self] }
 
     struct ClusterSlotUnset: Error {}
@@ -25,7 +33,7 @@ private final class InMemoryAdapterModule: FlightModule {
     func configure(_ container: Container) throws {
         self.container = container
         container.register((any DistributedPubSubAdapter).self, scope: .singleton) { _ in
-            guard let cluster = InMemoryAdapterModule.clusterSlot.withLock({ $0 }) else {
+            guard let cluster = InMemoryAdapterModule.cluster else {
                 throw ClusterSlotUnset()
             }
             return cluster.makeAdapter()
@@ -62,58 +70,58 @@ struct ModuleTests {
 
     @Test("adapter module present: PubSub component is clustered, relay service collected")
     func withAdapter() async throws {
-        InMemoryAdapterModule.clusterSlot.withLock { $0 = InMemoryCluster() }
-        defer { InMemoryAdapterModule.clusterSlot.withLock { $0 = nil } }
+        try await InMemoryAdapterModule.$cluster.withValue(InMemoryCluster()) {
+            // FlightPubSubModule arrives transitively via the adapter module's DAG.
+            let app = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
 
-        // FlightPubSubModule arrives transitively via the adapter module's DAG.
-        let app = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+            let pubsub = try app.container.resolve((any PubSub).self)
+            #expect(pubsub is ClusteredPubSub)
+            #expect(app.services.count == 1)
+            #expect(app.services[0].moduleName == "InMemoryAdapterModule")
+            #expect(app.moduleOrder == ["FlightPubSubModule", "InMemoryAdapterModule"])
 
-        let pubsub = try app.container.resolve((any PubSub).self)
-        #expect(pubsub is ClusteredPubSub)
-        #expect(app.services.count == 1)
-        #expect(app.services[0].moduleName == "InMemoryAdapterModule")
-        #expect(app.moduleOrder == ["FlightPubSubModule", "InMemoryAdapterModule"])
-
-        // The clustered component wraps the registered LocalPubSub — a subscriber
-        // on the concrete local component sees messages published via `any PubSub`.
-        let local = try app.container.resolve(LocalPubSub.self)
-        var iterator = local.subscribe("t").makeAsyncIterator()
-        await pubsub.publish(msg("t", "same-core"))
-        let received = await iterator.next()
-        #expect(received.map(text) == "same-core")
+            // The clustered component wraps the registered LocalPubSub — a subscriber
+            // on the concrete local component sees messages published via `any PubSub`.
+            let local = try app.container.resolve(LocalPubSub.self)
+            var iterator = local.subscribe("t").makeAsyncIterator()
+            await pubsub.publish(msg("t", "same-core"))
+            let received = await iterator.next()
+            #expect(received.map(text) == "same-core")
+    
+        }
     }
 
     @Test("two bootstrapped apps form a cluster; graceful shutdown ends both cleanly")
     func endToEndTwoApps() async throws {
-        InMemoryAdapterModule.clusterSlot.withLock { $0 = InMemoryCluster() }
-        defer { InMemoryAdapterModule.clusterSlot.withLock { $0 = nil } }
+        try await InMemoryAdapterModule.$cluster.withValue(InMemoryCluster()) {
+            let appA = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+            let appB = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
 
-        let appA = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
-        let appB = try Flight.assemble(configuration: Configuration(), modules: [InMemoryAdapterModule.self])
+            func serviceGroup(for app: AssembledApplication, label: String) -> ServiceGroup {
+                ServiceGroup(configuration: .init(
+                    services: app.services.map { .init(service: $0.service) },
+                    logger: Logger(label: label)
+                ))
+            }
+            let groupA = serviceGroup(for: appA, label: "test.app-a")
+            let groupB = serviceGroup(for: appB, label: "test.app-b")
+            let runningA = Task { try await groupA.run() }
+            let runningB = Task { try await groupB.run() }
 
-        func serviceGroup(for app: AssembledApplication, label: String) -> ServiceGroup {
-            ServiceGroup(configuration: .init(
-                services: app.services.map { .init(service: $0.service) },
-                logger: Logger(label: label)
-            ))
+            let pubsubA = try appA.container.resolve((any PubSub).self)
+            let pubsubB = try appB.container.resolve((any PubSub).self)
+
+            var onB = pubsubB.subscribe("cluster:t").makeAsyncIterator()
+            await pubsubA.publish(msg("cluster:t", "across-apps"))
+            let received = await onB.next()
+            #expect(received.map(text) == "across-apps")
+
+            await groupA.triggerGracefulShutdown()
+            await groupB.triggerGracefulShutdown()
+            try await runningA.value
+            try await runningB.value
+    
         }
-        let groupA = serviceGroup(for: appA, label: "test.app-a")
-        let groupB = serviceGroup(for: appB, label: "test.app-b")
-        let runningA = Task { try await groupA.run() }
-        let runningB = Task { try await groupB.run() }
-
-        let pubsubA = try appA.container.resolve((any PubSub).self)
-        let pubsubB = try appB.container.resolve((any PubSub).self)
-
-        var onB = pubsubB.subscribe("cluster:t").makeAsyncIterator()
-        await pubsubA.publish(msg("cluster:t", "across-apps"))
-        let received = await onB.next()
-        #expect(received.map(text) == "across-apps")
-
-        await groupA.triggerGracefulShutdown()
-        await groupB.triggerGracefulShutdown()
-        try await runningA.value
-        try await runningB.value
     }
 
     @Test("FlightPubSubModule declares no dependencies and defaults to no service")
@@ -172,17 +180,17 @@ struct UnloadedAdapterTests {
     }
 
     @Test("an adapter module present reads its own configuration — no cross-check fires")
-    func configuredAndLoaded() throws {
-        InMemoryAdapterModule.clusterSlot.withLock { $0 = InMemoryCluster() }
-        defer { InMemoryAdapterModule.clusterSlot.withLock { $0 = nil } }
+    func configuredAndLoaded() async throws {
+        try await InMemoryAdapterModule.$cluster.withValue(InMemoryCluster()) {
+            // Same configuration as the failing case. The adapter here is not the
+            // Valkey one, but presence is what the check is about: something
+            // registered an adapter, so the fallback branch never runs.
+            let configuration = Configuration(values: ["pubsub.valkey.url": "valkey://127.0.0.1:6379"])
+            let app = try Flight.assemble(configuration: configuration, modules: [InMemoryAdapterModule.self])
 
-        // Same configuration as the failing case. The adapter here is not the
-        // Valkey one, but presence is what the check is about: something
-        // registered an adapter, so the fallback branch never runs.
-        let configuration = Configuration(values: ["pubsub.valkey.url": "valkey://127.0.0.1:6379"])
-        let app = try Flight.assemble(configuration: configuration, modules: [InMemoryAdapterModule.self])
-
-        #expect(try app.container.resolve((any PubSub).self) is ClusteredPubSub)
+            #expect(try app.container.resolve((any PubSub).self) is ClusteredPubSub)
+    
+        }
     }
 
     @Test("no adapter and no configuration is the ordinary single-node app")

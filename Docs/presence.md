@@ -239,8 +239,8 @@ scale is worse than an honest limit.
 
 ## Testing
 
-`swift test` — 67 tests (the convergence properties alone cover 120
-randomized cases):
+`swift test --enable-all-traits` — 79 tests (the convergence properties
+alone cover 120 randomized cases):
 
 - **Local semantics** (`TrackerTests`, `PresenceSyncTests`): metas per
   key, leave only on last meta, diff generation, update normalization.

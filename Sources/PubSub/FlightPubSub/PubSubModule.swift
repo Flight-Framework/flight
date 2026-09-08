@@ -23,7 +23,8 @@ public struct FlightPubSubModule: FlightModule {
 
     /// Buffering, node identity and the broadcast timeout are read from
     /// `flight.yaml` (`pubsub.buffering`, `pubsub.node_id`,
-    /// `pubsub.broadcast_timeout`) — see ``PubSubSettings``.
+    /// `pubsub.broadcast_timeout`); `PubSubSettings` is the internal type
+    /// that reads them, and `Docs/pubsub.md` documents the keys.
     ///
     /// They used to be `init` parameters here, which meant they did not
     /// exist: both public entry points take `[any FlightModule.Type]` and

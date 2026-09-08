@@ -4,17 +4,18 @@ extension RequestContext {
     /// The authenticated principal for this request, or `nil` when the
     /// request is unauthenticated.
     ///
-    /// Backed by the request-scoped ``PrincipalHolder`` component; returns `nil`
-    /// when ``FlightSecurityModule`` (or an equivalent registration) is not
-    /// installed.
+    /// Read straight off the context: ``Authentication`` writes the identity
+    /// into the copy it passes downstream, so a handler sees it without
+    /// resolving anything. `nil` when the request is unauthenticated, and
+    /// when no authentication middleware ran at all.
     public var principal: Principal? {
-        (try? resolve(PrincipalHolder.self))?.principal
+        identity.principal as? Principal
     }
 
     /// The full authentication outcome, distinguishing "no credential" from
     /// "rejected credential".
     public var authenticationState: AuthenticationState {
-        (try? resolve(PrincipalHolder.self))?.state ?? .anonymous
+        AuthenticationState(identity)
     }
 
     /// Runs `operation` with `Principal.current` bound to this request's

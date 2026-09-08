@@ -89,7 +89,7 @@ application is `override`:
 let container = try TestContainer.build {
     AppModule()
 } overriding: { container in
-    container.override((any UserRepositoryProtocol).self, scope: .scoped) { _ in users }
+    container.override((any UserRepositoryProtocol).self, scope: .singleton) { _ in users }
 }
 ```
 

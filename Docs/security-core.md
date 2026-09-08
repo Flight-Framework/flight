@@ -22,7 +22,7 @@ import FlightCore
 import FlightSecurityCore
 import FlightWeb
 
-try await bootstrap(
+try await Flight.bootstrap(
     configuration: .load(),
     modules: [
         FlightWebModule<FlightTransport>.self,
@@ -86,16 +86,38 @@ background job should not silently inherit the requester's identity.
 
 ### Enforcement
 
-Authentication and enforcement are separate concerns: the authentication
-middleware `.continue`s whether or not a token was presented or valid, so
-public routes stay public. Reject where you choose to:
+Authentication and enforcement are separate concerns: `Authentication`
+continues whether or not a token was presented or valid, so public routes
+stay public. Reject where you choose to.
+
+`FlightSecurityModule` puts `Authentication` in the default lane and declares
+two more (Flight Web §"Middleware lanes"), so enforcement is a lane a
+controller or route names:
 
 ```swift
-// Everything requires authentication (global middleware — Flight Web's
-// pipeline has no per-route middleware):
-container.registerMiddleware("app.require-auth", order: -50, requireAuthentication)
+// Identity required — `Authentication` then `RequireAuthentication`:
+@Controller("/admin", pipelines: [.authenticated])
+struct AdminController {
+    @GetRoute("/health", pipelines: [.public])   // deliberate, and says so
+    func health(_ context: RequestContext) -> Response { .text("ok") }
+}
 
-// Or per route, in the handler:
+// Identity established, nobody rejected — for a route that serves
+// signed-in and anonymous callers differently:
+@Controller("/articles", pipelines: [.authentication])
+struct ArticleController { … }
+```
+
+A lane is the whole stack for a route that names it alone, so both lanes
+begin with `Authentication` rather than assuming the default lane also ran.
+Naming `[.default, .authenticated]` would run `Authentication` twice — once
+per lane — which costs a second validation of the same token; name the lane
+alone unless the default lane carries something the route needs.
+
+Authorization stays in the handler, because it depends on a value rather than
+a lane:
+
+```swift
 @PostRoute("/admin/users")
 func createUser(_ context: RequestContext) async throws -> Response {
     guard context.principal?.hasRole("admin") == true else {
@@ -105,7 +127,7 @@ func createUser(_ context: RequestContext) async throws -> Response {
 }
 ```
 
-`requireAuthentication` answers with a bare 401 plus an RFC 6750
+`RequireAuthentication` answers with a bare 401 plus an RFC 6750
 `WWW-Authenticate: Bearer` challenge (`error="invalid_token"` when a
 credential was presented and rejected — and no further detail).
 `SecurityError.unauthenticated` / `.forbidden` thrown from handlers render
@@ -131,6 +153,7 @@ All keys live under `security.oidc.` (env-var form `FLIGHT_SECURITY_OIDC_*`):
 | `jwks_transport`        | no       | `https_only` | `https_only`, `allow_insecure_loopback`, `allow_insecure_anywhere` |
 | `roles_claim`           | no       | `roles,groups,realm_access.roles` | Comma-separated claim names/dot-paths, unioned |
 | `scopes_claim`          | no       | `scope,scp` | Same; space-delimited strings are split |
+| `allowed_algorithms`    | no       | every asymmetric algorithm JWTKit verifies | Comma-separated `alg` allowlist — see *Algorithms* below |
 
 Missing required keys fail at container freeze — startup, not first request.
 An unrecognized `jwks_transport` value fails there too, rather than falling
@@ -255,13 +278,17 @@ fails to resolve it at container freeze — at startup, naming the type.
 ## Implementation notes worth knowing
 
 The design sketches `Principal.$current.set(principal, in: context.scope)` —
-a task-local bound "to a scope". Flight Web's middleware chain is a flat
-sequential loop (not an onion), so a task-local bound inside the
-authentication middleware would unwind before the handler runs. The
-implemented mechanism keeps the intended semantics with the real APIs:
+a task-local bound "to a scope". When this was implemented the middleware
+chain was a flat sequential loop, so a task-local bound inside the
+authentication middleware unwound before the handler ran. The implemented
+mechanism keeps the intended semantics with the real APIs:
 
-- The principal rides the request's `Scope` as a `.scoped` component
-  (`PrincipalHolder`), read through `context.principal`.
+- The principal rides `RequestContext.identity`, written by the
+  authentication middleware into the copy it passes downstream and read
+  through `context.principal`. It was a `.scoped` `PrincipalHolder`
+  component until the composition migration; the container was inverting a
+  dependency (`RequestContext` is Flight Web's, `Principal` is this
+  package's) that a seam protocol expresses directly.
 - `Principal.current` still exists as a task-local; handlers opt in with
   `context.withPrincipal { ... }`, which binds it around service calls. The
   `Task.detached` caveat from design applies unchanged.
@@ -270,9 +297,14 @@ implemented mechanism keeps the intended semantics with the real APIs:
   `.respond(.problem(status: .unauthorized, message: "Unauthorized"))` with
   the real Flight Web response API.
 
-A future Flight Web seam that lets middleware wrap the downstream chain
-would allow binding `Principal.current` for the whole handler
-automatically; nothing here forecloses that.
+**That constraint is gone.** `Middleware.handle(_:next:)` is layered:
+`compose(_:around:)` folds the chain right-to-left, so each layer calls
+`next(context)` with the rest of the chain inside its own extent. A
+task-local bound around `next` therefore encloses the handler, and nothing
+downstream reads the principal after the chain unwinds — `errorResponse` uses
+the coders, the error mapper and the logger, and never touches it. The
+holder is kept for now because it is what ships; the composition migration
+replaces it with a typed value on `RequestContext`.
 
 ## Non-goals
 
@@ -283,10 +315,13 @@ issuance, no TLS opinions.
 
 ## Development
 
+Flight Security Core is a target of the `flight` package, not a package of
+its own, and its dependencies are gated behind the `Security` trait:
+
 ```sh
-swift build
-swift test    # 98 tests, hermetic (in-memory JWKS/HTTP fakes, injected clocks)
+swift build --enable-all-traits
+swift test  --enable-all-traits   # 110 tests, hermetic (in-memory JWKS/HTTP fakes, injected clocks)
 ```
 
-Depends on `flight-core` and `flight-web` by relative path, plus JWTKit and
-AsyncHTTPClient (both SSWG).
+Depends on `FlightCore` and `FlightWeb`, plus JWTKit and AsyncHTTPClient
+(both SSWG).

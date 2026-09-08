@@ -202,7 +202,7 @@ made earlier rather than adding a second one:
 
 ```swift
 let container = try TestContainer.build { AppModule() } overriding: { container in
-    container.override((any UserRepository).self, scope: .scoped) { _ in InMemoryUsers() }
+    container.override((any UserRepository).self, scope: .singleton) { _ in InMemoryUsers() }
 }
 ```
 

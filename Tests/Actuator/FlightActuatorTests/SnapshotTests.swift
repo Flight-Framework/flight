@@ -27,10 +27,16 @@ struct SnapshotTests {
         })
         #expect(repository.stereotype == .repository)
 
-        let transient = try #require(snapshot.components.first {
-            $0.typeName == "FlightActuatorTests.SampleTransient"
+        // The dashboard groups by stereotype and lists Controllers first
+        // (`ModuleHealth+Actuator.swift`'s ordering), which only works if the
+        // @Controller macro tags them. It did not: it omitted `stereotype:`
+        // entirely, so every application controller defaulted to .component
+        // and the Controllers section could only ever show Actuator's own —
+        // the one controller registered by hand with the argument passed.
+        let controller = try #require(snapshot.components.first {
+            $0.typeName == "FlightActuatorTests.SampleController"
         })
-        #expect(transient.scope == .transient)
+        #expect(controller.stereotype == .controller)
 
         // Qualified duplicate-type registrations stay distinguishable —
         // the reason ComponentDescriptor carries the qualifier at all.
@@ -106,8 +112,6 @@ struct ModuleHealthHelperTests {
         #expect(ModuleHealth.failed(SomeError()).actuatorLabel == "failed")
 
         #expect(Lifetime.singleton.actuatorLabel == "singleton")
-        #expect(Lifetime.transient.actuatorLabel == "transient")
-        #expect(Lifetime.scoped.actuatorLabel == "scoped")
 
         #expect(Stereotype.component.actuatorLabel == "component")
         #expect(Stereotype.service.actuatorLabel == "service")

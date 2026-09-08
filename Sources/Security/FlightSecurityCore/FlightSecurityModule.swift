@@ -6,10 +6,12 @@ import ServiceLifecycle
 /// Authentication wiring, independent of how tokens are validated.
 ///
 /// Registers:
-/// - the request-scoped ``PrincipalHolder`` carrying the principal;
 /// - ``Authentication`` in its own `pipeline { }` call, ahead of whatever the
 ///   application declares in its own — see `Container.pipeline(_:)` for why
-///   calling it more than once composes rather than conflicts.
+///   calling it more than once composes rather than conflicts;
+/// - the two canonical security lanes, `PipelineLane.authentication` and
+///   `PipelineLane.authenticated`, filled with what their documentation says
+///   they contain.
 ///
 /// It does **not** register a ``TokenValidator``. Supplying one is the
 /// application's choice, made by listing a module:
@@ -22,9 +24,10 @@ import ServiceLifecycle
 /// fails to resolve it at container freeze — loudly, at startup, naming the
 /// type.
 ///
-/// ``RequireAuthentication`` is deliberately *not* added to any pipeline —
-/// apps add it where wanted, since unlike authentication itself, enforcement
-/// is not something every route wants.
+/// ``RequireAuthentication`` is deliberately *not* in the **default** lane —
+/// unlike authentication itself, enforcement is not something every route
+/// wants. It is what the `.authenticated` lane is for, and a route or
+/// controller opts in by naming that lane.
 ///
 /// ## Why the validator is not a default here
 ///
@@ -40,10 +43,6 @@ public final class FlightSecurityModule: FlightModule {
     public init() {}
 
     public func configure(_ container: Container) throws {
-        container.register(PrincipalHolder.self, scope: .scoped) { _ in
-            PrincipalHolder()
-        }
-
         // Both middleware types are marked `flight:module-registered`, so the
         // application's generated `flightRegisterAll` skips them and this is
         // the only place they are registered. That is the point: whether they
@@ -54,6 +53,26 @@ public final class FlightSecurityModule: FlightModule {
 
         container.pipeline {
             Authentication.self
+        }
+
+        // The canonical security lanes, declared here because the whole point
+        // of a canonical spelling is that naming it works. `PipelineLane`
+        // documents what each one contains, `@Controller(pipelines:)`
+        // recognizes both by name, and the controller macro warns when a
+        // route silently drops one — three things that describe a stack no
+        // module was building. Without this, `pipelines: [.authenticated]`
+        // fails at bootstrap with `UndeclaredLaneError`.
+        //
+        // A lane is the *whole* stack for a route that names it alone, so
+        // each one starts with `Authentication`: `[.authenticated]` must
+        // establish the identity it then requires, without depending on the
+        // default lane it replaced.
+        container.pipeline(.authentication) {
+            Authentication.self
+        }
+        container.pipeline(.authenticated) {
+            Authentication.self
+            RequireAuthentication.self
         }
     }
 }

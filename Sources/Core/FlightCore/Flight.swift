@@ -42,6 +42,25 @@ public enum Flight {
         try _flightAssemble(configuration: configuration, modules: modules)
     }
 
+    /// Assembles from modules already built, in dependency order.
+    ///
+    /// The type-based overload above instantiates modules itself, so every
+    /// module must be constructible with no arguments — which is why a module
+    /// reads configuration through the container rather than taking it as a
+    /// parameter. This one takes what a caller already has, so a module is
+    /// free to declare what it needs in its initializer and hold what it
+    /// provides (COMPOSITION-MIGRATION.md D11).
+    ///
+    /// Ordered, because resolving the DAG is what the other overload uses the
+    /// types for. A generated composition root has that order from the same
+    /// `dependencies` walk, decided at build time.
+    public static func assemble(
+        configuration: Configuration,
+        modules: [any FlightModule]
+    ) throws -> AssembledApplication {
+        try _flightAssemble(configuration: configuration, moduleInstances: modules)
+    }
+
     /// Assembles the application and runs it under a `ServiceGroup` until
     /// shutdown.
     ///

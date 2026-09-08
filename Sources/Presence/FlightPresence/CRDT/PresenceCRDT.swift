@@ -143,6 +143,8 @@ public struct PresenceCRDTState: Sendable {
     /// - an entry we hold is removed if the incoming state observed its
     ///   dot but no longer holds it (a remove we hadn't seen);
     /// - contexts union.
+    /// - Parameter incoming: The state to merge in — a peer's frame off the
+    ///   wire, or a delta this node produced itself.
     /// - Parameter ownReplica: This node's replica id, when the state being
     ///   joined came from the wire. A peer may not speak about dots this
     ///   replica asserted — only a replica ever asserts its own — and

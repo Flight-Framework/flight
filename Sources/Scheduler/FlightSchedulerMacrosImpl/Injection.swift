@@ -21,6 +21,9 @@ enum Injection {
         let name: String
         let typeText: String
         let kind: Kind
+        /// The declaration, carried so a shared generator can point a
+        /// diagnostic at it.
+        let node: VariableDeclSyntax
 
         /// The type as written, parenthesized where `.self` would otherwise
         /// bind to the wrong thing — `any P.self` parses as `any (P.self)`.
@@ -51,7 +54,7 @@ enum Injection {
                     let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text,
                     let type = binding.typeAnnotation?.type.trimmedDescription
                 else { continue }
-                found.append(Property(name: name, typeText: type, kind: kind))
+                found.append(Property(name: name, typeText: type, kind: kind, node: variable))
             }
         }
         return found

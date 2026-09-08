@@ -61,11 +61,6 @@ struct JSONRenderingTests {
         #expect(service.stereotype == "service")
         #expect(service.qualifier == nil)
 
-        let transient = try #require(wire.components.first {
-            $0.type == "FlightActuatorTests.SampleTransient"
-        })
-        #expect(transient.scope == "transient")
-
         let qualified = wire.components.filter { $0.type == "FlightActuatorTests.SampleQualified" }
         #expect(qualified.compactMap(\.qualifier).sorted() == ["primary", "secondary"])
 

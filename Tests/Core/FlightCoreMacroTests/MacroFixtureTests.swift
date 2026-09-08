@@ -66,6 +66,9 @@ struct MacroFixtureTests {
                     internal init(_flight container: FlightCore.Container) throws {
                     }
 
+                    init() {
+                    }
+
                     static func _flightRegister(_ container: FlightCore.Container) throws {
                         container.register(Self.self, scope: .singleton) { c in
                             try Self(_flight: c)
@@ -103,6 +106,11 @@ struct MacroFixtureTests {
                         self.logger = try container.resolve(AppLogger.self)
                     }
 
+                    public init(repository: UserRepository, logger: AppLogger) {
+                        self.repository = repository
+                        self.logger = logger
+                    }
+
                     public static func _flightRegister(_ container: FlightCore.Container) throws {
                         container.register(Self.self, scope: .singleton) { c in
                             try Self(_flight: c)
@@ -136,6 +144,10 @@ struct MacroFixtureTests {
                         self.repository = try container.resolve(InvoiceRepository.self)
                     }
 
+                    init(repository: InvoiceRepository) {
+                        self.repository = repository
+                    }
+
                     static func _flightRegister(_ container: FlightCore.Container) throws {
                         container.register(Self.self, scope: .singleton, stereotype: .service) { c in
                             try Self(_flight: c)
@@ -163,6 +175,9 @@ struct MacroFixtureTests {
                 public final class InvoiceRepository {
 
                     internal init(_flight container: FlightCore.Container) throws {
+                    }
+
+                    public init() {
                     }
 
                     public static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -211,7 +226,7 @@ struct MacroFixtureTests {
     func scopedComponent() {
         assertMacroExpansion(
             """
-            @Component(scope: .scoped)
+            @Component
             final class RequestContext {
             }
             """,
@@ -221,8 +236,11 @@ struct MacroFixtureTests {
                     internal init(_flight container: FlightCore.Container) throws {
                     }
 
+                    init() {
+                    }
+
                     static func _flightRegister(_ container: FlightCore.Container) throws {
-                        container.register(Self.self, scope: .scoped) { c in
+                        container.register(Self.self, scope: .singleton) { c in
                             try Self(_flight: c)
                         }
                     }
@@ -290,6 +308,11 @@ struct MacroFixtureTests {
                         self.replica = try container.resolve(DataSource.self, qualifier: "replica")
                     }
 
+                    init(primary: DataSource, replica: DataSource) {
+                        self.primary = primary
+                        self.replica = replica
+                    }
+
                     static func _flightRegister(_ container: FlightCore.Container) throws {
                         container.register(Self.self, scope: .singleton) { c in
                             try Self(_flight: c)
@@ -321,6 +344,10 @@ struct MacroFixtureTests {
 
                     internal init(_flight container: FlightCore.Container) throws {
                         self.port = try container.resolve(FlightCore.Configuration.self).get("server.port", as: Int.self)
+                    }
+
+                    init(_flightConfiguration configuration: FlightCore.Configuration) throws {
+                        self.port = try configuration.get("server.port", as: Int.self)
                     }
 
                     static func _flightRegister(_ container: FlightCore.Container) throws {
@@ -362,6 +389,10 @@ struct MacroFixtureTests {
                         self.poolSize = try container.resolve(FlightCore.Configuration.self).getIfPresent("datasource.pool_size", as: Int.self) ?? (10)
                     }
 
+                    init(_flightConfiguration configuration: FlightCore.Configuration) throws {
+                        self.poolSize = try configuration.getIfPresent("datasource.pool_size", as: Int.self) ?? (10)
+                    }
+
                     static func _flightRegister(_ container: FlightCore.Container) throws {
                         container.register(Self.self, scope: .singleton) { c in
                             try Self(_flight: c)
@@ -390,6 +421,9 @@ struct MacroFixtureTests {
                 final class PrimarySource {
 
                     internal init(_flight container: FlightCore.Container) throws {
+                    }
+
+                    init() {
                     }
 
                     static func _flightRegister(_ container: FlightCore.Container) throws {

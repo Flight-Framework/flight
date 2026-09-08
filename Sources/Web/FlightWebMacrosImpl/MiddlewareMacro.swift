@@ -1,4 +1,5 @@
 import SwiftDiagnostics
+import FlightMacroSupport
 import SwiftSyntax
 import SwiftSyntaxMacros
 
@@ -78,7 +79,9 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
             }
             """
 
-        return [resolvingInit, thunk]
+        let parameterInit = parameterizedInitializer(
+            properties: properties, access: access, declaration: declaration)
+        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
     }
 
     // MARK: - ExtensionMacro
@@ -112,30 +115,6 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
     }
 
     // MARK: - Injected-property model (mirrors ComponentMacro)
-
-    private struct InjectedProperty {
-        enum Kind {
-            case inject(qualifier: String?)
-            case configValue(key: String, defaultValue: String?)
-        }
-        let name: String
-        let typeText: String
-        let kind: Kind
-        let node: VariableDeclSyntax
-
-        /// The type as written, parenthesized where `.self` would otherwise
-        /// bind to the wrong thing — `any P.self` parses as `any (P.self)`.
-        /// Mirrors `ComponentMacro.InjectedProperty.metatypeBase`.
-        var metatypeBase: String {
-            if typeText.hasPrefix("(") && typeText.hasSuffix(")") { return typeText }
-            if typeText.hasPrefix("any ") || typeText.hasPrefix("some ")
-                || typeText.contains(" & ")
-            {
-                return "(\(typeText))"
-            }
-            return typeText
-        }
-    }
 
     private static func collectInjectedProperties(
         from declaration: some DeclGroupSyntax,

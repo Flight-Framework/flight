@@ -1,3 +1,4 @@
+import FlightMacroSupport
 import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
@@ -80,7 +81,24 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
             \(raw: thunkLines.map { "    " + $0 }.joined(separator: "\n"))
             }
             """
-        return [resolvingInit, thunk]
+        // Constructor injection, through the same generator @Component,
+        // @Controller and @Middleware use — the shared macro-support target
+        // this file's Injection helper anticipated and declined to build.
+        let parameterInit = parameterizedInitializer(
+            properties: properties.map {
+                InjectedProperty(
+                    name: $0.name, typeText: $0.typeText,
+                    kind: {
+                        switch $0.kind {
+                        case .inject(let qualifier): return .inject(qualifier: qualifier)
+                        case .configValue(let key, let defaultValue):
+                            return .configValue(key: key, defaultValue: defaultValue)
+                        }
+                    }($0),
+                    node: $0.node)
+            },
+            access: access, declaration: declaration)
+        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
     }
 
     private static func registrationLines(for job: ScannedJob) -> [String] {

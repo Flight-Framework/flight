@@ -73,24 +73,32 @@ extension Container {
         let mount = TusMount(prefix: base, store: store, options: options)
         let source = "uploads@\(base)"
 
+        // flight:hand-registered — the five routes of one `uploads(at:)`
+        // mount, derived from a prefix only the caller knows. The mount is
+        // what the static route manifest records; these are its expansion,
+        // and their paths are interpolated by construction.
         registerRoute(.options, base, source: source, pipelines: pipelines) { _ in
             mount.capabilities()
         }
+        // flight:hand-registered — same mount.
         registerRoute(
             .post, base, source: source, pipelines: pipelines,
             bodyMode: .streaming(maxBytes: options.maxChunkBytes)
         ) { context in
             await mount.stamped(context) { try await mount.create(context) }
         }
+        // flight:hand-registered — same mount.
         registerRoute(.head, "\(base)/:id", source: source, pipelines: pipelines) { context in
             await mount.stamped(context) { try await mount.probe(context) }
         }
+        // flight:hand-registered — same mount.
         registerRoute(
             .patch, "\(base)/:id", source: source, pipelines: pipelines,
             bodyMode: .streaming(maxBytes: options.maxChunkBytes)
         ) { context in
             await mount.stamped(context) { try await mount.append(context) }
         }
+        // flight:hand-registered — same mount.
         registerRoute(.delete, "\(base)/:id", source: source, pipelines: pipelines) { context in
             await mount.stamped(context) { try await mount.cancel(context) }
         }

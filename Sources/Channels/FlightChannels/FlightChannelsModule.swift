@@ -72,6 +72,10 @@ extension Container {
         source: String = "FlightChannels",
         authenticate: (@Sendable (RequestContext) async throws -> (any ChannelPrincipal)?)? = nil
     ) {
+        // flight:hand-registered — this convenience *is* the mount, and the
+        // path is its argument. An application that wants the route in the
+        // static manifest declares it with `@WebSocketRoute` instead, which
+        // is what the demo template does.
         registerRoute(.get, path, kind: .upgrade(.webSocket), source: source) { context in
             let principal = try await authenticate?(context)
             let handler = try ChannelSocketHandler(context: context, principal: principal)

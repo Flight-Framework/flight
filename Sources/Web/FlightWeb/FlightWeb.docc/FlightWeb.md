@@ -65,22 +65,46 @@ the edge instead of every handler catching and re-wrapping.
 
 ## Middleware
 
-``Middleware`` is a function from a ``Request`` and a ``Next`` to a
-``Response``. Registration is declarative and ordered, and the chain is
-composed once at startup rather than per request:
+``Middleware`` is a type with one method, from a ``RequestContext`` and a
+``Next`` to a ``Response``. `@Middleware` makes it a component like any
+other, so it can inject its dependencies:
 
 ```swift
-registerMiddleware(order: 10) { request, next in
-    let start = ContinuousClock.now
-    let response = try await next(request)
-    metrics.record(ContinuousClock.now - start)
-    return response
+@Middleware
+struct RequestTiming: Middleware {
+    @Inject var metrics: MetricsRecorder
+
+    func handle(_ context: RequestContext, next: Next) async throws -> Response {
+        let start = ContinuousClock.now
+        let response = try await next(context)
+        metrics.record(ContinuousClock.now - start)
+        return response
+    }
 }
 ```
 
+Order is declared in one place, outermost first, and the chain is composed
+once at startup rather than per request:
+
+```swift
+container.pipeline {
+    RequestTiming.self
+    Authentication.self
+}
+```
+
+A ``PipelineLane`` names an alternative stack that routes opt into with
+`pipelines:` on a controller or a route — how a static-asset route avoids
+paying for authentication it can never use. Naming a lane alone runs *only*
+that lane; `[.default, "admin"]` concatenates.
+
+The older `registerMiddleware(_:order:)` closure API and its
+``MiddlewareResult`` return enum are deprecated: return early from `handle`
+instead of returning a result enum.
+
 ## WebSockets and streaming
 
-``WebSocketRoute(_:)`` upgrades a route; the handler receives a
+``WebSocketRoute(_:pipelines:)`` upgrades a route; the handler receives a
 ``WebSocketConnection`` and owns it for the connection's lifetime.
 ``ServerSentEvent`` and ``ServerSentEventWriter`` cover the one-directional
 case, which is usually what a dashboard actually needs.
@@ -101,12 +125,12 @@ whole application without binding a port.
 ### Controllers and routes
 
 - ``Controller(_:pipelines:)``
-- ``GetRoute(_:maxBodyBytes:)``
-- ``PostRoute(_:maxBodyBytes:)``
-- ``PutRoute(_:maxBodyBytes:)``
-- ``PatchRoute(_:maxBodyBytes:)``
-- ``DeleteRoute(_:maxBodyBytes:)``
-- ``WebSocketRoute(_:)``
+- ``GetRoute(_:maxBodyBytes:pipelines:)``
+- ``PostRoute(_:maxBodyBytes:pipelines:)``
+- ``PutRoute(_:maxBodyBytes:pipelines:)``
+- ``PatchRoute(_:maxBodyBytes:pipelines:)``
+- ``DeleteRoute(_:maxBodyBytes:pipelines:)``
+- ``WebSocketRoute(_:pipelines:)``
 
 ### Requests and responses
 
@@ -167,13 +191,16 @@ whole application without binding a port.
 - ``SimpleErrorBody``
 - ``BodyDecodingError``
 - ``WebCodersError``
+- ``ErrorMapper``
 
 ### Middleware
 
 - ``Middleware``
 - ``Next``
-- ``MiddlewareResult``
+- ``PipelineLane``
+- ``MiddlewarePipelineBuilder``
 - ``MiddlewareRegistration``
+- ``MiddlewareResult``
 
 ### Routing internals
 

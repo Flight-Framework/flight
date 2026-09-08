@@ -16,11 +16,18 @@ private struct AdHocMiddleware: Middleware {
     }
 }
 
-/// The terminal every pipeline test folds around: answers with whatever the
-/// context currently holds, so a chain that never reaches a handler still
-/// produces the context's default 404 — the same observable behaviour the flat
-/// pipeline had for an empty chain.
-private let contextResponder: Next = { context in context.response }
+/// The terminal every pipeline test folds around: answers 404, the same
+/// observable behaviour a chain that never reaches a handler has.
+///
+/// This used to read `context.response` — a field the context carried and
+/// nothing ever read in production, so a terminal that wanted a specific
+/// answer set it on the context first. The field is gone; a terminal that
+/// wants a specific answer is `responder(_:)`.
+private let contextResponder: Next = { _ in .notFound }
+
+/// A terminal answering with exactly this, for chains whose handler result
+/// has to be distinguishable from the not-found default.
+private func responder(_ response: Response) -> Next { { _ in response } }
 
 @Suite("Middleware pipeline")
 struct MiddlewareTests {
@@ -97,9 +104,9 @@ struct MiddlewareTests {
 
         var headers = HTTPFields()
         headers[.authorization] = "Bearer token"
-        var authed = RequestContext.mock(path: "/private", headers: headers)
-        authed.response = .noContent
-        let accepted = try await compose([MiddlewareRegistration(authMiddleware)], around: contextResponder)(
+        let authed = RequestContext.mock(path: "/private", headers: headers)
+        let accepted = try await compose(
+            [MiddlewareRegistration(authMiddleware)], around: responder(.noContent))(
             authed)
         #expect(accepted.status == .noContent)
     }

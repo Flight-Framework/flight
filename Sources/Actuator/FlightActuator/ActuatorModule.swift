@@ -125,6 +125,12 @@ public struct ActuatorModule: FlightModule {
         // Health is published wherever the actuator is enabled at all: an
         // orchestrator needs a probe in production, and the old all-or-nothing
         // gate is why production had none.
+        // flight:hand-registered — the case COMPOSITION-MIGRATION.md §2.9a
+        // is about: whether these routes exist at all is decided by
+        // `FLIGHT_ENV` at bootstrap, so no build-time scan can answer it.
+        // They become static manifest entries carrying an install predicate,
+        // which is how conditional *registration* becomes conditional
+        // *installation* without freezing a deployment knob into the binary.
         container.registerRoute(.get, "/actuator/health", source: "FlightActuator") { context in
             try await context.resolve(ActuatorController.self).health(context)
         }
@@ -133,10 +139,12 @@ public struct ActuatorModule: FlightModule {
         // module that has not started yet must not count against liveness (a
         // slow pod restarts into the same slow start, forever) and must count
         // against readiness.
+        // flight:hand-registered — same gate.
         container.registerRoute(.get, "/actuator/health/live", source: "FlightActuator") {
             context in
             try await context.resolve(ActuatorController.self).liveness(context)
         }
+        // flight:hand-registered — same gate.
         container.registerRoute(.get, "/actuator/health/ready", source: "FlightActuator") {
             context in
             try await context.resolve(ActuatorController.self).readiness(context)
@@ -147,6 +155,7 @@ public struct ActuatorModule: FlightModule {
         // registered only where the exposure says so — an unrecognized
         // environment does not get it.
         guard exposure.publishesDashboard else { return }
+        // flight:hand-registered — same gate.
         container.registerRoute(.get, "/actuator", source: "FlightActuator") { context in
             try await context.resolve(ActuatorController.self).dashboard(context)
         }

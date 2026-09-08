@@ -131,9 +131,22 @@ let package = Package(
 
         // MARK: Core
 
+        // The registration macros' shared model: one `InjectedProperty`, one
+        // parenthesisation rule, one constructor-injection generator. It was
+        // written three times before this, each copy commented as mirroring
+        // the others.
+        .target(
+            name: "FlightMacroSupport",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
+            ],
+            path: "Sources/Core/FlightMacroSupport"
+        ),
         .macro(
             name: "FlightCoreMacrosImpl",
             dependencies: [
+                "FlightMacroSupport",
                 "FlightConfigCore",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
@@ -155,6 +168,7 @@ let package = Package(
             name: "flight-registration-gen",
             dependencies: [
                 "FlightConfigCore",
+                "FlightRouteScan",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
             ],
@@ -181,9 +195,25 @@ let package = Package(
 
         // MARK: Web
 
+        // Route scanning, shared by the two things that need it: the
+        // `@Controller` macro expanding one file, and
+        // `flight-registration-gen` building the static route manifest across
+        // a whole target. One parser, so the paths, the validation and the
+        // messages cannot drift between them. Depends on SwiftSyntax but
+        // *not* SwiftSyntaxMacros — that coupling is what kept the route
+        // table invisible to the generator.
+        .target(
+            name: "FlightRouteScan",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+            ],
+            path: "Sources/Web/FlightRouteScan"
+        ),
         .macro(
             name: "FlightWebMacrosImpl",
             dependencies: [
+                "FlightMacroSupport",
+                "FlightRouteScan",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
@@ -314,6 +344,7 @@ let package = Package(
         .macro(
             name: "FlightSchedulerMacrosImpl",
             dependencies: [
+                "FlightMacroSupport",
                 "FlightCronCore",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),

@@ -20,7 +20,7 @@ multi-node story needs. Modeled on
 import FlightCore
 import FlightPubSub
 
-try await bootstrap(
+try await Flight.bootstrap(
     configuration: .load(),
     modules: [FlightPubSubModule.self, AppModule.self]
 )
@@ -212,7 +212,7 @@ builds with the repository:
 
 ```
 swift build --enable-all-traits
-swift test  --enable-all-traits    # 60 PubSub tests across 9 suites
+swift test  --enable-all-traits    # 70 PubSub tests across 11 suites
 ```
 
 A plain `swift build` at the root fails by design — the trait-gated targets
