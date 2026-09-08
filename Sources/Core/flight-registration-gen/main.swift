@@ -126,6 +126,12 @@ struct ScannedConfigValue {
 /// through the same parser (`FlightRouteScan`), so the manifest and the
 /// expansion cannot disagree about a path, a method, or a lane.
 struct ScannedControllerRoute {
+    /// The controller's type name, and the route's position within it —
+    /// together they name the factory `@Controller` generated,
+    /// `_flightRoute_<method>_<index>`.
+    let controllerTypeName: String
+    let methodName: String
+    let indexInController: Int
     let httpMethod: String
     /// Controller base path combined with the route's own, by the same rule
     /// the macro applies.
@@ -576,12 +582,17 @@ final class ComponentVisitor: SyntaxVisitor {
         let base = RouteScanning.basePath(of: attribute, diagnostics: silent)
         let controllerPipelines = RouteScanning.pipelines(of: attribute)
 
+        var index = 0
         for member in members.members {
             guard let function = member.decl.as(FunctionDeclSyntax.self) else { continue }
             for route in RouteScanning.scanRoutes(of: function, diagnostics: silent) {
                 let location = converter.location(for: route.node.position)
+                defer { index += 1 }
                 routes.append(
                     ScannedControllerRoute(
+                        controllerTypeName: controller,
+                        methodName: route.methodName,
+                        indexInController: index,
                         httpMethod: route.kind.httpMethod,
                         path: RouteScanning.combinePaths(base, route.path),
                         source: "\(module).\(controller).\(route.methodName)",
@@ -1505,8 +1516,18 @@ func emitFlightGraph(into out: inout String) {
     // Module-registered types are excluded for the same reason
     // `flightRegisterAll` excludes them: whether they exist in an application
     // is a runtime question their own module answers.
-    let nodes = components.filter { !$0.isModuleRegistered }
-    guard !nodes.isEmpty else { return }
+    let registrable = components.filter { !$0.isModuleRegistered }
+    // A controller is constructed per request by its route terminal, not
+    // held for the process — that is the whole point of §2.1a — so it is not
+    // a graph node. Unless something else injects it, in which case the
+    // graph has to build it like anything else.
+    let dependedUpon = Set(
+        registrable.flatMap { $0.injectTypeNames + $0.acknowledgedTypeNames }.map(baseName))
+    let nodes = registrable.filter {
+        stereotype(forAttribute: $0.attributeName) != "controller"
+            || dependedUpon.contains(baseName($0.typeName))
+    }
+    guard !registrable.isEmpty else { return }
 
     let byName = Dictionary(nodes.map { (baseName($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
     // One conformer per protocol, the same mapping the existential bridges
@@ -1553,9 +1574,18 @@ func emitFlightGraph(into out: inout String) {
 
     // Externally supplied: every dependency with no node to build it, in a
     // stable order, deduplicated by the type as written.
+    //
+    // Over everything the generated code constructs, not just the graph's
+    // own nodes: a controller is built by its route terminal rather than
+    // held by the graph, and it reaches its dependencies *through* the
+    // graph — so a root input only a controller needs still has to be
+    // stored there.
+    let constructed = ordered + registrable.filter { component in
+        !ordered.contains { baseName($0.typeName) == baseName(component.typeName) }
+    }
     var supplied: [String] = []
     var seenSupplied: Set<String> = []
-    for node in ordered {
+    for node in constructed {
         for dependency in node.injectTypeNames + node.acknowledgedTypeNames
         where provider(of: dependency) == nil {
             if seenSupplied.insert(dependency).inserted { supplied.append(dependency) }
@@ -1566,7 +1596,7 @@ func emitFlightGraph(into out: inout String) {
         return name.prefix(1).lowercased() + name.dropFirst()
     }
 
-    let needsConfiguration = ordered.contains { !$0.configValues.isEmpty }
+    let needsConfiguration = constructed.contains { !$0.configValues.isEmpty }
 
     out += "\n"
     out += "/// Every component this module declares, constructed once, in\n"
@@ -1581,6 +1611,17 @@ func emitFlightGraph(into out: inout String) {
     out += "/// default, and a public struct cannot expose them. The composition\n"
     out += "/// root is in this module too, so nothing needs it to be public.\n"
     out += "struct FlightGraph {\n"
+    if needsConfiguration || !supplied.isEmpty {
+        out += "    // Root inputs, stored: a route terminal reaches these the\n"
+        out += "    // same way it reaches a component.\n"
+    }
+    if needsConfiguration {
+        out += "    let configuration: FlightCore.Configuration\n"
+    }
+    for dependency in supplied {
+        out += "    let \(suppliedBinding(dependency)): \(dependency)\n"
+    }
+    if (needsConfiguration || !supplied.isEmpty) && !ordered.isEmpty { out += "\n" }
     for node in ordered {
         out += "    let \(binding(node)): \(qualified(node))\n"
     }
@@ -1589,6 +1630,10 @@ func emitFlightGraph(into out: inout String) {
     if needsConfiguration { parameters.append("configuration: FlightCore.Configuration") }
     parameters += supplied.map { "\(suppliedBinding($0)): \($0)" }
     out += "    init(\(parameters.joined(separator: ", "))) throws {\n"
+    if needsConfiguration { out += "        self.configuration = configuration\n" }
+    for dependency in supplied {
+        out += "        self.\(suppliedBinding(dependency)) = \(suppliedBinding(dependency))\n"
+    }
     for node in ordered {
         var arguments: [String] = []
         if !node.configValues.isEmpty { arguments.append("_flightConfiguration: configuration") }
@@ -1643,6 +1688,67 @@ func emitFlightGraph(into out: inout String) {
     }
     out += resolved.map { "        \($0)" }.joined(separator: ",\n") + "\n"
     out += "    )\n"
+    out += "}\n"
+
+    // Route registrations with a per-request controller (§2.1a).
+    //
+    // The whole route lives in the factory `@Controller` generated; all this
+    // supplies is *how the controller is obtained*. That closure is the
+    // difference between the two wiring mechanisms: `_flightRegister` passes
+    // one returning an instance the container resolved once, and this passes
+    // one that constructs from the graph on every request.
+    //
+    // Emitted but not called, like the graph above. Calling it as well as
+    // `flightRegisterAll` would register each route twice and fail the freeze
+    // on a duplicate; the flip is one deletion in the macro, and it is the
+    // last step because it is the one that changes behaviour.
+    guard !routes.isEmpty else { return }
+    let componentsByName = Dictionary(
+        registrable.map { (baseName($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
+
+    out += "\n"
+    out += "/// Registers every route, with its controller constructed per\n"
+    out += "/// request from ``FlightGraph`` rather than resolved once.\n"
+    out += "///\n"
+    out += "/// Not called yet: running this *and* `flightRegisterAll` would\n"
+    out += "/// register every route twice and fail the freeze. It compiles on\n"
+    out += "/// every build, so the constructor labels, the graph's property\n"
+    out += "/// names and the generated factory names are checked against each\n"
+    out += "/// other continuously rather than at the flip.\n"
+    out += "func flightRegisterRoutes(_ container: FlightCore.Container) throws {\n"
+    out += "    container.register(FlightGraph.self, scope: .singleton) { c in\n"
+    out += "        try makeFlightGraph(c)\n"
+    out += "    }\n"
+    for route in routes {
+        guard let controller = componentsByName[baseName(route.controllerTypeName)] else { continue }
+        let type = qualified(controller)
+        var arguments: [String] = []
+        if !controller.configValues.isEmpty {
+            arguments.append("_flightConfiguration: graph.configuration")
+        }
+        let edges =
+            Array(zip(controller.injectTypeNames, controller.injectPropertyNames))
+            + Array(zip(controller.acknowledgedTypeNames, controller.acknowledgedPropertyNames))
+        for (dependency, label) in edges {
+            if let source = provider(of: dependency) {
+                arguments.append("\(label): graph.\(binding(source))")
+            } else {
+                arguments.append("\(label): graph.\(suppliedBinding(dependency))")
+            }
+        }
+        let construction =
+            "\(controller.configValues.isEmpty ? "" : "try ")\(type)(\(arguments.joined(separator: ", ")))"
+        let factory = "_flightRoute_\(route.methodName)_\(route.indexInController)"
+        out += "    container.register(\n"
+        out += "        FlightWeb.RouteRegistration.self,\n"
+        out += "        qualifier: \"\(route.httpMethod) \(escaped(route.path)) @\""
+        out += " + String(reflecting: \(type).self) + \".\(route.methodName)\",\n"
+        out += "        scope: .singleton\n"
+        out += "    ) { c in\n"
+        out += "        let graph = try c.resolve(FlightGraph.self)\n"
+        out += "        return \(type).\(factory) { _ in \(construction) }\n"
+        out += "    }\n"
+    }
     out += "}\n"
 }
 

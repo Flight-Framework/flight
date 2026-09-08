@@ -622,6 +622,78 @@ struct GeneratorTests {
                 "postgresDataSource: container.resolve(PostgresDataSource.self)"))
     }
 
+    @Test("routes are emitted with a per-request controller, through the macro's factory")
+    func routesConstructPerRequest() throws {
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            @Service
+            struct UserService: Sendable {}
+            @Controller("/users")
+            struct UserController {
+            @Inject var users: UserService
+            @GetRoute("/:id")
+            func show(_ context: RequestContext) -> String { "x" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        // The whole route lives in the factory the macro generated; this
+        // supplies only how the controller is obtained.
+        #expect(
+            result.generated.contains(
+                "UserController._flightRoute_show_0 { _ in UserController(users: graph.userService) }"
+            ))
+        #expect(result.generated.contains("let graph = try c.resolve(FlightGraph.self)"))
+    }
+
+    @Test("a controller is not a graph node — it is built per request")
+    func controllerIsNotAGraphNode() throws {
+        // The point of §2.1a: process dependencies are held, the controller
+        // is not. A controller something *else* injects stays a node,
+        // because then the graph does have to build it.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            @Service
+            struct UserService: Sendable {}
+            @Controller("/users")
+            struct UserController {
+            @Inject var users: UserService
+            @GetRoute("/:id")
+            func show(_ context: RequestContext) -> String { "x" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("let userService: UserService"))
+        #expect(!result.generated.contains("let userController: UserController"))
+    }
+
+    @Test("a root input only a controller needs is still stored on the graph")
+    func controllerOnlyRootInputIsStored() throws {
+        // The terminal reaches its dependencies *through* the graph, so a
+        // root input no graph node uses still has to be there.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            @Controller("/socket")
+            struct SocketController {
+            // flight:hand-registered
+            @Inject var validator: (any TokenValidator)
+            @GetRoute("/")
+            func open(_ context: RequestContext) -> String { "x" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        // Named for the type, not the property: two properties of one type
+        // are one root input, which is what makes them the *same* value.
+        #expect(result.generated.contains("let tokenValidator: (any TokenValidator)"))
+        #expect(
+            result.generated.contains("SocketController(validator: graph.tokenValidator)"))
+    }
+
     // MARK: - Undeclared lanes
 
     @Test("a route naming an undeclared lane is warned about at build time")
