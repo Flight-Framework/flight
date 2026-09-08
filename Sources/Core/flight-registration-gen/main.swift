@@ -1548,7 +1548,14 @@ out += """
 // application with components but no routes needs it just as much as one
 // with routes. Registration is deferred either way — nothing is constructed
 // until freeze.
-if !graphNodes.isEmpty {
+// Gated on the same condition the graph is *emitted* under, not on whether
+// it has nodes. An application whose only component is a controller has an
+// empty graph — and route terminals still resolve it, because that is where
+// they reach root inputs and it is how they are written either way. Gating
+// on `graphNodes` left that application emitting terminals that resolved a
+// type nothing registered, which the skeleton template caught and a richer
+// one could not.
+if !graphRegistrable.isEmpty {
     out += "\n"
     out += "    container.register(FlightGraph.self, scope: .singleton) { c in\n"
     out += "        try makeFlightGraph(c)\n"

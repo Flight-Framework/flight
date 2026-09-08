@@ -767,6 +767,28 @@ struct GeneratorTests {
         #expect(result.generated.contains("UserService(store: userRepository)"))
     }
 
+    @Test("an application whose only component is a controller still registers the graph")
+    func controllerOnlyAppRegistersTheGraph() throws {
+        // The skeleton template's shape, and a bug it caught that a richer
+        // application could not: with the controller excluded from the graph
+        // there are no nodes, but the route terminals still resolve
+        // FlightGraph — so gating its registration on "has nodes" emitted
+        // terminals that resolved a type nothing registered.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            @Controller
+            struct HealthController {
+            @GetRoute("/")
+            func index(_ context: RequestContext) -> String { "ok" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("container.register(FlightGraph.self"))
+        #expect(result.generated.contains("try c.resolve(FlightGraph.self)"))
+    }
+
     // MARK: - Included modules
 
     @Test("the bootstrap list resolves transitively, dependencies first")

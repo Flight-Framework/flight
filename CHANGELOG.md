@@ -4,6 +4,120 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-09-08
+
+The composition migration, as far as it goes without breaking how an
+application starts. A generated `FlightGraph` constructs every component an
+application declares, route controllers are built per request from it, and
+the container becomes a typed view onto that rather than a second
+construction path. Both mechanisms are live and compiled together: nothing
+here is half-migrated, and an application that never looks at the generated
+file behaves the same as it did.
+
+### Breaking
+
+- **`Scope` is gone**, and with it `Scope.active`, `Container.withScope`,
+  `Container.resolve(_:qualifier:in:)`, `resolveInActiveScope`, `ScopeError`,
+  and `RequestContext.scope`. Nothing needed it: repositories hold the pool
+  and lease per operation (flight-data 0.5.0), and the authenticated
+  principal now rides the request context. Post-freeze resolution is a
+  dictionary read with nothing in front of it — it used to switch on the
+  lifetime and, for `.scoped`, consult a task-local and a per-scope memo
+  table on every resolution.
+
+- **`Lifetime.scoped` and `.transient` are gone.** Singleton is the only
+  lifetime, `scope:` defaults to it, and the captive-dependency class cannot
+  occur. Source carrying either gets a build error naming what to use
+  instead, rather than the type checker's "has no member 'scoped'".
+  `ResolutionError.scopeRequired` and `.noActiveScope` go with them.
+
+- **`PrincipalHolder` is gone.** The authenticated identity is
+  `RequestContext.identity`, a typed value the authentication middleware
+  writes into the copy it passes downstream. Read it through
+  `context.principal` and `context.authenticationState` as before.
+  `FlightSecurityCore.Principal` conforms to Flight Web's new
+  `RequestPrincipal` seam, which is what lets the context carry an identity
+  without depending on the package that defines one.
+
+- **`RequestContext.response` is gone.** It was written in two places and
+  read in none — vestigial from the flat pre-handler chain, where middleware
+  mutated a response in place. Under `handle(_:next:) -> Response` the
+  response *is* the return value. With the identity field added, the context
+  went from 184 bytes to 112: three cache lines to two, on a struct copied at
+  every `next(context)`.
+
+- **The container no longer resolves to itself.** Its stated purpose was a
+  gateway opening a scope of its own for request-scoped repositories, and
+  both halves of that are gone. Nothing outside its own tests used it.
+
+- **`@Controller` route registration moved.** In an application built by the
+  plugin, routes come from generated terminals that construct the controller
+  per request; the macro's own registration is opted out with
+  `_flightRegister(_:includingRoutes:)`. Registering a controller directly —
+  a test, a hand-wired module — still gets its routes, because the parameter
+  defaults to `true`.
+
+### Added
+
+- **A generated `FlightGraph`** holding every component the application
+  declares, constructed once in dependency order by plain initializer calls.
+  Every node is also a `nil`-defaulted parameter, so a test replaces one and
+  gets the rest of the graph real — what `Container.override` exists to
+  approximate.
+
+- **Constructor injection on every registration macro.** `@Component`,
+  `@Controller`, `@Middleware` and `@Scheduler` emit an initializer taking
+  their `@Inject` properties as parameters, beside the resolving one. A type
+  that already declares that signature keeps its own.
+
+- **A static manifest** — `FlightRouteManifest` — carrying routes, pipeline
+  lanes, the module graph, mounts, hand-registered routes, components, and
+  the set of modules the application includes. Emitted for any target with a
+  Flight surface; not yet consumed by dispatch.
+
+- **`Flight.assemble(configuration:modules:)` taking instances.** The
+  type-based overload instantiates modules itself, which is why a module must
+  be constructible with no arguments and therefore reads configuration
+  through the container. This one takes modules a caller already built, in
+  dependency order.
+
+- **Per-request controller construction.** A controller's dependencies arrive
+  as initializer arguments — process ones from the graph, request ones from
+  the context — so a controller can take a request value rather than reaching
+  for it. Verified for fixed, streaming and upgraded responses, including the
+  two that outlive the dispatch call that produced them.
+
+### Fixed
+
+- **`@Controller` never set `stereotype: .controller`.** Actuator groups its
+  dashboard by stereotype and lists Controllers first; every application
+  controller defaulted to `.component`, so that section could only ever show
+  Actuator's own. The fixtures hid it: the Actuator test module hand-registered
+  one component of each stereotype and had no controller at all.
+
+- **The canonical security lanes were never declared.**
+  `PipelineLane.authentication` and `.authenticated` were named by the type,
+  recognized by the `@Controller` macro, documented in the guide, and built
+  by no module — so `pipelines: [.authenticated]` failed at bootstrap with
+  `UndeclaredLaneError`. `FlightSecurityModule` declares both, with the
+  contents `PipelineLane`'s own documentation specifies.
+
+- **A PubSub test flake under `--filter`.** Two suites shared one static
+  cluster slot, and `.serialized` orders tests within a suite rather than
+  suites against each other.
+
+- **`JobRunner` counted only successful runs**, so a job failing every time
+  reported as never having run.
+
+### Diagnostics
+
+- A route naming a lane nobody declares is a build warning, at the
+  declaration, rather than only a bootstrap error.
+- A route registered by hand is named in the generated file and warned about
+  unless acknowledged with `// flight:hand-registered`, so a route the static
+  manifest cannot see still leaves a trace.
+- `RequestContext`'s size is pinned by a test at two cache lines.
+
 ## [0.14.0] - 2026-09-07
 
 Everything here was found the same way: by building an application on this
