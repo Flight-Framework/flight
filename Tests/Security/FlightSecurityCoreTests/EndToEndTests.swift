@@ -12,33 +12,27 @@ import Testing
 /// generic validator. State travels on the instance (TestContainer
 /// substitutes provided instances by type), so parallel tests never share
 /// key material.
-private final class InMemoryOIDCModule: FlightModule {
-    private let source: InMemoryJWKSSource?
-    private let now: (@Sendable () -> Date)?
+private struct InMemoryOIDCModule: FlightModule {
+    /// What `FlightSecurityModule` takes, so the type match finds it.
+    let tokenValidator: any TokenValidator
 
-    init() {
-        source = nil
-        now = nil
+    init(configuration: Configuration, source: InMemoryJWKSSource, clock: TestClock) throws {
+        self.tokenValidator = OIDCTokenValidator(
+            configuration: try OIDCSecurityConfiguration(configuration: configuration),
+            jwksSource: source,
+            now: clock.nowProvider
+        )
     }
 
-    init(source: InMemoryJWKSSource, clock: TestClock) {
-        self.source = source
-        self.now = clock.nowProvider
+    static var isTypeConstructible: Bool { false }
+
+    init() {
+        preconditionFailure("InMemoryOIDCModule must be built with a source and clock")
     }
 
     func configure(_ container: Container) throws {
-        guard let source, let now else {
-            fatalError("InMemoryOIDCModule must be instantiated with a source and clock")
-        }
-        container.register((any TokenValidator).self, scope: .singleton) { c in
-            OIDCTokenValidator(
-                configuration: try OIDCSecurityConfiguration(
-                    configuration: c.resolve(Configuration.self)
-                ),
-                jwksSource: source,
-                now: now
-            )
-        }
+        let validator = tokenValidator
+        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
     }
 }
 
@@ -99,12 +93,17 @@ struct EndToEndTests {
             "security.oidc.issuer": testIssuer,
             "security.oidc.audience": testAudience,
         ])
+        let oidc = try InMemoryOIDCModule(
+            configuration: configuration, source: source, clock: clock)
+        let security = FlightSecurityModule(validator: oidc.tokenValidator)
         let container = try TestContainer.build(configuration: configuration) {
-            InMemoryOIDCModule(source: source, clock: clock)
-            FlightSecurityModule()
+            oidc
+            security
             RoutesModule()
         }
-        return try TestClient(container: container)
+        // The security middleware is a value the composition root hands to
+        // FlightWebModule, so a client that must run it is handed it too.
+        return try TestClient(container: container, middleware: security.middleware)
     }
 
     private func bearer(_ token: String) -> HTTPFields {

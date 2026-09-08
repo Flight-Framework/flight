@@ -15,19 +15,19 @@ struct ModuleTests {
         ])
     }
 
-    @Test("the security module registers middleware and lanes, but no validator")
+    @Test("the security module declares middleware and lanes, but no validator")
     func securityModuleRegistersAuthenticationOnly() throws {
-        let module = FlightSecurityModule()
-        let container = try TestContainer.build {
-            module
-            CustomValidatorModule(validator: StubValidator(principalsByToken: [:]))
-        }
+        // Declared as values now: the composition root hands them to
+        // FlightWebModule alongside every other module's.
+        let module = FlightSecurityModule(validator: StubValidator(principalsByToken: [:]))
 
-        // The principal needs no registration at all now: it rides
+        // The principal needs no registration at all: it rides
         // `RequestContext.identity` as a typed value rather than a `.scoped`
         // component resolved out of the request's scope.
-        let middleware = try container.collectMiddleware()
-        #expect(middleware.contains { $0.name.contains("Authentication") })
+        #expect(module.middleware.contains { $0.name.contains("Authentication") })
+        // All three canonical lanes, so `pipelines: [.authenticated]` resolves.
+        #expect(
+            Set(module.middleware.map(\.lane)) == [.default, .authentication, .authenticated])
 
         #expect(module.service == nil, "JWKS maintenance belongs to FlightOIDCModule")
     }
@@ -37,16 +37,21 @@ struct ModuleTests {
         let oidc = try FlightOIDCModule(configuration: minimalConfig)
         let container = try TestContainer.build(configuration: minimalConfig) {
             oidc
+            // Pulled in transitively by OIDC's `dependencies`, and it takes
+            // the validator OIDC provides — which is what the composition
+            // root wires by type.
+            FlightSecurityModule(validator: oidc.tokenValidator)
         }
 
         let validator = try container.resolve((any TokenValidator).self)
         #expect(validator is OIDCTokenValidator)
         #expect(oidc.service != nil, "OIDC owns the JWKS maintenance service")
 
-        // Listing FlightOIDCModule pulls FlightSecurityModule in transitively,
-        // so the middleware arrives without naming it.
+        // Listing FlightOIDCModule pulls FlightSecurityModule in
+        // transitively — and the security module is built from the validator
+        // OIDC provides, which is the edge the composition root wires by type.
         #expect(
-            try container.collectMiddleware()
+            FlightSecurityModule(validator: oidc.tokenValidator).middleware
                 .contains { $0.name.contains("Authentication") }
         )
     }
@@ -74,25 +79,27 @@ struct ModuleTests {
         // modules has no such ordering dependence. Note also that no
         // security.oidc.* configuration is present: nothing demands it when
         // FlightOIDCModule isn't listed.
+        let security = FlightSecurityModule(validator: stub)
         let container = try TestContainer.build {
-            FlightSecurityModule()
+            security
             CustomValidatorModule(validator: stub)
         }
 
         #expect(try container.resolve((any TokenValidator).self) is StubValidator)
         #expect(
-            try container.collectMiddleware()
-                .contains { $0.name.contains("Authentication") },
-            "middleware still registered"
+            security.middleware.contains { $0.name.contains("Authentication") },
+            "middleware still declared"
         )
     }
 
-    @Test("security module without any validator fails loudly at freeze")
+    @Test("security module without any validator cannot be built at all")
     func noValidatorFailsAtStartup() {
+        // It used to fail at freeze, when `Authentication`'s `@Inject` found
+        // no validator registered. The middleware is a value holding its
+        // validator now, so "no validator" is not a state the module can reach
+        // — the type-based path refuses it, naming the fix.
         #expect(throws: (any Error).self) {
-            try TestContainer.build {
-                FlightSecurityModule()
-            }
+            try Flight.instantiateModules([FlightSecurityModule.self])
         }
     }
 

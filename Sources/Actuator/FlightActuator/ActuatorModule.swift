@@ -56,6 +56,9 @@ public struct ActuatorModule: FlightModule {
         // was *stated* is a different question from what it resolved to, and
         // it is the one the gate needs.
         self.isEnvironmentDeclared = processEnvironment["FLIGHT_ENV"].map { !$0.isEmpty } ?? false
+        self.routes = Self.makeRoutes(
+            exposure: try? ActuatorExposure.resolve(
+                environment: environment, isEnvironmentDeclared: isEnvironmentDeclared))
     }
 
     /// Explicit-environment initializer — the test seam (`TestContainer.build`
@@ -67,6 +70,9 @@ public struct ActuatorModule: FlightModule {
         // Naming the environment in code is a declaration, the same as
         // setting FLIGHT_ENV.
         self.isEnvironmentDeclared = true
+        self.routes = Self.makeRoutes(
+            exposure: try? ActuatorExposure.resolve(
+                environment: environment, isEnvironmentDeclared: true))
     }
 
     /// Explicit exposure, bypassing both the environment allowlist and
@@ -76,19 +82,85 @@ public struct ActuatorModule: FlightModule {
         self.environment = environment
         self.exposureOverride = exposure
         self.isEnvironmentDeclared = true
+        self.routes = Self.makeRoutes(exposure: exposure)
     }
 
     private let exposureOverride: ActuatorExposure?
     private let isEnvironmentDeclared: Bool
 
-    public func configure(_ container: Container) throws {
-        // Whether a route is registered at all has to be decided here, and
-        // registration-phase code cannot resolve `Configuration` — so the
-        // override arrives the same way `FLIGHT_ENV` does.
-        let exposure =
+    /// Resolved once, when the module is built, so `routes` can be a stored
+    /// value — and kept as a `Result` because `FlightModule` requires a
+    /// non-throwing `init()`. A malformed `FLIGHT_ACTUATOR_EXPOSURE` still
+    /// fails bootstrap: `configure` rethrows it below, and nothing serves
+    /// before every module has configured.
+    private var resolvedExposure: Result<ActuatorExposure, any Error> {
+        Result {
             try exposureOverride
-            ?? ActuatorExposure.resolve(
-                environment: environment, isEnvironmentDeclared: isEnvironmentDeclared)
+                ?? ActuatorExposure.resolve(
+                    environment: environment, isEnvironmentDeclared: isEnvironmentDeclared)
+        }
+    }
+
+    /// The actuator's endpoints, as values.
+    ///
+    /// §2.9a's case: whether these exist at all is decided by `FLIGHT_ENV` at
+    /// bootstrap, so no build-time scan can answer it — which is why they
+    /// carried `flight:hand-registered` markers when they were imperative
+    /// `registerRoute` calls. As values the gate is an ordinary `if`, and the
+    /// composition root collects them like any other contribution.
+    ///
+    /// Each handler resolves the controller from the request's context: a
+    /// lock-free singleton lookup, not reconstruction.
+    public let routes: [RouteRegistration]
+
+    /// Stored rather than computed, because the composition root reads what a
+    /// module *holds*: a computed property is excluded from that scan, which
+    /// is what keeps `var service` from being taken as a contribution.
+    private static func makeRoutes(exposure: ActuatorExposure?) -> [RouteRegistration] {
+        guard let exposure, exposure.publishesHealth else { return [] }
+        // Health is published wherever the actuator is enabled at all: an
+        // orchestrator needs a probe in production, and the old
+        // all-or-nothing gate is why production had none.
+        var routes: [RouteRegistration] = [
+            RouteRegistration(method: "GET", path: "/actuator/health", source: "FlightActuator") {
+                context in try await context.resolve(ActuatorController.self).health(context)
+            },
+            // Liveness and readiness are different questions, and one endpoint
+            // answering both got one of them wrong whichever way it was wired:
+            // a module that has not started yet must not count against
+            // liveness (a slow pod restarts into the same slow start, forever)
+            // and must count against readiness.
+            RouteRegistration(
+                method: "GET", path: "/actuator/health/live", source: "FlightActuator"
+            ) { context in
+                try await context.resolve(ActuatorController.self).liveness(context)
+            },
+            RouteRegistration(
+                method: "GET", path: "/actuator/health/ready", source: "FlightActuator"
+            ) { context in
+                try await context.resolve(ActuatorController.self).readiness(context)
+            },
+        ]
+        // The dashboard discloses the module list, every registered
+        // component's fully-qualified type name, and failure messages. It is
+        // published only where the exposure says so — an unrecognized
+        // environment does not get it.
+        if exposure.publishesDashboard {
+            routes.append(
+                RouteRegistration(method: "GET", path: "/actuator", source: "FlightActuator") {
+                    context in
+                    try await context.resolve(ActuatorController.self).dashboard(context)
+                })
+        }
+        return routes
+    }
+
+    public func configure(_ container: Container) throws {
+        // Whether the actuator exists at all has to be decided here too, and
+        // registration-phase code cannot resolve `Configuration` — so the
+        // override arrives the same way `FLIGHT_ENV` does. This is also where
+        // a malformed exposure surfaces, failing bootstrap.
+        let exposure = try resolvedExposure.get()
         guard exposure.publishesHealth else { return }
 
         // The environment the gate ran against, for the dashboard to report.
@@ -118,46 +190,5 @@ public struct ActuatorModule: FlightModule {
             return ActuatorController(container: c, environment: environment, format: format)
         }
 
-        // The route itself, through the same escape hatch @GetRoute sits
-        // beside (Flight Web's registerRoute). Resolving the controller
-        // here is a lock-free singleton lookup, not reconstruction — the
-        // factory above already ran at freeze(), before any request.
-        // Health is published wherever the actuator is enabled at all: an
-        // orchestrator needs a probe in production, and the old all-or-nothing
-        // gate is why production had none.
-        // flight:hand-registered — the case COMPOSITION-MIGRATION.md §2.9a
-        // is about: whether these routes exist at all is decided by
-        // `FLIGHT_ENV` at bootstrap, so no build-time scan can answer it.
-        // They become static manifest entries carrying an install predicate,
-        // which is how conditional *registration* becomes conditional
-        // *installation* without freezing a deployment knob into the binary.
-        container.registerRoute(.get, "/actuator/health", source: "FlightActuator") { context in
-            try await context.resolve(ActuatorController.self).health(context)
-        }
-        // Liveness and readiness are different questions, and one endpoint
-        // answering both got one of them wrong whichever way it was wired: a
-        // module that has not started yet must not count against liveness (a
-        // slow pod restarts into the same slow start, forever) and must count
-        // against readiness.
-        // flight:hand-registered — same gate.
-        container.registerRoute(.get, "/actuator/health/live", source: "FlightActuator") {
-            context in
-            try await context.resolve(ActuatorController.self).liveness(context)
-        }
-        // flight:hand-registered — same gate.
-        container.registerRoute(.get, "/actuator/health/ready", source: "FlightActuator") {
-            context in
-            try await context.resolve(ActuatorController.self).readiness(context)
-        }
-
-        // The dashboard discloses the module list, every registered
-        // component's fully-qualified type name, and failure messages. It is
-        // registered only where the exposure says so — an unrecognized
-        // environment does not get it.
-        guard exposure.publishesDashboard else { return }
-        // flight:hand-registered — same gate.
-        container.registerRoute(.get, "/actuator", source: "FlightActuator") { context in
-            try await context.resolve(ActuatorController.self).dashboard(context)
-        }
     }
 }

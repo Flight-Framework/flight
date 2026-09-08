@@ -660,7 +660,10 @@ struct GeneratorTests {
             result.generated.contains(
                 "UserController._flightRoute_show_0 { _ in UserController(users: graph.userService) }"
             ))
-        #expect(result.generated.contains("let graph = try c.resolve(FlightGraph.self)"))
+        // Routes are a value the composition root passes to FlightWebModule,
+        // so the graph arrives as a parameter rather than being resolved.
+        #expect(
+            result.generated.contains("func flightRoutes(_ graph: FlightGraph) -> [FlightWeb.RouteRegistration]"))
     }
 
     @Test("a controller is not a graph node — it is built per request")
@@ -789,7 +792,8 @@ struct GeneratorTests {
         ])
         #expect(result.exitCode == 0)
         #expect(result.generated.contains("container.register(FlightGraph.self"))
-        #expect(result.generated.contains("try c.resolve(FlightGraph.self)"))
+        // The graph reaches route terminals as `flightRoutes`' parameter.
+        #expect(result.generated.contains("func flightRoutes(_ graph: FlightGraph)"))
     }
 
     // MARK: - The composition root

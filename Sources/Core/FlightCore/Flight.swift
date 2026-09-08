@@ -87,6 +87,19 @@ public enum Flight {
             configuration: configuration, modules: modules, logger: logger)
     }
 
+    /// The same bootstrap from modules already built, in dependency order —
+    /// what a generated composition root supplies, and the only shape that
+    /// works once modules take what they provide. Mirrors
+    /// ``assemble(configuration:modules:)-(_,[any_FlightModule])``.
+    public static func bootstrap(
+        configuration: Configuration,
+        modules: [any FlightModule],
+        logger: Logger = Logger(label: "flight.bootstrap")
+    ) async throws {
+        try await _flightBootstrap(
+            configuration: configuration, moduleInstances: modules, logger: logger)
+    }
+
     /// The whole of `main`: run the application, and if it cannot start, say
     /// why and exit non-zero.
     ///

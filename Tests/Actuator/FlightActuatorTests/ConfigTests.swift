@@ -11,10 +11,9 @@ import Testing
 struct ConfigTests {
 
     private func contentType(for values: [String: String]) async throws -> String? {
-        let container = try TestContainer.build(configuration: Configuration(values: values)) {
-            ActuatorModule(environment: .dev)
-        }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: .dev)
+        let container = try TestContainer.build(configuration: Configuration(values: values)) { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         return await client.get("/actuator").headers[.contentType]
     }
 

@@ -18,8 +18,9 @@ struct GatingTests {
 
     @Test("prod answers 404 for the dashboard — the route does not exist")
     func prodServes404() async throws {
-        let container = try TestContainer.build { ActuatorModule(environment: .prod) }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: .prod)
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         #expect(await client.get("/actuator").status == .notFound)
     }
 
@@ -27,8 +28,9 @@ struct GatingTests {
     func prodServesHealth() async throws {
         // The old all-or-nothing gate is why production had no health check
         // at all: blocking the dashboard blocked the probe with it.
-        let container = try TestContainer.build { ActuatorModule(environment: .prod) }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: .prod)
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         let response = await client.get("/actuator/health")
         #expect(response.status == .ok)
         #expect(response.bodyText.contains("\"status\":\"UP\""))
@@ -37,8 +39,9 @@ struct GatingTests {
     @Test("development environments serve the dashboard",
           arguments: [FlightEnvironment.dev, .test, FlightEnvironment("local")])
     func developmentServesDashboard(environment: FlightEnvironment) async throws {
-        let container = try TestContainer.build { ActuatorModule(environment: environment) }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: environment)
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
         #expect(response.bodyText.contains(environment.rawValue))
@@ -52,26 +55,25 @@ struct GatingTests {
           ])
     func unrecognizedEnvironmentsAreClosed(environment: FlightEnvironment) async throws {
         // Each of these was `!= .prod` and therefore published the dashboard.
-        let container = try TestContainer.build { ActuatorModule(environment: environment) }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: environment)
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         #expect(await client.get("/actuator").status == .notFound)
         #expect(await client.get("/actuator/health").status == .ok)
     }
 
     @Test("an explicit exposure opts a non-development environment in")
     func explicitExposureOptsIn() async throws {
-        let container = try TestContainer.build {
-            ActuatorModule(environment: .staging, exposure: .full)
-        }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: .staging, exposure: .full)
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         #expect(await client.get("/actuator").status == .ok)
     }
 
     @Test("disabled registers nothing at all")
     func disabledRegistersNothing() throws {
-        let container = try TestContainer.build {
-            ActuatorModule(environment: .dev, exposure: .disabled)
-        }
+        let actuator = ActuatorModule(environment: .dev, exposure: .disabled)
+        let container = try TestContainer.build { actuator }
         let registered = container.allRegistrations().map(\.typeName)
         #expect(!registered.contains("FlightActuator.ActuatorController"))
         #expect(!registered.contains("FlightWeb.RouteRegistration"))
@@ -108,18 +110,18 @@ struct GatingTests {
         // unauthenticated topology dashboard — while Docs/actuator.md claimed
         // getting the environment wrong "costs you a dashboard instead of
         // leaking one".
-        let container = try TestContainer.build { ActuatorModule(processEnvironment: [:]) }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(processEnvironment: [:])
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         #expect(await client.get("/actuator").status == .notFound)
         #expect(await client.get("/actuator/health").status == .ok)
     }
 
     @Test("declaring dev explicitly still gets the dashboard")
     func declaredDevGetsDashboard() async throws {
-        let container = try TestContainer.build {
-            ActuatorModule(processEnvironment: ["FLIGHT_ENV": "dev"])
-        }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(processEnvironment: ["FLIGHT_ENV": "dev"])
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         #expect(await client.get("/actuator").status == .ok)
     }
 
@@ -131,25 +133,24 @@ struct GatingTests {
                 processEnvironment: ["FLIGHT_ACTUATOR_EXPOSURE": "full"]) == .full)
     }
 
-    @Test("the route table entry is visible through Core introspection")
+    @Test("the module declares its four routes as values")
     func routeVisibleInIntrospection() throws {
-        let container = try TestContainer.build { ActuatorModule(environment: .dev) }
-        let routes = container.allRegistrations().filter {
-            $0.typeName == "FlightWeb.RouteRegistration"
-        }
+        // Declared as values now, so this is where the truth is — they used to
+        // be `registerRoute` calls and this asserted on the container.
+        // `FlightWebModule` is what puts them back in a container, for the
+        // dashboard to list; `WebModuleTests` covers that.
+        let actuator = ActuatorModule(environment: .dev)
         // The dashboard, plus the three health probes: the aggregate, and the
         // liveness/readiness pair that answer the two different questions an
         // orchestrator asks.
-        #expect(routes.count == 4)
+        #expect(actuator.routes.count == 4)
         #expect(
-            Set(routes.compactMap(\.qualifier)) == [
+            Set(actuator.routes.map { "\($0.method.rawValue) \($0.path) @\($0.source)" }) == [
                 "GET /actuator @FlightActuator",
                 "GET /actuator/health @FlightActuator",
                 "GET /actuator/health/live @FlightActuator",
                 "GET /actuator/health/ready @FlightActuator",
             ])
-        #expect(routes[0].qualifier?.hasPrefix("GET /actuator") == true)
-        #expect(routes[0].sourceModule == "<direct>")  // TestContainer stamps nothing
     }
 
     @Test("an app that already registered Container itself still boots")
@@ -160,16 +161,17 @@ struct GatingTests {
             }
         }
 
+        let actuator = ActuatorModule(environment: .dev)
         let container = try TestContainer.build {
             ContainerRegisteringModule()
-            ActuatorModule(environment: .dev)
+            actuator
         }
         let containerBeans = container.allRegistrations().filter {
             $0.typeName == "FlightCore.Container" && $0.qualifier == nil
         }
         #expect(containerBeans.count == 1)
 
-        let client = try TestClient(container: container)
+        let client = try TestClient(container: container, routes: actuator.routes)
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
     }

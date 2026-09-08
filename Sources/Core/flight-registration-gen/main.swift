@@ -1730,7 +1730,7 @@ if autoRegistered.isEmpty {
             // only introspection — Actuator groups the dashboard by
             // stereotype, and a controller absent from the container would
             // be absent from it. Its routes come from
-            // `flightRegisterRoutes`, hence `includingRoutes: false`.
+            // `flightRoutes(_:)`, hence `includingRoutes: false`.
             let routesClause = kind == "controller" ? ", includingRoutes: false" : ""
             out += "    try \(qualified)._flightRegister(container\(routesClause))\n"
         }
@@ -1780,7 +1780,7 @@ if !routes.isEmpty {
     out += "    // Routes last: their controllers are constructed per\n"
     out += "    // request from the graph, which needs every component\n"
     out += "    // registered first.\n"
-    out += "    try flightRegisterRoutes(container)\n"
+    out += ""
 }
 out += "}\n"
 
@@ -1798,6 +1798,11 @@ struct GraphRoots {
     var supplied: [(label: String, type: String)] = []
 }
 var graphRoots = GraphRoots()
+
+/// True when this target emitted `flightRoutes(_:)` — its own controllers'
+/// routes, as a value. The composer folds it into the `[RouteRegistration]`
+/// aggregate alongside whatever routes modules declare.
+var emittedRouteValues = false
 
 // MARK: - FlightGraph (§2.1, emitted unused)
 //
@@ -2021,16 +2026,18 @@ func emitFlightGraph(into out: inout String) {
         registrable.map { (baseName($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
 
     out += "\n"
-    out += "/// Registers every route, with its controller constructed per\n"
-    out += "/// request from ``FlightGraph`` rather than resolved once.\n"
+    out += "/// Every route this target declares, with its controller\n"
+    out += "/// constructed per request from ``FlightGraph`` rather than\n"
+    out += "/// resolved once.\n"
     out += "///\n"
-    out += "/// Called by `flightRegisterAll`, which passes\n"
-    out += "/// `includingRoutes: false` to every controller's own thunk so the\n"
-    out += "/// two do not both register and fail the freeze on a duplicate. A\n"
-    out += "/// controller registered directly — a test, a hand-wired module —\n"
-    out += "/// still gets its routes the resolved-once way, which is why the\n"
-    out += "/// parameter defaults to true.\n"
-    out += "func flightRegisterRoutes(_ container: FlightCore.Container) throws {\n"
+    out += "/// A value, handed to `FlightWebModule` by the composition root\n"
+    out += "/// alongside whatever routes other modules declare. Controllers\n"
+    out += "/// still register themselves for introspection, with\n"
+    out += "/// `includingRoutes: false`, so the two do not both contribute the\n"
+    out += "/// same route.\n"
+    emittedRouteValues = true
+    out += "func flightRoutes(_ graph: FlightGraph) -> [FlightWeb.RouteRegistration] {\n"
+    out += "    [\n"
     for route in routes {
         guard let controller = componentsByName[baseName(route.controllerTypeName)] else { continue }
         let type = qualified(controller)
@@ -2051,16 +2058,9 @@ func emitFlightGraph(into out: inout String) {
         let construction =
             "\(controller.configValues.isEmpty ? "" : "try ")\(type)(\(arguments.joined(separator: ", ")))"
         let factory = "_flightRoute_\(route.methodName)_\(route.indexInController)"
-        out += "    container.register(\n"
-        out += "        FlightWeb.RouteRegistration.self,\n"
-        out += "        qualifier: \"\(route.httpMethod) \(escaped(route.path)) @\""
-        out += " + String(reflecting: \(type).self) + \".\(route.methodName)\",\n"
-        out += "        scope: .singleton\n"
-        out += "    ) { c in\n"
-        out += "        let graph = try c.resolve(FlightGraph.self)\n"
-        out += "        return \(type).\(factory) { _ in \(construction) }\n"
-        out += "    }\n"
+        out += "        \(type).\(factory) { _ in \(construction) },\n"
     }
+    out += "    ]\n"
     out += "}\n"
 }
 
@@ -2194,11 +2194,20 @@ func emitComposer(into out: inout String) {
         }
         // Aggregates first: `[T]` is a collection of contributions, not a
         // single value some one module provides.
-        if arrayElementType(type) != nil {
+        if let element = arrayElementType(type) {
+            var expressions: [String] = []
+            // This target's own controllers come first, so an application's
+            // routes precede a framework module's in the table — the order
+            // `flightRegisterAll` produced when they were registrations.
+            if emittedRouteValues, providedTypeKey(element) == "RouteRegistration" {
+                needed.insert("FlightGraph")
+                expressions.append("flightRoutes(flightGraph)")
+            }
             let sources = contributors(to: type, for: consumer)
-            guard !sources.isEmpty else { return String?.none }  // nobody contributed
             for source in sources { needed.insert(moduleKey(source.module)) }
-            return "\(label): \(sources.map(\.expression).joined(separator: " + "))"
+            expressions += sources.map(\.expression)
+            guard !expressions.isEmpty else { return String?.none }  // nobody contributed
+            return "\(label): \(expressions.joined(separator: " + "))"
         }
         if let source = provider(of: type, for: consumer) {
             needed.insert(moduleKey(source.module))

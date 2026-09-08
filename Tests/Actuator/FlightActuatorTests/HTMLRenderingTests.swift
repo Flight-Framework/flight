@@ -10,8 +10,9 @@ struct HTMLRenderingTests {
 
     @Test("dashboard serves text/html by default — no config needed")
     func servesHTMLByDefault() async throws {
-        let container = try TestContainer.build { ActuatorModule(environment: .dev) }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: .dev)
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
         #expect(response.headers[.contentType] == "text/html; charset=utf-8")
@@ -20,11 +21,12 @@ struct HTMLRenderingTests {
 
     @Test("page lists environment, components, and layer sections")
     func pageContents() async throws {
+        let actuator = ActuatorModule(environment: .staging, exposure: .full)
         let container = try TestContainer.build {
-            ActuatorModule(environment: .staging, exposure: .full)
+            actuator
             SampleAppModule()
         }
-        let client = try TestClient(container: container)
+        let client = try TestClient(container: container, routes: actuator.routes)
         let body = await client.get("/actuator").bodyText
 
         #expect(body.contains("Environment: <strong>staging</strong>"))
@@ -50,11 +52,12 @@ struct HTMLRenderingTests {
 
     @Test("all dynamic strings are HTML-escaped")
     func escapesHostileContent() async throws {
+        let actuator = ActuatorModule(environment: .dev)
         let container = try TestContainer.build {
-            ActuatorModule(environment: .dev)
+            actuator
             HostileQualifierModule()
         }
-        let client = try TestClient(container: container)
+        let client = try TestClient(container: container, routes: actuator.routes)
         let body = await client.get("/actuator").bodyText
 
         #expect(!body.contains("<script>"))
@@ -80,7 +83,8 @@ struct HTMLRenderingTests {
     @Test("empty module list renders a note, not an empty table")
     func emptyModules() throws {
         // TestContainer does no health tracking — exactly the empty case.
-        let container = try TestContainer.build { ActuatorModule(environment: .dev) }
+        let actuator = ActuatorModule(environment: .dev)
+        let container = try TestContainer.build { actuator }
         let snapshot = ActuatorSnapshot(container: container, environment: .dev)
         let html = renderActuatorHTML(snapshot)
         #expect(html.contains("<h2>Modules (0)</h2>"))

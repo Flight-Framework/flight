@@ -7,6 +7,53 @@ wrong, say so and it changes.
 
 ---
 
+## D20 — Web takes the route table; the registries stop being container scans
+
+**Chosen.** `FlightWebModule(configuration:routes:middleware:assetMounts:coders:)`.
+`DispatchBuilder` gains a value-based `build(routes:middleware:assetMounts:container:)`,
+and the container overload delegates to it. The generator emits
+`flightRoutes(_ graph:) -> [RouteRegistration]` instead of registering routes,
+and the composer folds it into the `[RouteRegistration]` aggregate alongside
+every module's own.
+
+**Why.** `DispatchBuilder.build(container:)` collected four registries
+post-`freeze()`, which is what forced `FlightWebModule` to stash a container
+and build the table at its service's first breath. With routes and middleware
+as values the table is assembled during `configure`, so a conflicting route or
+an undeclared lane fails there rather than at start-up.
+
+**What moved with it.**
+- `FlightSecurityModule(validator:)` holds `Authentication` and
+  `RequireAuthentication` as instances and declares all three canonical lanes
+  as `middleware`. It no longer registers middleware types, and
+  `Authentication` is handed its validator once instead of resolving it per
+  request.
+- `ActuatorModule.routes` is a stored property — §2.9a's conditional
+  installation is now an ordinary `if` over the exposure, not four
+  `flight:hand-registered` calls.
+- `RouteRegistration.channelSocket(_:)` is the value form of
+  `registerChannelSocket`.
+- `WebCoders` arrives as an optional parameter the composer fills by type. It
+  used to be a scan: `configure` checked `allRegistrations()` for coders an
+  earlier module had registered and stood down if it found any, so the answer
+  depended on module order.
+
+**What stays.** `container.registerRoute`, `pipeline`, and `assets` still work,
+and `DispatchBuilder.build(container:)` still collects them — that is the test
+seam and the documented imperative escape hatch. Only the production path is
+values-only. `TestClient` gains `routes:`/`middleware:` for suites exercising a
+module's declared endpoints.
+
+**The one thing that got worse, and the fix.** Routes leaving the container
+means Actuator's dashboard cannot see them through `allRegistrations()`. So
+`FlightWebModule.configure` registers the routes it was composed with, for
+introspection only — the table is already built. A controller that also
+registers its own routes now collides, which is the duplicate check working:
+the generated `flightRegisterAll` passes `includingRoutes: false`, and a
+hand-written module must too.
+
+---
+
 ## D18 — The composition root builds the component graph
 
 **Chosen.** The generated composer builds `FlightGraph`, wiring its roots from

@@ -28,10 +28,27 @@ public struct TestClient: Sendable {
 
     /// Builds dispatch from a frozen container, exactly as `FlightWebModule`
     /// would at service start (route-table validation included).
-    public init(container: Container) throws {
+    /// - Parameter routes: Routes a module *declares* rather than registers.
+    ///   Since `FlightWebModule` takes the application's routes as a value,
+    ///   a module's `routes` property never reaches the container — so a suite
+    ///   exercising those endpoints passes them here, which is the same thing
+    ///   the composition root does.
+    /// - Parameter middleware: Middleware a module *declares*, for the same
+    ///   reason `routes` exists.
+    public init(
+        container: Container,
+        routes: [RouteRegistration] = [],
+        middleware: [MiddlewareRegistration] = []
+    ) throws {
         var logger = Logger(label: "flight.web.test-client")
         logger.logLevel = .critical
-        self.dispatch = try DispatchBuilder.build(container: container, logger: logger)
+        self.dispatch = try DispatchBuilder.build(
+            routes: container.collectRoutes() + routes,
+            middleware: container.collectRegistrations(of: MiddlewareRegistration.self)
+                + middleware,
+            assetMounts: container.collectAssetMounts(),
+            container: container,
+            logger: logger)
         self.coders = (try? container.resolve(WebCoders.self)) ?? WebCoders.default
     }
 

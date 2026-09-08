@@ -17,37 +17,105 @@ import ServiceLifecycle
 /// `@Inject` dependencies are fully resolved before the first request
 /// arrives (§8).
 ///
-/// A class, because it stashes the container during `configure` for the
-/// service to build dispatch from later, post-freeze — the same shape as any
-/// service-owning module (Flight Core §4).
-public final class FlightWebModule<Transport: ServerTransport>: FlightModule {
-    private var container: Container?
+/// A class, because `configure` is where the container that a
+/// `RequestContext` carries becomes available — dispatch is built there, from
+/// values this module already holds, and the service reads it after. The
+/// registries are no longer collected from the container at `freeze()`; only
+/// request-time resolution still needs one, and that goes when
+/// `context.resolve` does (COMPOSITION-MIGRATION.md §9).
+public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @unchecked Sendable {
 
-    public init() {}
+    /// Every route in the application: the generated ones, plus whatever each
+    /// module declares. The composition root concatenates them.
+    public let routes: [RouteRegistration]
+
+    /// Every middleware, with the lanes they declare.
+    public let middleware: [MiddlewareRegistration]
+
+    /// Static-asset mounts, which are routing fallbacks rather than routes.
+    public let assetMounts: [AssetMountRegistration]
+
+    /// Encoders and decoders, read from `web.*` once at composition. A
+    /// misspelled `web.json.date-strategy` fails here rather than on
+    /// whichever request first encoded something.
+    public let coders: WebCoders
+
+    /// The transport's own settings come from here at start-up.
+    private let configuration: Configuration
+
+    /// Built in `configure`, read by `service`.
+    private var dispatch: Dispatch?
+
+    /// - Parameter coders: An application's own encoders/decoders, when it
+    ///   has them. Nil means "read `web.*`" — the ordinary case.
+    ///
+    ///   This used to be a scan: `configure` checked `allRegistrations()` for
+    ///   a `WebCoders` an earlier module had registered and stood down if it
+    ///   found one, which made the answer depend on module order and on a
+    ///   runtime lookup. Whether the application brought its own coders is a
+    ///   fact about how it was composed, so it is a parameter — and one the
+    ///   composer fills in by type when any module provides `WebCoders`.
+    public init(
+        configuration: Configuration,
+        routes: [RouteRegistration] = [],
+        middleware: [MiddlewareRegistration] = [],
+        assetMounts: [AssetMountRegistration] = [],
+        coders: WebCoders? = nil
+    ) throws {
+        self.configuration = configuration
+        self.coders = try coders ?? WebCoders(configuration: configuration)
+        self.routes = routes
+        self.middleware = middleware
+        self.assetMounts = assetMounts
+    }
+
+    /// This module takes what it provides, so it cannot be built from its
+    /// type — every supported path checks this and throws first.
+    public static var isTypeConstructible: Bool { false }
+
+    public init() {
+        preconditionFailure(
+            "FlightWebModule takes its configuration and the application's routes in "
+                + "init(configuration:routes:middleware:assetMounts:), so it cannot be "
+                + "instantiated from its type. Pass `composedBy: flightComposeModules` to "
+                + "Flight.run — `flight new` writes that argument — or construct the module "
+                + "yourself and use the entry point taking module instances.")
+    }
 
     public func configure(_ container: Container) throws {
-        self.container = container
+        let coders = self.coders
+        container.register(WebCoders.self, scope: .singleton) { _ in coders }
 
-        // Registration and resolution are separate phases, so the coders are
-        // *registered* here and *built* at freeze — reading configuration now
-        // would trip Core's "resolution begins at freeze()" precondition.
-        //
-        // Checked against the registration list rather than by resolving, for
-        // the same reason. An application that registers its own `WebCoders`
-        // in a module configured before this one keeps it; registering both
-        // would be a duplicate-registration failure, not a silent override.
-        let alreadyRegistered = container.allRegistrations().contains {
-            $0.typeName == String(reflecting: WebCoders.self) && $0.qualifier == nil
-        }
-        guard !alreadyRegistered else { return }
+        // Route-table validation happens here now — a conflicting or malformed
+        // route, or one naming an undeclared lane, fails during module
+        // configuration rather than at the service's first breath. Earlier,
+        // and at the point that assembled the table.
+        let dispatch = try DispatchBuilder.build(
+            routes: routes,
+            middleware: middleware,
+            assetMounts: assetMounts,
+            container: container,
+            logger: Logger(label: "flight.web"))
+        self.dispatch = dispatch
+        container.register(Dispatch.self, scope: .singleton) { _ in dispatch }
 
-        container.register(WebCoders.self, scope: .singleton) { c in
-            try WebCoders(configuration: c.resolve(Configuration.self))
+        // Registered for *introspection*, not for dispatch — the table above
+        // is already built. Actuator's dashboard lists routes through the same
+        // `allRegistrations()` it lists everything else through, and a route
+        // that only existed as a value would have vanished from it.
+        for route in routes {
+            container.register(
+                RouteRegistration.self,
+                qualifier: "\(route.method.rawValue) \(route.path) @\(route.source)",
+                scope: .singleton
+            ) { _ in route }
         }
     }
 
     public var service: (any Service)? {
-        container.map { WebHostService<Transport>(container: $0) }
+        dispatch.map {
+            WebHostService<Transport>(dispatch: $0, configuration: configuration)
+        }
     }
 
     /// The transport is what brings work in, so it is the first thing to
@@ -56,25 +124,21 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule {
     public var serviceShutdownPhase: ServiceShutdownPhase { .inbound }
 }
 
-/// Runs the web stack: build dispatch from the (by now frozen) container,
-/// read the transport's settings from the app configuration, hand dispatch
-/// to a fresh transport instance, and park in its `run()` until shutdown.
+/// Runs the web stack: read the transport's settings from the app
+/// configuration, hand the already-built dispatch to a fresh transport
+/// instance, and park in its `run()` until shutdown.
+///
+/// It used to hold the container and build dispatch here, at `run()`, because
+/// the route table was collected from the container post-`freeze()`. The
+/// module owns the routes now, so the table is built during configuration and
+/// this only runs it.
 struct WebHostService<Transport: ServerTransport>: Service {
-    let container: Container
+    let dispatch: Dispatch
+    let configuration: Configuration
 
     func run() async throws {
-        let logger = Logger(label: "flight.web")
-        // Route-table validation happens here, at startup: a conflicting or
-        // malformed route fails the app before the socket ever binds.
-        let dispatch = try DispatchBuilder.build(container: container, logger: logger)
-        // Force the coders now. They are registered lazily, so without this a
-        // misspelled `web.json.date-strategy` would first surface on whichever
-        // request happened to encode something — long after the deploy that
-        // introduced it looked successful.
-        _ = try container.resolve(WebCoders.self)
-        let appConfiguration = try container.resolve(FlightCore.Configuration.self)
         let transport = Transport(
-            configuration: try Transport.Configuration(configuration: appConfiguration),
+            configuration: try Transport.Configuration(configuration: configuration),
             dispatch: dispatch
         )
         try await transport.run()

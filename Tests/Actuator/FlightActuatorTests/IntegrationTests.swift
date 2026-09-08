@@ -22,9 +22,10 @@ struct IntegrationTests {
 
     @Test("assemble → dispatch → dashboard, end to end")
     func endToEnd() async throws {
+        let actuator = ActuatorModule()
         let app = try Flight.assemble(
             configuration: Configuration(values: ["actuator.format": "json"]),
-            modules: [ActuatorModule.self, SampleAppModule.self]
+            modules: [actuator, SampleAppModule()]
         )
 
         // Bootstrap stamped Actuator's registrations with the module name.
@@ -34,7 +35,7 @@ struct IntegrationTests {
         #expect(controller.sourceModule == "ActuatorModule")
 
         // Both modules configured → running (Flight Core).
-        let client = try TestClient(container: app.container)
+        let client = try TestClient(container: app.container, routes: actuator.routes)
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
         let wire = try response.decodeJSON(SnapshotWire.self)
@@ -66,8 +67,9 @@ struct IntegrationTests {
     func reportsGateEnvironment() async throws {
         // Module constructed with an explicit environment; the page must
         // report that same value even though FLIGHT_ENV says "dev".
-        let container = try TestContainer.build { ActuatorModule(environment: .staging, exposure: .full) }
-        let client = try TestClient(container: container)
+        let actuator = ActuatorModule(environment: .staging, exposure: .full)
+        let container = try TestContainer.build { actuator }
+        let client = try TestClient(container: container, routes: actuator.routes)
         let body = await client.get("/actuator").bodyText
         #expect(body.contains("Environment: <strong>staging</strong>"))
     }
@@ -84,9 +86,10 @@ struct ProbeTests {
         // toward DOWN on the single endpoint, so used as a liveness probe it
         // restart-looped a slow-starting pod into the same slow start,
         // forever.
-        let container = try TestContainer.build { ActuatorModule(environment: .dev) }
+        let actuator = ActuatorModule(environment: .dev)
+        let container = try TestContainer.build { actuator }
         container.reportHealth(.notStarted, forModule: "Slow")
-        let client = try TestClient(container: container)
+        let client = try TestClient(container: container, routes: actuator.routes)
 
         #expect(await client.get("/actuator/health/live").status == .ok)
         #expect(await client.get("/actuator/health/ready").status == .serviceUnavailable)
@@ -96,9 +99,10 @@ struct ProbeTests {
     @Test("a failed module is neither alive nor ready")
     func failedIsDownForBoth() async throws {
         struct Boom: Error {}
-        let container = try TestContainer.build { ActuatorModule(environment: .dev) }
+        let actuator = ActuatorModule(environment: .dev)
+        let container = try TestContainer.build { actuator }
         container.reportHealth(.failed(Boom()), forModule: "Broken")
-        let client = try TestClient(container: container)
+        let client = try TestClient(container: container, routes: actuator.routes)
 
         #expect(await client.get("/actuator/health/live").status == .serviceUnavailable)
         #expect(await client.get("/actuator/health/ready").status == .serviceUnavailable)
@@ -106,9 +110,10 @@ struct ProbeTests {
 
     @Test("a healthy app is up on every probe")
     func runningIsUpEverywhere() async throws {
-        let container = try TestContainer.build { ActuatorModule(environment: .dev) }
+        let actuator = ActuatorModule(environment: .dev)
+        let container = try TestContainer.build { actuator }
         container.reportHealth(.running, forModule: "Fine")
-        let client = try TestClient(container: container)
+        let client = try TestClient(container: container, routes: actuator.routes)
 
         for path in ["/actuator/health", "/actuator/health/live", "/actuator/health/ready"] {
             let response = await client.get(path)

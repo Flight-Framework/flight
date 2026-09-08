@@ -29,18 +29,22 @@ struct SnapshotWire: Decodable {
 @Suite("JSON rendering")
 struct JSONRenderingTests {
 
-    private func jsonContainer(environment: FlightEnvironment = .staging) throws -> Container {
-        try TestContainer.build(
+    /// The container plus the actuator's declared routes — a module's routes
+    /// are values now, so a client that serves them has to be given them.
+    private func jsonClient(environment: FlightEnvironment = .staging) throws -> TestClient {
+        let actuator = ActuatorModule(environment: environment, exposure: .full)
+        let container = try TestContainer.build(
             configuration: Configuration(values: ["actuator.format": "json"])
         ) {
-            ActuatorModule(environment: environment, exposure: .full)
+            actuator
             SampleAppModule()
         }
+        return try TestClient(container: container, routes: actuator.routes)
     }
 
     @Test("dashboard serves application/json when configured")
     func servesJSONContentType() async throws {
-        let client = try TestClient(container: jsonContainer())
+        let client = try jsonClient()
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
         #expect(response.headers[.contentType] == "application/json; charset=utf-8")
@@ -48,7 +52,7 @@ struct JSONRenderingTests {
 
     @Test("the wire shape carries environment, modules, and components")
     func wireShape() async throws {
-        let client = try TestClient(container: jsonContainer(environment: .staging))
+        let client = try jsonClient(environment: .staging)
         let response = await client.get("/actuator")
         let wire = try response.decodeJSON(SnapshotWire.self)
 
@@ -67,7 +71,9 @@ struct JSONRenderingTests {
         // Actuator's own machinery is visible through the same introspection
         // as everything else — no side channel, no special casing.
         #expect(wire.components.contains { $0.type == "FlightActuator.ActuatorController" })
-        #expect(wire.components.contains { $0.type == "FlightWeb.RouteRegistration" })
+        // Routes are not asserted here: they are values a module declares, and
+        // they reach the container through `FlightWebModule`, which this
+        // container does not include. `GatingTests` covers that path.
     }
 
     @Test("a failed module encodes health 'failed' with its error")
@@ -103,7 +109,7 @@ struct JSONRenderingTests {
 
     @Test("JSON output is deterministic across requests")
     func deterministicOutput() async throws {
-        let client = try TestClient(container: jsonContainer())
+        let client = try jsonClient()
         let first = await client.get("/actuator")
         let second = await client.get("/actuator")
         #expect(first.bodyData == second.bodyData)

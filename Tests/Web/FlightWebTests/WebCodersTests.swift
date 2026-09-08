@@ -17,8 +17,9 @@ struct WebCodersTests {
     /// A frozen container wired by the real `FlightWebModule`, so these
     /// exercise the registration path an application actually gets.
     private func container(_ values: [String: String]) throws -> Container {
-        try TestContainer.build(configuration: Configuration(values: values)) {
-            FlightWebModule<InMemoryTransport>()
+        let configuration = Configuration(values: values)
+        return try TestContainer.build(configuration: configuration) {
+            try FlightWebModule<InMemoryTransport>(configuration: configuration)
         }
     }
 
@@ -117,9 +118,15 @@ struct WebCodersTests {
 
     @Test("an application's own coders win over the configured ones")
     func applicationRegistrationWins() throws {
-        let container = try TestContainer.build(configuration: Configuration(values: [:])) {
-            CustomCodersModule()
-            FlightWebModule<InMemoryTransport>()
+        // The application's coders arrive as an argument rather than winning
+        // a registration race — whether it brought its own is a fact about
+        // how it was composed, and the composer matches the property by type.
+        let configuration = Configuration(values: [:])
+        let custom = CustomCodersModule()
+        let container = try TestContainer.build(configuration: configuration) {
+            custom
+            try FlightWebModule<InMemoryTransport>(
+                configuration: configuration, coders: custom.coders)
         }
         // Asserted through behaviour rather than the strategy enum, which
         // has associated values and no Equatable.
@@ -129,14 +136,14 @@ struct WebCodersTests {
     }
 }
 
-/// Registers coders before `FlightWebModule` would, standing in for an
+/// Provides coders for `FlightWebModule` to take, standing in for an
 /// application that wants its own.
 private struct CustomCodersModule: FlightModule {
-    func configure(_ container: Container) throws {
-        container.register(WebCoders.self, scope: .singleton) { _ in
-            var coders = WebCoders.default
-            coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
-            return coders
-        }
-    }
+    let coders: WebCoders = {
+        var coders = WebCoders.default
+        coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
+        return coders
+    }()
+
+    func configure(_ container: Container) throws {}
 }

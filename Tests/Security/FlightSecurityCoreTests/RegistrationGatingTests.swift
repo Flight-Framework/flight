@@ -45,16 +45,13 @@ struct RegistrationGatingTests {
     }
 
     /// The module registers both, so an app that includes it resolves them.
-    @Test("the security module registers both middleware types")
+    @Test("the security module declares both middleware types")
     func moduleRegistersBothMiddleware() throws {
-        let container = Container()
-        container.register((any TokenValidator).self, scope: .singleton) { _ in
-            StubValidator(principalsByToken: [:])
-        }
-        try FlightSecurityModule().configure(container)
-        try container.freeze()
-
-        _ = try container.resolve(Authentication.self)
-        _ = try container.resolve(RequireAuthentication.self)
+        // They used to be container registrations resolved per request. The
+        // module holds the instances now, so this reads what it declares.
+        let module = FlightSecurityModule(validator: StubValidator(principalsByToken: [:]))
+        let names = Set(module.middleware.map(\.name))
+        #expect(names.contains { $0.hasSuffix(".Authentication") })
+        #expect(names.contains { $0.hasSuffix(".RequireAuthentication") })
     }
 }

@@ -95,6 +95,34 @@ public struct FlightChannelsModule: FlightModule {
     }
 }
 
+extension RouteRegistration {
+    /// The channels WebSocket endpoint, as a route value — the value-level
+    /// spelling of `container.registerChannelSocket(_:)`, for a module that
+    /// declares its routes rather than registering them.
+    ///
+    ///     struct AppModule: FlightModule {
+    ///         let routes = [RouteRegistration.channelSocket("/socket")]
+    ///     }
+    ///
+    /// `authenticate` runs during the initial HTTP upgrade request, before
+    /// the WebSocket exists — exactly where connection identity is
+    /// established. Return the connection's principal (nil admits an
+    /// anonymous socket); throw to refuse the upgrade outright.
+    public static func channelSocket(
+        _ path: String = "/socket",
+        source: String = "FlightChannels",
+        authenticate: (@Sendable (RequestContext) async throws -> (any ChannelPrincipal)?)? = nil
+    ) -> RouteRegistration {
+        RouteRegistration(
+            method: "GET", path: path, kind: .upgrade(.webSocket), source: source
+        ) { context in
+            let principal = try await authenticate?(context)
+            let handler = try ChannelSocketHandler(context: context, principal: principal)
+            return .upgrade(handler: handler, context: context)
+        }
+    }
+}
+
 extension Container {
     /// Mounts the channels WebSocket endpoint as an ordinary upgrade
     /// route — the same `registerRoute` pipeline as everything else, so the

@@ -12,10 +12,26 @@ import Testing
 struct BootstrapIntegrationTests {
 
     @Test func bootstrappedAppServesRequestsThroughInMemoryTransport() async throws {
+        // The routes are values handed to the web module, which is what a
+        // generated composition root does — `flightRoutes(graph)` produces
+        // exactly these calls, and a controller is constructed per request.
+        let users = UserService()
+        let configuration = Configuration()
+        let web = try FlightWebModule<InMemoryTransport>(
+            configuration: configuration,
+            routes: [
+                UserController._flightRoute_getUser_0 { _ in UserController(userService: users) },
+                UserController._flightRoute_createUser_1 { _ in
+                    UserController(userService: users)
+                },
+                UserController._flightRoute_deleteUser_2 { _ in
+                    UserController(userService: users)
+                },
+            ])
         let app = Task {
             try await Flight.bootstrap(
-                configuration: Configuration(),
-                modules: [FlightWebModule<InMemoryTransport>.self, UserModule.self]
+                configuration: configuration,
+                modules: [web, ComponentsOnlyModule()] as [any FlightModule]
             )
         }
         defer { app.cancel() }
@@ -34,25 +50,38 @@ struct BootstrapIntegrationTests {
         #expect(!InMemoryTransportHub.isRunning)
     }
 
-    @Test func conflictingRoutesFailStartupLoudly() async throws {
-        struct ConflictModule: FlightModule {
-            func configure(_ container: Container) throws {
-                container.registerRoute(.get, "/dup/:a", source: "A.first") { _ in .noContent }
-                container.registerRoute(.get, "/dup/:b", source: "B.second") { _ in .noContent }
-            }
-        }
-        let app = Task {
-            try await Flight.bootstrap(
-                configuration: Configuration(),
-                modules: [FlightWebModule<InMemoryTransport>.self, ConflictModule.self]
-            )
-        }
-        // The web service throws during dispatch assembly; the ServiceGroup
-        // fails the app — bootstrap rethrows rather than serving.
-        await #expect(throws: Error.self) {
-            try await app.value
+    @Test func conflictingRoutesFailStartupLoudly() throws {
+        // Two routes that collide. Dispatch is assembled when the web module
+        // is configured, so this fails *there* rather than at the service's
+        // first breath — earlier, and with the same message.
+        let configuration = Configuration()
+        let web = try FlightWebModule<InMemoryTransport>(
+            configuration: configuration,
+            routes: [
+                RouteRegistration(method: "GET", path: "/dup/:a", source: "A.first") { _ in
+                    .noContent
+                },
+                RouteRegistration(method: "GET", path: "/dup/:b", source: "B.second") { _ in
+                    .noContent
+                },
+            ])
+        #expect(throws: (any Error).self) {
+            _ = try Flight.assemble(configuration: configuration, modules: [web])
         }
         #expect(!InMemoryTransportHub.isRunning)
+    }
+
+    /// Components without their routes — `includingRoutes: false`, exactly
+    /// what the generated `flightRegisterAll` passes now that routes are
+    /// values the web module is composed with. Registering both would be a
+    /// duplicate, which is the check working.
+    private struct ComponentsOnlyModule: FlightModule {
+        func configure(_ container: Container) throws {
+            try UserService._flightRegister(container)
+            try RequestTracer._flightRegister(container)
+            try UserController._flightRegister(container, includingRoutes: false)
+            try EchoSocketController._flightRegister(container, includingRoutes: false)
+        }
     }
 
     @Test func handRegisteredRoutesRideTheSamePipeline() async throws {

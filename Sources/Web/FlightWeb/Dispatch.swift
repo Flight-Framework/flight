@@ -82,6 +82,12 @@ public enum DispatchBuilder {
     /// The no-match path (404/405) runs the **default** lane, so access
     /// logging and friends still see every miss — the property the old
     /// wrap-the-router shape had, kept on purpose.
+    /// Builds dispatch from a frozen container's registries.
+    ///
+    /// The test seam. `FlightWebModule` uses the value-based overload below,
+    /// because a module that owns what it provides has the registries before
+    /// any container exists; this one stays for harnesses that assemble a
+    /// container by hand.
     public static func build(
         container: Container,
         logger: Logger = Logger(label: "flight.web")
@@ -90,14 +96,58 @@ public enum DispatchBuilder {
             container.isFrozen,
             "DispatchBuilder.build requires a frozen container — routes are components, collected post-freeze."
         )
-        let router = try Router(routes: container.collectRoutes())
+        return try build(
+            routes: container.collectRoutes(),
+            middleware: container.collectRegistrations(of: MiddlewareRegistration.self),
+            assetMounts: container.collectAssetMounts(),
+            container: container,
+            logger: logger)
+    }
+
+    /// Builds dispatch from values.
+    ///
+    /// Every registry it needs is a list of contributions, and a contribution
+    /// is a value a module holds (COMPOSITION-MIGRATION.md D15). Lanes are
+    /// derived from the middleware rather than passed separately: a lane *is*
+    /// the set of middleware naming it, and `pipeline("x") { }` with an empty
+    /// block contributes a lane marker so an empty lane still counts as
+    /// declared.
+    /// - Parameter container: What a `RequestContext` carries so a handler
+    ///   can `resolve`. Distinct from the registries above, which used to come
+    ///   from it too — this one is request-time resolution, and it goes when
+    ///   `context.resolve` does (COMPOSITION-MIGRATION.md §9).
+    public static func build(
+        routes: [RouteRegistration],
+        middleware: [MiddlewareRegistration],
+        assetMounts: [AssetMountRegistration] = [],
+        container: Container,
+        logger: Logger = Logger(label: "flight.web")
+    ) throws -> Dispatch {
+        let router = try Router(routes: routes)
 
         // Lane validation: the default lane exists even when empty (an app
         // with no middleware is legal); anything else must be declared.
-        let declaredLanes = try container.declaredMiddlewareLanes()
+        //
+        // A lane is declared by anything naming it, including the marker
+        // `pipeline("x") { }` leaves for an empty block — so declaring and
+        // populating are separate passes. Order within a lane is
+        // `(generation, order, position)`, the same ordering
+        // `collectMiddleware(lane:)` applies.
+        var declaredLanes: Set<PipelineLane> = []
+        var entries: [PipelineLane: [(offset: Int, registration: MiddlewareRegistration)]] = [:]
+        for (offset, registration) in middleware.enumerated() {
+            declaredLanes.insert(registration.lane)
+            guard !registration.isLaneMarker else { continue }
+            entries[registration.lane, default: []].append((offset, registration))
+        }
         var chainsByLane: [PipelineLane: [MiddlewareRegistration]] = [:]
         for lane in declaredLanes {
-            chainsByLane[lane] = try container.collectMiddleware(lane: lane)
+            chainsByLane[lane] = (entries[lane] ?? [])
+                .sorted {
+                    ($0.registration.generation, $0.registration.order, $0.offset)
+                        < ($1.registration.generation, $1.registration.order, $1.offset)
+                }
+                .map(\.registration)
         }
         if chainsByLane[.default] == nil {
             chainsByLane[.default] = []
@@ -153,7 +203,7 @@ public enum DispatchBuilder {
 
         // Asset mounts: fallbacks for GET/HEAD routing misses, each wrapped
         // in its own lane chain — composed here, once, like every route.
-        let mounts = try container.collectAssetMounts()
+        let mounts = assetMounts
         var mountResponders: [(mount: AssetMountRegistration, responder: Next)] = []
         for mount in mounts {
             var chain: [MiddlewareRegistration] = []

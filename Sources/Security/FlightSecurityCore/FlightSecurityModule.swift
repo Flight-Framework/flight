@@ -39,42 +39,52 @@ import ServiceLifecycle
 /// internal flag that also decided whether a JWKS refresher ran. Choosing a
 /// module instead is explicit, order-independent, and visible at the
 /// bootstrap call site.
-public final class FlightSecurityModule: FlightModule {
-    public init() {}
+public struct FlightSecurityModule: FlightModule {
 
-    public func configure(_ container: Container) throws {
-        // Both middleware types are marked `flight:module-registered`, so the
-        // application's generated `flightRegisterAll` skips them and this is
-        // the only place they are registered. That is the point: whether they
-        // exist is a property of "did this app include a security module",
-        // which no build-time scan can decide.
-        try Authentication._flightRegister(container)
-        try RequireAuthentication._flightRegister(container)
+    /// The authentication stack, as values.
+    ///
+    /// Whether these exist is a property of "did this application include a
+    /// security module", which no build-time scan can decide — so they are
+    /// this module's to provide, and the composer hands them to
+    /// `FlightWebModule` along with everyone else's.
+    ///
+    /// The canonical security lanes are declared here because the whole point
+    /// of a canonical spelling is that naming it works. `PipelineLane`
+    /// documents what each contains, `@Controller(pipelines:)` recognizes both
+    /// by name, and the controller macro warns when a route silently drops
+    /// one — three things that described a stack no module was building.
+    /// Without them, `pipelines: [.authenticated]` fails at bootstrap with
+    /// `UndeclaredLaneError`.
+    ///
+    /// A lane is the *whole* stack for a route naming it alone, so each starts
+    /// with `Authentication`: `[.authenticated]` must establish the identity
+    /// it then requires, without depending on the default lane it replaced.
+    public let middleware: [MiddlewareRegistration]
 
-        container.pipeline {
-            Authentication.self
-        }
-
-        // The canonical security lanes, declared here because the whole point
-        // of a canonical spelling is that naming it works. `PipelineLane`
-        // documents what each one contains, `@Controller(pipelines:)`
-        // recognizes both by name, and the controller macro warns when a
-        // route silently drops one — three things that describe a stack no
-        // module was building. Without this, `pipelines: [.authenticated]`
-        // fails at bootstrap with `UndeclaredLaneError`.
-        //
-        // A lane is the *whole* stack for a route that names it alone, so
-        // each one starts with `Authentication`: `[.authenticated]` must
-        // establish the identity it then requires, without depending on the
-        // default lane it replaced.
-        container.pipeline(.authentication) {
-            Authentication.self
-        }
-        container.pipeline(.authenticated) {
-            Authentication.self
-            RequireAuthentication.self
-        }
+    /// - Parameter validator: How tokens are validated — from
+    ///   `FlightOIDCModule`, or from a module of your own. It used to be
+    ///   resolved per request by `Authentication`'s `@Inject`; the middleware
+    ///   is a value now, so it is handed the validator once.
+    public init(validator: any TokenValidator) {
+        let authentication = Authentication(validator: validator)
+        let require = RequireAuthentication()
+        self.middleware =
+            MiddlewareRegistration.lane(.default, [authentication])
+            + MiddlewareRegistration.lane(.authentication, [authentication])
+            + MiddlewareRegistration.lane(.authenticated, [authentication, require])
     }
+
+    /// This module takes the validator, so it cannot be built from its type.
+    public static var isTypeConstructible: Bool { false }
+
+    public init() {
+        preconditionFailure(
+            "FlightSecurityModule takes a token validator in init(validator:), so it cannot be "
+                + "instantiated from its type. List FlightOIDCModule, or a module of your own that "
+                + "provides `(any TokenValidator)`, and let the composition root wire it.")
+    }
+
+    public func configure(_ container: Container) throws {}
 }
 
 /// OIDC/JWT token validation: the default implementation of the seam
@@ -101,10 +111,20 @@ public final class FlightOIDCModule: FlightModule {
     /// The validator, concretely — and what the JWKS refresher maintains.
     public let validator: OIDCTokenValidator
 
+    /// The same validator as the existential.
+    ///
+    /// Typed this way deliberately: it is what `FlightSecurityModule` takes,
+    /// and the composer matches provider to parameter by type. A concrete
+    /// property would not match `validator: any TokenValidator`, and the
+    /// generator has source text rather than a conformance table.
+    public let tokenValidator: any TokenValidator
+
     public init(configuration: Configuration) throws {
         let settings = try OIDCSecurityConfiguration(configuration: configuration)
+        let validator = OIDCTokenValidator(configuration: settings)
         self.settings = settings
-        self.validator = OIDCTokenValidator(configuration: settings)
+        self.validator = validator
+        self.tokenValidator = validator
     }
 
     /// This module takes its configuration, so it cannot be built from its

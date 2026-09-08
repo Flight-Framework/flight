@@ -156,6 +156,35 @@ public enum MiddlewarePipelineBuilder {
     }
 }
 
+extension MiddlewareRegistration {
+    /// One lane's worth of middleware, as values — the value-level spelling of
+    /// `container.pipeline(name) { ... }`.
+    ///
+    /// A module that owns its middleware has the *instances*, so there is
+    /// nothing to resolve: the container form exists because a registration
+    /// could only name a type and resolve it later. The lane marker comes
+    /// first for the same reason it does there — a lane with no middleware is
+    /// still a declared lane, and a route naming it must validate.
+    public static func lane(
+        _ name: PipelineLane, _ middleware: [any Middleware]
+    ) -> [MiddlewareRegistration] {
+        var registrations = [
+            MiddlewareRegistration(
+                name: "__lane", lane: name, order: 0, generation: .pipeline,
+                isLaneMarker: true
+            ) { context, next in try await next(context) }
+        ]
+        for instance in middleware {
+            registrations.append(
+                MiddlewareRegistration(
+                    name: String(reflecting: type(of: instance)), lane: name, order: 0,
+                    generation: .pipeline
+                ) { context, next in try await instance.handle(context, next: next) })
+        }
+        return registrations
+    }
+}
+
 extension Container {
     /// Registers a route by hand — the same escape hatch beside the macro
     /// path that Core's `register` is beside `@Component`. Runs during a
