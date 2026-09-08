@@ -37,31 +37,19 @@ final class PresenceNode: Sendable {
         monitor: (any PresenceMembershipMonitor)? = nil,
         configValues: [String: String] = PresenceNode.fastConfig
     ) throws {
-        struct NodeModule: FlightModule {
-            static var dependencies: [any FlightModule.Type] { [FlightPresenceModule.self] }
-            func configure(_ container: Container) throws {}
-        }
-
         let container = Container()
         var mutableValues = configValues
         mutableValues["flight.presence.node-name"] = name
         let values = mutableValues
-        container.register(Configuration.self, scope: .singleton) { _ in Configuration(values: values) }
-
-        let adapter = cluster?.makeAdapter()
-        if let adapter {
-            container.register((any DistributedPubSubAdapter).self, scope: .singleton) { _ in adapter }
-        }
-        if let monitor {
-            container.register((any PresenceMembershipMonitor).self, scope: .singleton) { _ in monitor }
-        }
-
-        var services: [any Service] = []
-        // Both PubSub and Channels take what they provide, so both are built
-        // here and substituted for the types the DAG walk would otherwise
-        // instantiate. This node's one channel is declared as a value, which
-        // is what Channels is built from.
         let nodeConfiguration = Configuration(values: values)
+        container.register(Configuration.self, scope: .singleton) { _ in nodeConfiguration }
+
+        // One node, wired explicitly — which is now the only way it can be
+        // written. The adapter and the membership monitor are *arguments*
+        // rather than components Presence probes the container for: whether
+        // this node is clustered, and whether the cluster can say who is up,
+        // are facts about how the node was composed.
+        let adapter = cluster?.makeAdapter()
         let pubsub = try FlightPubSubModule(
             configuration: nodeConfiguration, adapter: adapter)
         let channels = try FlightChannelsModule(
@@ -72,10 +60,15 @@ final class PresenceNode: Sendable {
                     PresenceRoomChannel(presence: try context.resolve((any Presence).self))
                 }
             ])
-        let supplied = try Flight.instantiateModules(
-            try Flight.resolveModuleOrder([NodeModule.self]),
-            supplying: [pubsub, channels])
-        for module in supplied {
+        let presence = try FlightPresenceModule(
+            configuration: nodeConfiguration,
+            localBus: pubsub.local,
+            gossipBus: pubsub.bus,
+            adapter: adapter,
+            membershipMonitor: monitor)
+
+        var services: [any Service] = []
+        for module in [pubsub, channels, presence] as [any FlightModule] {
             try module.configure(container)
             if let service = module.service { services.append(service) }
         }

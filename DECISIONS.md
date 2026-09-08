@@ -7,6 +7,34 @@ wrong, say so and it changes.
 
 ---
 
+## D17 — Presence takes its adapter and monitor as arguments, and its service loses the container
+
+**Chosen.** `FlightPresenceModule(configuration:localBus:gossipBus:adapter:membershipMonitor:)`.
+The module holds the tracker; `PresenceService` is built from it and its
+`Container` initializer is deleted, along with the `Source` enum that held
+either and the `optionalMonitor` probe.
+
+**Why.** Presence had PubSub's exact anti-pattern, twice: `resolve`, catching
+`.notRegistered` to mean "not in this deployment", for both the adapter and the
+membership monitor — and those two answers *decide the failure-detection mode*.
+Whether a node is clustered, and whether the cluster can say who is up, are
+facts about how the node was composed. The composition root knows them; a
+runtime scan could only discover them.
+
+The service's `Container` case existed for a specific reason that has now gone
+away: the module registered factories, and bootstrap collects services during
+`configure` — *before* `freeze()` — so the components did not exist when the
+service was constructed and `run()` had to resolve them. A module that owns its
+components has them before any container exists, so the `direct` initializer
+that was "for direct embedding and tests" became the only one.
+
+**Consequence worth noting.** Two dead helpers fell out immediately
+(`optionalMonitor`, the module's `optional(_:_:)`), and the value flow wires
+`localBus: flightPubSubModule.local, gossipBus: flightPubSubModule.bus` with no
+edge declared anywhere — the two buses are distinguished by type alone.
+
+---
+
 ## D15 — An aggregate parameter concatenates; that is what keeps extensions open
 
 **Chosen.** A parameter typed `[T]` is an *aggregate*: the composer collects

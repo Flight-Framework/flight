@@ -141,13 +141,30 @@ Under the usual dotted namespace (all optional):
 
 ## Wiring
 
-`FlightPresenceModule` depends on `FlightPubSubModule` and
-`FlightChannelsModule`; registers `PresenceConfiguration`,
-`PresenceTracker` + `(any Presence)`, and contributes `PresenceService` to
-the app `ServiceGroup` (gossip intake, heartbeats, liveness sweep,
-membership events). A membership-aware adapter module registers its
-monitor as `(any PresenceMembershipMonitor).self`; Presence detects it by
-presence, the same composition rule as PubSub's adapter seam.
+`FlightPresenceModule` is built from PubSub's two buses and holds the tracker:
+
+```swift
+FlightPresenceModule(
+    configuration: configuration,
+    localBus: flightPubSubModule.local,
+    gossipBus: flightPubSubModule.bus,
+    adapter: myAdapterModule.adapter,          // omit for a single node
+    membershipMonitor: myAdapterModule.monitor) // omit for heartbeat expiry
+```
+
+which the generated composition root writes for you. It provides
+`PresenceConfiguration`, `PresenceTracker` and `(any Presence)`, and
+contributes `PresenceService` to the app `ServiceGroup` (gossip intake,
+heartbeats, liveness sweep, membership events).
+
+**The last two arguments choose the failure-detection mode**: no adapter is
+`.singleNode`, an adapter alone is `.heartbeatExpiry`, an adapter plus a
+monitor is `.membership`. They are arguments rather than container lookups
+because that is a fact about how the node was composed — Presence used to
+`resolve` each and catch `.notRegistered` to mean "not in this deployment",
+which is a runtime scan answering a question the composition root already
+knows the answer to. A membership-aware adapter package exposes its monitor as
+a property, and the composer matches it by type.
 
 ## What this trusts
 

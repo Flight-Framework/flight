@@ -24,70 +24,111 @@ import struct Foundation.UUID
 ///     struct AppModule: FlightModule {
 ///         static var dependencies: [any FlightModule.Type] { [FlightPresenceModule.self] }
 ///         func configure(_ container: Container) throws {
-///             try ChannelRegistration("room:*") { context in
-///                 RoomChannel(presence: try context.resolve((any Presence).self))
-///             }
 ///             container.registerChannelSocket("/socket")
 ///         }
+///         let channels = [
+///             ChannelRegistration("room:*") { context in
+///                 RoomChannel(presence: try context.resolve((any Presence).self))
+///             }
+///         ]
 ///     }
 ///
-/// A class, because it stashes the container during `configure` for the
-/// service to resolve from later, post-freeze — the same shape as any
-/// service-owning module (Core, Web's `FlightWebModule`).
-public final class FlightPresenceModule: FlightModule {
+/// A struct holding what it provides: the tracker exists before any
+/// container does, so `configure` projects it rather than registering a
+/// factory, and the service is built from it rather than from a stashed
+/// `Container` resolved at `run()`.
+public struct FlightPresenceModule: FlightModule {
     public static var dependencies: [any FlightModule.Type] {
         [FlightPubSubModule.self, FlightChannelsModule.self]
     }
 
-    private var container: Container?
+    /// Node name, heartbeat and expiry windows, read once at composition.
+    public let settings: PresenceConfiguration
 
-    public init() {}
+    /// The tracker, concretely.
+    public let tracker: PresenceTracker
 
+    /// What consumers use. The same instance as `tracker`.
+    public let presence: any Presence
+
+    /// Kept for the service, which watches it when the deployment has one.
+    private let monitor: (any PresenceMembershipMonitor)?
+
+    /// The gossip bus, kept for the service.
+    private let gossipBus: any PubSub
+
+    /// - Parameters:
+    ///   - configuration: For `flight.presence.*`.
+    ///   - localBus: `FlightPubSubModule.local` — intra-node fan-out.
+    ///   - gossipBus: `FlightPubSubModule.bus` — what carries presence
+    ///     between nodes when the deployment is clustered.
+    ///   - adapter: Present exactly when the deployment is clustered. Its
+    ///     presence is what moves this node off `.singleNode`.
+    ///   - membershipMonitor: A cluster that can say who is up. With one,
+    ///     presence runs in `.membership` mode; without, it falls back to
+    ///     heartbeat expiry.
+    ///
+    /// The last two used to be container probes — `resolve`, catching
+    /// `.notRegistered` to mean "not in this deployment". That is a runtime
+    /// scan answering a question about how the application was assembled,
+    /// which the composition root knows; `FlightPubSubModule` had the same
+    /// probe for the same reason and lost it the same way.
+    public init(
+        configuration: Configuration,
+        localBus: LocalPubSub,
+        gossipBus: any PubSub,
+        adapter: (any DistributedPubSubAdapter)? = nil,
+        membershipMonitor: (any PresenceMembershipMonitor)? = nil
+    ) throws {
+        let settings = try PresenceConfiguration(configuration: configuration)
+        let mode: PresenceMode =
+            adapter == nil ? .singleNode : (membershipMonitor == nil ? .heartbeatExpiry : .membership)
+        let tracker = PresenceTracker(
+            replica: PresenceReplicaID(name: settings.nodeName, boot: Self.generateBoot()),
+            mode: mode,
+            configuration: settings,
+            localBus: localBus,
+            gossipBus: gossipBus
+        )
+        self.settings = settings
+        self.tracker = tracker
+        self.presence = tracker
+        self.monitor = membershipMonitor
+        self.gossipBus = gossipBus
+    }
+
+    /// This module takes what it provides, so it cannot be built from its
+    /// type — every supported path checks this and throws first.
+    public static var isTypeConstructible: Bool { false }
+
+    public init() {
+        preconditionFailure(
+            "FlightPresenceModule takes its buses and configuration in "
+                + "init(configuration:localBus:gossipBus:adapter:membershipMonitor:), so it cannot "
+                + "be instantiated from its type. Pass `composedBy: flightComposeModules` to "
+                + "Flight.run — `flight new` writes that argument — or construct the module "
+                + "yourself and use the entry point taking module instances.")
+    }
+
+    /// Projects what this module already holds.
     public func configure(_ container: Container) throws {
-        self.container = container
-
-        container.register(PresenceConfiguration.self, scope: .singleton) { container in
-            try PresenceConfiguration(configuration: container.resolve(Configuration.self))
-        }
-
-        container.register(PresenceTracker.self, scope: .singleton) { container in
-            let configuration = try container.resolve(PresenceConfiguration.self)
-            let adapter: (any DistributedPubSubAdapter)? = try Self.optional(container) {
-                try $0.resolve((any DistributedPubSubAdapter).self)
-            }
-            let monitor: (any PresenceMembershipMonitor)? = try Self.optional(container) {
-                try $0.resolve((any PresenceMembershipMonitor).self)
-            }
-            let mode: PresenceMode =
-                adapter == nil ? .singleNode : (monitor == nil ? .heartbeatExpiry : .membership)
-            return PresenceTracker(
-                replica: PresenceReplicaID(name: configuration.nodeName, boot: Self.generateBoot()),
-                mode: mode,
-                configuration: configuration,
-                localBus: try container.resolve(LocalPubSub.self),
-                gossipBus: try container.resolve((any PubSub).self)
-            )
-        }
-
-        container.register((any Presence).self, scope: .singleton) { container in
-            try container.resolve(PresenceTracker.self)
-        }
+        let settings = self.settings
+        let tracker = self.tracker
+        container.register(PresenceConfiguration.self, scope: .singleton) { _ in settings }
+        container.register(PresenceTracker.self, scope: .singleton) { _ in tracker }
+        container.register((any Presence).self, scope: .singleton) { _ in tracker }
     }
 
+    /// Built from what this module holds. It used to be built from the
+    /// stashed `Container` and resolve at `run()`, because the service is
+    /// constructed pre-freeze and the components did not exist yet — they do
+    /// now, before any container does.
     public var service: (any Service)? {
-        container.map { PresenceService(container: $0) }
-    }
-
-    /// Absent component = deployment choice, the normal case. Any other
-    /// resolution failure is a real wiring bug and must surface — the same
-    /// discipline as `FlightPubSubModule`'s adapter probe.
-    private static func optional<T>(_ container: Container, _ resolve: (Container) throws -> T) throws -> T? {
-        do {
-            return try resolve(container)
-        } catch let error as ResolutionError {
-            guard case .notRegistered = error else { throw error }
-            return nil
-        }
+        PresenceService(
+            tracker: tracker,
+            pubsub: gossipBus,
+            monitor: monitor,
+            configuration: settings)
     }
 
     /// 12 hex chars of boot uniqueness (48 bits): enough that no two

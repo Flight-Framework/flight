@@ -13,27 +13,20 @@ import ServiceLifecycle
 /// Startup logs which failure-detection mode is active, loudly.
 public struct PresenceService: Service, Sendable {
 
-    private enum Source: Sendable {
-        /// Module wiring: resolve at `run()` — the service is constructed
-        /// pre-freeze (Core collects services during configuration).
-        case container(Container)
-        case direct(
-            tracker: PresenceTracker,
-            pubsub: any PubSub,
-            monitor: (any PresenceMembershipMonitor)?,
-            configuration: PresenceConfiguration
-        )
-    }
-
-    private let source: Source
+    private let tracker: PresenceTracker
+    private let pubsub: any PubSub
+    private let monitor: (any PresenceMembershipMonitor)?
+    private let configuration: PresenceConfiguration
     private let logger: Logger
 
-    public init(container: Container, logger: Logger = Logger(label: "flight.presence")) {
-        self.source = .container(container)
-        self.logger = logger
-    }
-
-    /// For direct embedding and tests, bypassing the container.
+    /// Built from what `FlightPresenceModule` holds.
+    ///
+    /// There used to be a second initializer taking a `Container`, and a
+    /// `Source` enum to hold either — because the module registered factories
+    /// and its service was constructed *pre-freeze*, so the components did not
+    /// exist yet and `run()` had to resolve them. A module that owns its
+    /// components has them before any container exists, so the seam that
+    /// existed only for tests is now the whole thing.
     public init(
         tracker: PresenceTracker,
         pubsub: any PubSub,
@@ -41,25 +34,14 @@ public struct PresenceService: Service, Sendable {
         configuration: PresenceConfiguration,
         logger: Logger = Logger(label: "flight.presence")
     ) {
-        self.source = .direct(tracker: tracker, pubsub: pubsub, monitor: monitor, configuration: configuration)
+        self.tracker = tracker
+        self.pubsub = pubsub
+        self.monitor = monitor
+        self.configuration = configuration
         self.logger = logger
     }
 
     public func run() async throws {
-        let tracker: PresenceTracker
-        let pubsub: any PubSub
-        let monitor: (any PresenceMembershipMonitor)?
-        let configuration: PresenceConfiguration
-        switch source {
-        case .direct(let t, let p, let m, let c):
-            (tracker, pubsub, monitor, configuration) = (t, p, m, c)
-        case .container(let container):
-            tracker = try container.resolve(PresenceTracker.self)
-            pubsub = try container.resolve((any PubSub).self)
-            monitor = Self.optionalMonitor(container)
-            configuration = try container.resolve(PresenceConfiguration.self)
-        }
-
         let mode = tracker.mode
         logStartup(mode: mode, replica: tracker.replica, configuration: configuration)
 
@@ -185,12 +167,6 @@ public struct PresenceService: Service, Sendable {
                 ]
             )
         }
-    }
-
-    /// Absent monitor = degraded or single-node mode; any other resolution
-    /// failure is a real wiring bug and surfaces at tracker construction.
-    static func optionalMonitor(_ container: Container) -> (any PresenceMembershipMonitor)? {
-        try? container.resolve((any PresenceMembershipMonitor).self)
     }
 }
 
