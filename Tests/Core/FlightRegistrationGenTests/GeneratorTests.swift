@@ -553,7 +553,7 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
-        #expect(result.generated.contains("init(postgresDataSource: PostgresDataSource) throws"))
+        #expect(result.generated.contains("init(postgresDataSource: PostgresDataSource,"))
         #expect(result.generated.contains("UserRepository(pool: postgresDataSource)"))
     }
 
@@ -589,8 +589,8 @@ struct GeneratorTests {
             """,
         ], flightYAML: "app:\n  page-size: 25\n")
         #expect(result.exitCode == 0)
-        #expect(result.generated.contains("init(configuration: FlightCore.Configuration) throws"))
-        #expect(result.generated.contains("try Pager(_flightConfiguration: configuration)"))
+        #expect(result.generated.contains("init(configuration: FlightCore.Configuration,"))
+        #expect(result.generated.contains("(try Pager(_flightConfiguration: configuration))"))
     }
 
     @Test("a module-registered component is left out of the graph")
@@ -729,13 +729,42 @@ struct GeneratorTests {
         ])
         #expect(result.exitCode == 0)
         // The graph constructs; the container projects onto it.
-        #expect(result.generated.contains("self.userService = UserService()"))
+        #expect(result.generated.contains("let userService = userService ?? UserService()"))
         #expect(
             result.generated.contains("try c.resolve(FlightGraph.self).userService"),
             "the container registration must project, not construct a second copy")
         #expect(
             !result.generated.contains("try UserService._flightRegister"),
             "a projected component must not also be constructed by its own thunk")
+    }
+
+    @Test("a test can replace one node and get the rest of the graph real")
+    func nodesAreDefaultedParameters() throws {
+        // §2.10's claim, made real. `Container.override` exists because the
+        // alternative was hand-rebuilding the object graph in every test
+        // module; a defaulted parameter per node is that, generated.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            protocol UserStore {}
+            @Repository
+            struct UserRepository: UserStore {}
+            @Service
+            struct UserService: Sendable {
+            @Inject var store: (any UserStore)
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("userRepository: UserRepository? = nil"))
+        #expect(result.generated.contains("userService: UserService? = nil"))
+        // The local binding, not the parameter, is what downstream nodes see
+        // — otherwise a supplied instance would be composed around a second
+        // copy of itself.
+        #expect(
+            result.generated.contains(
+                "let userRepository = userRepository ?? UserRepository()"))
+        #expect(result.generated.contains("UserService(store: userRepository)"))
     }
 
     // MARK: - Undeclared lanes

@@ -62,24 +62,24 @@ struct MiddlewareMacroFixtureTests {
             """
             @Middleware
             public struct Transactions {
-                @Inject var container: Container
+                @Inject var sessions: SessionStore
                 @Inject var settings: WebSettings
                 func handle(_ context: RequestContext, next: Next) async throws -> Response { try await next(context) }
             }
             """,
             expandedSource: """
                 public struct Transactions {
-                    var container: Container
+                    var sessions: SessionStore
                     var settings: WebSettings
                     func handle(_ context: RequestContext, next: Next) async throws -> Response { try await next(context) }
 
                     internal init(_flight container: FlightCore.Container) throws {
-                        self.container = try container.resolve(Container.self)
+                        self.sessions = try container.resolve(SessionStore.self)
                         self.settings = try container.resolve(WebSettings.self)
                     }
 
-                    public init(container: Container, settings: WebSettings) {
-                        self.container = container
+                    public init(sessions: SessionStore, settings: WebSettings) {
+                        self.sessions = sessions
                         self.settings = settings
                     }
 

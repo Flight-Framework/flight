@@ -1696,6 +1696,11 @@ func emitFlightGraph(into out: inout String) {
     var parameters: [String] = []
     if needsConfiguration { parameters.append("configuration: FlightCore.Configuration") }
     parameters += supplied.map { "\(suppliedBinding($0)): \($0)" }
+    // Every node is also a parameter, defaulting to nil, so a test can
+    // replace one and get the rest of the graph real (§2.10). `nil` rather
+    // than the composed value because a Swift default cannot reference
+    // another parameter — the body does the `??`.
+    parameters += ordered.map { "\(binding($0)): \(qualified($0))? = nil" }
     out += "    init(\(parameters.joined(separator: ", "))) throws {\n"
     if needsConfiguration { out += "        self.configuration = configuration\n" }
     for dependency in supplied {
@@ -1719,7 +1724,11 @@ func emitFlightGraph(into out: inout String) {
             }
         }
         let call = "\(qualified(node))(\(arguments.joined(separator: ", ")))"
-        out += "        self.\(binding(node)) = \(node.configValues.isEmpty ? "" : "try ")\(call)\n"
+        // Bound locally first: a later node's arguments must see the
+        // *supplied* instance when a test passed one, not a second copy.
+        out +=
+            "        let \(binding(node)) = \(binding(node)) ?? \(node.configValues.isEmpty ? "" : "(try ")\(call)\(node.configValues.isEmpty ? "" : ")")\n"
+        out += "        self.\(binding(node)) = \(binding(node))\n"
     }
     out += "    }\n"
 
