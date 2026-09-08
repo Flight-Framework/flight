@@ -30,12 +30,17 @@ qualification on all of it.
 
 ```swift
 struct AppModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] { [FlightPresenceModule.self] }
+    static var dependencies: [any FlightModule.Type] {
+        [FlightPresenceModule.self, FlightChannelsModule.self]
+    }
+
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*") { context in
+            RoomChannel(presence: try context.resolve((any Presence).self))
+        }
+    ]
 
     func configure(_ container: Container) throws {
-        container.registerChannel("room:*") { c in
-            RoomChannel(presence: try c.resolve((any Presence).self))
-        }
         container.registerChannelSocket("/socket") { context in
             context.request.queryParam("token").map { try verify($0) }
         }

@@ -82,13 +82,20 @@ struct RoomChannel: Channel {
 }
 
 struct AppModule: FlightModule {
+    // Listed to *include* Channels in the application. It is not an ordering
+    // constraint: this module declares channels, so Channels is built from
+    // them and therefore built second.
     static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
 
-    func configure(_ container: Container) throws {
-        container.registerChannel("room:*") { c in
-            RoomChannel(broadcaster: try c.resolve(ChannelBroadcaster.self))
+    // Channels are values this module holds. The composer collects `channels`
+    // from every module declaring any and hands them all to
+    // FlightChannelsModule, so a package the framework has never heard of
+    // contributes channels without the application enumerating it.
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*") { context in
+            RoomChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
         }
-    }
+    ]
 }
 
 @Controller
