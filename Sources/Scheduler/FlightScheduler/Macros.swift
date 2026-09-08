@@ -21,7 +21,8 @@ import Foundation
 /// Nothing registers this by hand: the build plugin finds the type, and this
 /// macro registers one job per `@Scheduled` method into the same container
 /// every other component goes through.
-@attached(member, names: named(init), named(_flightRegister))
+@attached(
+    member, names: named(init), named(_flightRegister), named(_flightScheduledJobs))
 @attached(extension, conformances: _FlightRegistrable)
 public macro Scheduler() =
     #externalMacro(module: "FlightSchedulerMacrosImpl", type: "SchedulerMacro")

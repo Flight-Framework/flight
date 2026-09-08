@@ -11,25 +11,33 @@ import ServiceLifecycle
 /// already known — a job whose dependencies are missing has failed the build
 /// long before this runs.
 public struct SchedulerService: Service, Sendable {
-    private let container: Container
+    private let jobs: [ScheduledJobRegistration]
+    private let coordinator: (any JobCoordinator)?
+    private let status: SchedulerStatus?
     private let clock: any SchedulerClock
     private let logger: Logger
 
+    /// Takes what it runs. It used to hold a `Container` and collect the jobs
+    /// at `run()`, because they were registrations gathered post-`freeze()`;
+    /// the module owns them now.
     public init(
-        container: Container,
+        jobs: [ScheduledJobRegistration],
+        coordinator: (any JobCoordinator)? = nil,
+        status: SchedulerStatus? = nil,
         clock: any SchedulerClock = SystemSchedulerClock(),
         logger: Logger = Logger(label: "flight.scheduler")
     ) {
-        self.container = container
+        self.jobs = jobs
+        self.coordinator = coordinator
+        self.status = status
         self.clock = clock
         self.logger = logger
     }
 
     public func run() async throws {
-        let jobs = try container.collectScheduledJobs()
-        let coordinator = try Self.resolveCoordinator(in: container)
+        // Absent coordinator = single-process deployment, the common case.
+        let coordinator = self.coordinator ?? LocalJobCoordinator()
         let mode = Self.mode(for: coordinator)
-        let status = try? container.resolve(SchedulerStatus.self)
         status?.setMode(mode)
 
         guard !jobs.isEmpty else {
@@ -136,16 +144,6 @@ public struct SchedulerService: Service, Sendable {
     /// a coordinator that is present but cannot be built is a wiring bug, and
     /// starting anyway in single-process mode would run every `.once` job on
     /// every node — the failure a coordinator is registered to prevent.
-    static func resolveCoordinator(in container: Container) throws -> any JobCoordinator {
-        do {
-            return try container.resolve((any JobCoordinator).self)
-        } catch let error as ResolutionError {
-            // Absent coordinator = single-process deployment, the common case.
-            guard case .notRegistered = error else { throw error }
-            return LocalJobCoordinator()
-        }
-    }
-
     static func mode(for coordinator: any JobCoordinator) -> SchedulerMode {
         coordinator is LocalJobCoordinator
             ? .singleProcess : .coordinated(coordinator.describedKind)

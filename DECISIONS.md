@@ -7,6 +7,34 @@ wrong, say so and it changes.
 
 ---
 
+## D21 — Scheduled jobs are values, and the coordinator is an argument
+
+**Chosen.** `@Scheduler` generates `_flightScheduledJobs(_ make:)` beside its
+`_flightRegister`, the generator emits `flightScheduledJobs(_ graph:)`, and
+`FlightSchedulerModule(jobs:coordinator:)` takes both. `SchedulerService` takes
+what it runs; its `Container` and `resolveCoordinator` are gone.
+
+**Why.** This was the module I said was blocked, and the graph move unblocked
+it exactly as predicted: a job's closure needed its component at *firing* time,
+and with the graph a composition value the closure captures it instead of
+resolving it. The macro already had the shape — a value form beside a
+registration form is what `@Controller` does with its route factories.
+
+**The coordinator is the more important half.** It was
+`resolve((any JobCoordinator).self)`, catching `.notRegistered` to mean
+single-process — PubSub's and Presence's anti-pattern a third time, and the
+one with the worst failure: an operator who believes `.once` means once, running
+several servers, finds out from duplicated data. Whether a deployment has
+something to coordinate *through* is a fact about how it was composed. The demo
+had exactly this exposure: it registered a `PostgresJobCoordinator` the
+scheduler would no longer have read, so it now provides it as a property.
+
+**`isTypeConstructible` stays true here**, unlike the other converted modules:
+a scheduler with no jobs is a legal application, so `init()` produces something
+correct rather than something misconfigured.
+
+---
+
 ## D20 — Web takes the route table; the registries stop being container scans
 
 **Chosen.** `FlightWebModule(configuration:routes:middleware:assetMounts:coders:)`.

@@ -51,6 +51,10 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
         for job in jobs {
             lines.append(contentsOf: registrationLines(for: job))
         }
+        var jobValueLines: [String] = []
+        for job in jobs {
+            jobValueLines.append(contentsOf: valueLines(for: job))
+        }
 
         let access = declaration.modifiers.contains {
             $0.name.tokenKind == .keyword(.public) || $0.name.tokenKind == .keyword(.open)
@@ -81,6 +85,22 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
             \(raw: thunkLines.map { "    " + $0 }.joined(separator: "\n"))
             }
             """
+        // The same jobs as values, built from a component the caller supplies.
+        //
+        // The registration form above resolves the component from a container
+        // when the job fires; this one closes over whatever `make` returns —
+        // which the generated composition root fills with the component the
+        // graph already built. The two are the same shape the route factories
+        // and `_flightRegister` are: one wiring mechanism each.
+        let jobValues: DeclSyntax = """
+            \(raw: access)static func _flightScheduledJobs(
+                _ make: @escaping @Sendable () -> Self
+            ) -> [FlightScheduler.ScheduledJobRegistration] {
+                [
+            \(raw: jobValueLines.map { "        " + $0 }.joined(separator: "\n"))
+                ]
+            }
+            """
         // Constructor injection, through the same generator @Component,
         // @Controller and @Middleware use — the shared macro-support target
         // this file's Injection helper anticipated and declined to build.
@@ -98,7 +118,45 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
                     node: $0.node)
             },
             access: access, declaration: declaration)
-        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
+        return [resolvingInit, parameterInit, thunk, jobValues].compactMap { $0 }
+    }
+
+    /// One `ScheduledJobRegistration` literal, closing over `make()`.
+    private static func valueLines(for job: ScannedJob) -> [String] {
+        var call = "component.\(job.methodName)()"
+        if job.isAsync { call = "await \(call)" }
+        if job.isThrows { call = "try \(call)" }
+
+        var lines: [String] = []
+        lines.append("FlightScheduler.ScheduledJobRegistration(")
+        lines.append("    name: String(reflecting: Self.self) + \".\(job.methodName)\",")
+        lines.append("    trigger: \(trigger(for: job)),")
+        lines.append("    scope: \(job.scopeText),")
+        lines.append("    overlap: \(job.overlapText)")
+        lines.append(") {")
+        lines.append("    let component = make()")
+        lines.append("    \(call)")
+        lines.append("},")
+        return lines
+    }
+
+    /// Shared by both forms, so the schedule cannot drift between them.
+    private static func trigger(for job: ScannedJob) -> String {
+        switch job.schedule {
+        case .cron(let text, let timeZone):
+            // Force-try is safe here and nowhere else: the expression was
+            // parsed by this same parser at compile time, so a throw is
+            // impossible unless the macro and the runtime disagree — which
+            // sharing one parser rules out.
+            return
+                "FlightScheduler.JobTrigger.cron("
+                + "try! FlightScheduler.CronExpression(\"\(text)\"), "
+                + "timeZone: try! FlightScheduler._flightTimeZone("
+                + "\(timeZone), job: String(reflecting: Self.self) + \".\(job.methodName)\"))"
+        case .interval(let every, let initialDelay):
+            let delay = initialDelay ?? ".seconds(0)"
+            return "FlightScheduler.JobTrigger.interval(\(every), initialDelay: \(delay))"
+        }
     }
 
     private static func registrationLines(for job: ScannedJob) -> [String] {

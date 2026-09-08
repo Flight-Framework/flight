@@ -1804,6 +1804,9 @@ var graphRoots = GraphRoots()
 /// aggregate alongside whatever routes modules declare.
 var emittedRouteValues = false
 
+/// True when this target emitted `flightScheduledJobs(_:)`.
+var emittedScheduledJobValues = false
+
 // MARK: - FlightGraph (§2.1, emitted unused)
 //
 // The composition function, in the shape it will eventually replace
@@ -2062,6 +2065,25 @@ func emitFlightGraph(into out: inout String) {
     }
     out += "    ]\n"
     out += "}\n"
+
+    // Scheduled jobs, the same way: the macro generated a value form beside
+    // its registration form, and this closes it over the component the graph
+    // built rather than one a container resolves when the job fires.
+    let schedulers = ordered.filter { $0.attributeName == "Scheduler" }
+    guard !schedulers.isEmpty else { return }
+    emittedScheduledJobValues = true
+    out += "\n"
+    out += "/// Every scheduled job this target declares, bound to the\n"
+    out += "/// components ``FlightGraph`` already built.\n"
+    out += "func flightScheduledJobs(_ graph: FlightGraph)\n"
+    out += "    -> [FlightScheduler.ScheduledJobRegistration]\n"
+    out += "{\n"
+    for scheduler in schedulers {
+        out +=
+            "    \(qualified(scheduler))._flightScheduledJobs { graph.\(binding(scheduler)) }\n"
+        out += "        + \n"
+    }
+    out = String(out.dropLast("        + \n".count)) + "}\n"
 }
 
 // MARK: - The composition root
@@ -2202,6 +2224,10 @@ func emitComposer(into out: inout String) {
             if emittedRouteValues, providedTypeKey(element) == "RouteRegistration" {
                 needed.insert("FlightGraph")
                 expressions.append("flightRoutes(flightGraph)")
+            }
+            if emittedScheduledJobValues, providedTypeKey(element) == "ScheduledJobRegistration" {
+                needed.insert("FlightGraph")
+                expressions.append("flightScheduledJobs(flightGraph)")
             }
             let sources = contributors(to: type, for: consumer)
             for source in sources { needed.insert(moduleKey(source.module)) }

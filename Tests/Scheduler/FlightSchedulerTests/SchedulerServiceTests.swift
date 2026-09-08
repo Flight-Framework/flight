@@ -100,15 +100,20 @@ struct SchedulerServiceTests {
         // opposite in as many words: "one broken job never stops the others".
         let clock = TestSchedulerClock(now: epoch)
         let fired = Mutex(0)
-        let container = Container()
-        container.registerScheduledJob(
-            "never", cron: try CronExpression("0 0 0 30 2 *"), scope: .onEveryNode) {}
-        container.registerScheduledJob(
-            "daily", cron: try CronExpression("0 0 3 * * *"), scope: .onEveryNode
-        ) { fired.withLock { $0 += 1 } }
-        try container.freeze()
-
-        let service = SchedulerService(container: container, clock: clock, logger: quiet)
+        // Jobs are values the module is composed with now.
+        let jobs = [
+            ScheduledJobRegistration(
+                name: "never",
+                trigger: .cron(try CronExpression("0 0 0 30 2 *"), timeZone: .gmt),
+                scope: .onEveryNode
+            ) {},
+            ScheduledJobRegistration(
+                name: "daily",
+                trigger: .cron(try CronExpression("0 0 3 * * *"), timeZone: .gmt),
+                scope: .onEveryNode
+            ) { fired.withLock { $0 += 1 } },
+        ]
+        let service = SchedulerService(jobs: jobs, clock: clock, logger: quiet)
         let stopped = Mutex(false)
         let task = Task {
             try await service.run()
@@ -160,25 +165,18 @@ struct SchedulerServiceTests {
         }
     }
 
-    @Test("no coordinator registered means single-process mode")
-    func modeWithoutCoordinator() throws {
-        let container = Container()
-        try container.freeze()
-        let coordinator = try SchedulerService.resolveCoordinator(in: container)
-        #expect(coordinator is LocalJobCoordinator)
-        #expect(SchedulerService.mode(for: coordinator) == .singleProcess)
+    @Test("no coordinator supplied means single-process mode")
+    func modeWithoutCoordinator() {
+        // The coordinator is an argument now: whether a deployment has
+        // something to coordinate through is a fact about how it was
+        // composed, so the absent case is `nil` rather than a resolution
+        // failure caught and interpreted.
+        #expect(SchedulerService.mode(for: LocalJobCoordinator()) == .singleProcess)
     }
 
-    @Test("a registered coordinator is found and named in the mode")
-    func modeWithCoordinator() throws {
-        let container = Container()
-        container.register((any JobCoordinator).self, scope: .singleton) { _ in
-            StubJobCoordinator.claiming
-        }
-        try container.freeze()
-        let coordinator = try SchedulerService.resolveCoordinator(in: container)
-        #expect(!(coordinator is LocalJobCoordinator))
-        #expect(SchedulerService.mode(for: coordinator) == .coordinated("stub"))
+    @Test("a supplied coordinator is named in the mode")
+    func modeWithCoordinator() {
+        #expect(SchedulerService.mode(for: StubJobCoordinator.claiming) == .coordinated("stub"))
     }
 }
 
