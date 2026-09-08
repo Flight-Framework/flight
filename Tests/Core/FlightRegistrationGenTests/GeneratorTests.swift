@@ -694,6 +694,37 @@ struct GeneratorTests {
             result.generated.contains("SocketController(validator: graph.tokenValidator)"))
     }
 
+    @Test("the graph projects the container's components rather than rebuilding them")
+    func graphProjectsRatherThanRebuilds() throws {
+        // While both wiring mechanisms are live, the container is what
+        // constructs. A graph that built its own copies would give an
+        // application two of every component — a route terminal reaching one
+        // through the graph, a channel or a job reaching the other through
+        // the container. Harmless for a stateless repository; a silent
+        // split-brain for anything holding state.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightWeb
+            @Service
+            struct UserService: Sendable {}
+            @Controller("/users")
+            struct UserController {
+            @Inject var users: UserService
+            @GetRoute("/:id")
+            func show(_ context: RequestContext) -> String { "x" }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains("userService: container.resolve(UserService.self)"),
+            "makeFlightGraph must resolve, not construct")
+        // The composing initializer stays — it is the shape this becomes
+        // once the container stops constructing — and is type-checked on
+        // every build even though nothing calls it yet.
+        #expect(result.generated.contains("self.userService = UserService()"))
+    }
+
     // MARK: - Undeclared lanes
 
     @Test("a route naming an undeclared lane is warned about at build time")

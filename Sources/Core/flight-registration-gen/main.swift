@@ -1668,6 +1668,35 @@ func emitFlightGraph(into out: inout String) {
         out += "        self.\(binding(node)) = \(node.configValues.isEmpty ? "" : "try ")\(call)\n"
     }
     out += "    }\n"
+
+    // A second initializer that takes everything, used while the container
+    // is still what constructs components.
+    //
+    // Without it the graph would build its own copies and an application
+    // would run two of every component: a route terminal reaching one
+    // through the graph, a channel or a job reaching the other through the
+    // container. Harmless for a stateless repository and a silent
+    // split-brain for anything that holds state.
+    //
+    // The composing initializer above is the shape this becomes once the
+    // container stops constructing; this one is the bridge, and it goes with
+    // the container.
+    var projected: [String] = []
+    if needsConfiguration { projected.append("configuration: FlightCore.Configuration") }
+    projected += supplied.map { "\(suppliedBinding($0)): \($0)" }
+    projected += ordered.map { "\(binding($0)): \(qualified($0))" }
+    if !ordered.isEmpty {
+        out += "\n"
+        out += "    init(\(projected.joined(separator: ", "))) {\n"
+        if needsConfiguration { out += "        self.configuration = configuration\n" }
+        for dependency in supplied {
+            out += "        self.\(suppliedBinding(dependency)) = \(suppliedBinding(dependency))\n"
+        }
+        for node in ordered {
+            out += "        self.\(binding(node)) = \(binding(node))\n"
+        }
+        out += "    }\n"
+    }
     out += "}\n"
 
     // A named way to build it from a container, so the graph is
@@ -1696,6 +1725,12 @@ func emitFlightGraph(into out: inout String) {
             dependency.hasPrefix("(") || !dependency.contains(" ")
             ? dependency : "(\(dependency))"
         resolved.append("\(suppliedBinding(dependency)): container.resolve(\(metatype).self)")
+    }
+    // Components are *resolved*, not constructed: the container built them
+    // at freeze, and building them again here would give the application two
+    // of each.
+    resolved += ordered.map {
+        "\(binding($0)): container.resolve(\(qualified($0)).self)"
     }
     if resolved.isEmpty {
         out += "    try FlightGraph()\n"
