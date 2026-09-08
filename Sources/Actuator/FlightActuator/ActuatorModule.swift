@@ -1,4 +1,5 @@
 import FlightCore
+import Synchronization
 import FlightWeb
 import class Foundation.ProcessInfo
 
@@ -34,6 +35,34 @@ public struct ActuatorModule: FlightModule {
     /// app's own unqualified `FlightEnvironment` registration.
     static let environmentQualifier = "flight.actuator"
 
+    /// Holds the controller the routes serve from.
+    ///
+    /// The routes are values, built when the module is; the controller needs
+    /// the container it introspects, which only exists at `configure`. So the
+    /// routes close over this box and `configure` fills it — which is what
+    /// replaced `context.resolve(ActuatorController.self)` in every handler.
+    final class ControllerBox: @unchecked Sendable {
+        private let storage = Mutex<ActuatorController?>(nil)
+        func set(_ controller: ActuatorController) { storage.withLock { $0 = controller } }
+        func get() throws -> ActuatorController {
+            guard let controller = storage.withLock({ $0 }) else {
+                throw ActuatorNotConfigured()
+            }
+            return controller
+        }
+    }
+
+    /// Thrown only if a route somehow serves before the module configured,
+    /// which bootstrap's ordering makes unreachable — stated rather than
+    /// force-unwrapped.
+    struct ActuatorNotConfigured: Error, CustomStringConvertible {
+        var description: String {
+            "the actuator served a request before its module was configured"
+        }
+    }
+
+    private let controller = ControllerBox()
+
     let environment: FlightEnvironment
 
     /// Bootstrap path: the environment comes from `FLIGHT_ENV`, read via
@@ -58,7 +87,8 @@ public struct ActuatorModule: FlightModule {
         self.isEnvironmentDeclared = processEnvironment["FLIGHT_ENV"].map { !$0.isEmpty } ?? false
         self.routes = Self.makeRoutes(
             exposure: try? ActuatorExposure.resolve(
-                environment: environment, isEnvironmentDeclared: isEnvironmentDeclared))
+                environment: environment, isEnvironmentDeclared: isEnvironmentDeclared),
+            controller: controller)
     }
 
     /// Explicit-environment initializer — the test seam (`TestContainer.build`
@@ -72,7 +102,8 @@ public struct ActuatorModule: FlightModule {
         self.isEnvironmentDeclared = true
         self.routes = Self.makeRoutes(
             exposure: try? ActuatorExposure.resolve(
-                environment: environment, isEnvironmentDeclared: true))
+                environment: environment, isEnvironmentDeclared: true),
+            controller: controller)
     }
 
     /// Explicit exposure, bypassing both the environment allowlist and
@@ -82,7 +113,7 @@ public struct ActuatorModule: FlightModule {
         self.environment = environment
         self.exposureOverride = exposure
         self.isEnvironmentDeclared = true
-        self.routes = Self.makeRoutes(exposure: exposure)
+        self.routes = Self.makeRoutes(exposure: exposure, controller: controller)
     }
 
     private let exposureOverride: ActuatorExposure?
@@ -116,14 +147,16 @@ public struct ActuatorModule: FlightModule {
     /// Stored rather than computed, because the composition root reads what a
     /// module *holds*: a computed property is excluded from that scan, which
     /// is what keeps `var service` from being taken as a contribution.
-    private static func makeRoutes(exposure: ActuatorExposure?) -> [RouteRegistration] {
+    private static func makeRoutes(
+        exposure: ActuatorExposure?, controller: ControllerBox
+    ) -> [RouteRegistration] {
         guard let exposure, exposure.publishesHealth else { return [] }
         // Health is published wherever the actuator is enabled at all: an
         // orchestrator needs a probe in production, and the old
         // all-or-nothing gate is why production had none.
         var routes: [RouteRegistration] = [
             RouteRegistration(method: "GET", path: "/actuator/health", source: "FlightActuator") {
-                context in try await context.resolve(ActuatorController.self).health(context)
+                context in try await controller.get().health(context)
             },
             // Liveness and readiness are different questions, and one endpoint
             // answering both got one of them wrong whichever way it was wired:
@@ -133,12 +166,12 @@ public struct ActuatorModule: FlightModule {
             RouteRegistration(
                 method: "GET", path: "/actuator/health/live", source: "FlightActuator"
             ) { context in
-                try await context.resolve(ActuatorController.self).liveness(context)
+                try await controller.get().liveness(context)
             },
             RouteRegistration(
                 method: "GET", path: "/actuator/health/ready", source: "FlightActuator"
             ) { context in
-                try await context.resolve(ActuatorController.self).readiness(context)
+                try await controller.get().readiness(context)
             },
         ]
         // The dashboard discloses the module list, every registered
@@ -149,7 +182,7 @@ public struct ActuatorModule: FlightModule {
             routes.append(
                 RouteRegistration(method: "GET", path: "/actuator", source: "FlightActuator") {
                     context in
-                    try await context.resolve(ActuatorController.self).dashboard(context)
+                    try await controller.get().dashboard(context)
                 })
         }
         return routes
@@ -178,6 +211,7 @@ public struct ActuatorModule: FlightModule {
         // `container` is the same instance being configured — no
         // self-registration needed for the controller to hold a reference
         // to it.
+        let box = controller
         container.register(ActuatorController.self, scope: .singleton, stereotype: .controller) { [environment] c in
             // getIfPresent, not get(_:default:) — the latter is non-throwing
             // and fatalErrors on a malformed *present* value; getIfPresent
@@ -187,7 +221,11 @@ public struct ActuatorModule: FlightModule {
             // relies on (getIfPresent's doc comment).
             let format = try c.resolve(Configuration.self)
                 .getIfPresent("actuator.format", as: ActuatorFormat.self) ?? .ssr
-            return ActuatorController(container: c, environment: environment, format: format)
+            let controller = ActuatorController(
+                container: c, environment: environment, format: format)
+            // The routes serve from here rather than resolving per request.
+            box.set(controller)
+            return controller
         }
 
     }
