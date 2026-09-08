@@ -1611,6 +1611,39 @@ func emitFlightGraph(into out: inout String) {
     }
     out += "    }\n"
     out += "}\n"
+
+    // A named way to build it from a container, so the graph is
+    // *constructible* and not merely compilable. Its root parameters are
+    // exactly the things a module registers, and they resolve at freeze like
+    // anything else.
+    //
+    // Emitted as a function rather than a registration, deliberately: every
+    // component is built eagerly at freeze, so registering the graph would
+    // make a missing root parameter fail the boot of an application that
+    // works today — for a value nothing calls yet. A function is inert until
+    // something calls it, and gives step 6 a single place to change.
+    out += "\n"
+    out += "/// Builds ``FlightGraph`` from a frozen container.\n"
+    out += "///\n"
+    out += "/// The bridge between the two wiring mechanisms while both exist:\n"
+    out += "/// the graph's root parameters are the components modules register,\n"
+    out += "/// so they resolve exactly as they always have. Nothing calls this\n"
+    out += "/// yet — dispatch still builds controllers the container's way.\n"
+    out += "func makeFlightGraph(_ container: FlightCore.Container) throws -> FlightGraph {\n"
+    out += "    try FlightGraph(\n"
+    var resolved: [String] = []
+    if needsConfiguration {
+        resolved.append("configuration: container.resolve(FlightCore.Configuration.self)")
+    }
+    for dependency in supplied {
+        let metatype =
+            dependency.hasPrefix("(") || !dependency.contains(" ")
+            ? dependency : "(\(dependency))"
+        resolved.append("\(suppliedBinding(dependency)): container.resolve(\(metatype).self)")
+    }
+    out += resolved.map { "        \($0)" }.joined(separator: ",\n") + "\n"
+    out += "    )\n"
+    out += "}\n"
 }
 
 // MARK: - Static route manifest

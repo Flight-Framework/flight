@@ -597,6 +597,31 @@ struct GeneratorTests {
         #expect(!result.generated.contains("let authentication: Authentication"))
     }
 
+    @Test("the graph is constructible from a container, not just compilable")
+    func graphIsConstructibleFromAContainer() throws {
+        // A function rather than a registration, deliberately: every
+        // component is built eagerly at freeze, so registering the graph
+        // would make a missing root parameter fail the boot of an
+        // application that works today — for a value nothing calls yet.
+        let result = try generate([
+            "Sources.swift": """
+            import FlightCore
+            @Repository
+            struct UserRepository: Sendable {
+            // flight:hand-registered
+            @Inject var pool: PostgresDataSource
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains(
+                "func makeFlightGraph(_ container: FlightCore.Container) throws -> FlightGraph"))
+        #expect(
+            result.generated.contains(
+                "postgresDataSource: container.resolve(PostgresDataSource.self)"))
+    }
+
     // MARK: - Undeclared lanes
 
     @Test("a route naming an undeclared lane is warned about at build time")

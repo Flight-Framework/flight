@@ -7,6 +7,46 @@ wrong, say so and it changes.
 
 ---
 
+## D10 — Per-request construction is not shipped until the terminal can pass request values
+
+**Context.** Step 6's spike proves per-request construction works for all
+three response kinds, including the two that outlive dispatch. The obvious
+next move is to make `@Controller` construct inside the handler closure
+rather than capturing an instance resolved at `freeze()`. I did not.
+
+**Why not.** Moving `try c.resolve(Self.self)` inside the closure buys the
+*lifetime* and nothing else, because every component is a singleton now:
+post-freeze resolution returns the same instance either way. What it costs is
+a dictionary read per dependency per request, on every route. That is a
+strictly worse trade until the terminal has something request-shaped to pass
+— and nothing in the tree does yet, because §2.5 put the principal on the
+context, which is where request values already travel typed and cheaply.
+
+Per-request construction earns its cost when a controller's dependencies are
+*visible in its signature* rather than read from the context ad hoc, and that
+requires constructor injection from the graph — not a per-request locator
+lookup wearing the same shape.
+
+**So the order matters:** the graph must reach the terminal *first*, and then
+construction moves. Shipping the lifetime change first would be measurable
+cost for no behaviour, and would have to be undone.
+
+**What shipped instead.** `makeFlightGraph(_:)` — the graph is now
+*constructible*, not merely compilable, with its root parameters resolved
+from the container. A function rather than a registration, because every
+component is built eagerly at freeze and registering the graph would make a
+missing root parameter fail the boot of an application that works today, for
+a value nothing calls yet.
+
+**The open decision**, recorded in §7 step 6 with trade-offs: how the
+generated terminal gets graph values when `@Controller` expands in the
+application's module and cannot know `FlightGraph` exists. My recommendation
+is the macro emitting a per-route factory that takes a `make` closure, with
+the generator supplying it — it keeps the handler thunk where it is, so the
+drift `FlightRouteScan` was extracted to prevent stays prevented.
+
+---
+
 ## D9 — `Lifetime` kept as a single-case enum, parameter defaulted
 
 **Context.** §2.2 removed `.scoped` and `.transient`. `Lifetime` is now one
