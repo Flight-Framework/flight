@@ -789,6 +789,86 @@ struct GeneratorTests {
         #expect(result.generated.contains("try c.resolve(FlightGraph.self)"))
     }
 
+    // MARK: - The composition root
+
+    @Test("the composer builds every included module, dependencies first")
+    func composerBuildsInOrder() throws {
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            final class PubSubModule: FlightModule {
+            func configure(_ container: Container) throws {}
+            }
+            final class ChannelsModule: FlightModule {
+            static var dependencies: [any FlightModule.Type] { [PubSubModule.self] }
+            init(configuration: Configuration, pubsub: PubSubModule) throws {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [ChannelsModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("let pubSubModule = PubSubModule()"))
+        // A module that declares what it needs is wired from what came before.
+        #expect(
+            result.generated.contains(
+                "let channelsModule = try ChannelsModule(configuration: configuration, pubsub: pubSubModule)"
+            ))
+    }
+
+    @Test("a generic module keeps its type argument")
+    func genericModuleKeepsItsArgument() throws {
+        // `FlightWebModule<FlightTransport>` is one module named with the
+        // transport it was chosen with. Matching strips the argument;
+        // constructing cannot.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            final class FlightWebModule<T: Sendable>: FlightModule {
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(
+            configuration: .load(), modules: [FlightWebModule<FlightTransport>.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains("let flightWebModule = FlightWebModule<FlightTransport>()"))
+    }
+
+    @Test("a module declaring init() is constructed that way, whatever else it offers")
+    func noArgumentInitWins() throws {
+        // ActuatorModule declares init() *and* init(processEnvironment:) —
+        // the second is a test seam, and picking the first parameterized
+        // initializer found chose the seam.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            final class ActuatorModule: FlightModule {
+            init() {}
+            init(processEnvironment: [String: String]) {}
+            func configure(_ container: Container) throws {}
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [ActuatorModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(result.generated.contains("let actuatorModule = ActuatorModule()"))
+        #expect(!result.generated.contains("processEnvironment:"))
+    }
+
     // MARK: - Included modules
 
     @Test("the bootstrap list resolves transitively, dependencies first")
@@ -1226,7 +1306,7 @@ struct GeneratorTests {
             "AppModule depends on SecurityModule, so SecurityModule configures first")
     }
 
-    @Test("the module graph is emitted, generic arguments stripped")
+    @Test("the module graph is emitted, dependencies as written")
     func emitsModuleGraph() throws {
         let result = try generate([
             "AppModule.swift": """
@@ -1243,9 +1323,12 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
+        // As written, generic argument and all: matching strips it, but the
+        // composer has to construct the type that was named.
         #expect(
             result.generated.contains(
-                #"name: "AppModule", dependencies: ["PostgresDataModule", "FlightPubSubModule"]"#))
+                #"name: "AppModule", dependencies: ["PostgresDataModule<PrimaryDataSource>", "FlightPubSubModule"]"#
+            ))
     }
 
     @Test("a module with no dependencies is still an edge in the graph")

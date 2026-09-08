@@ -180,7 +180,30 @@ func _flightBootstrap(
     modules: [any FlightModule.Type],
     logger: Logger = Logger(label: "flight.bootstrap")
 ) async throws {
-    let app = try _flightAssemble(configuration: configuration, modules: modules)
+    try await _flightBootstrap(
+        configuration: configuration,
+        assembled: _flightAssemble(configuration: configuration, modules: modules),
+        logger: logger)
+}
+
+/// The same bootstrap from modules a caller already built, in dependency
+/// order — what a generated composer supplies.
+func _flightBootstrap(
+    configuration: Configuration,
+    moduleInstances instances: [any FlightModule],
+    logger: Logger = Logger(label: "flight.bootstrap")
+) async throws {
+    try await _flightBootstrap(
+        configuration: configuration,
+        assembled: _flightAssemble(configuration: configuration, moduleInstances: instances),
+        logger: logger)
+}
+
+private func _flightBootstrap(
+    configuration: Configuration,
+    assembled app: AssembledApplication,
+    logger: Logger
+) async throws {
     logger.info(
         "flight assembled",
         metadata: [

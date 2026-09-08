@@ -202,6 +202,13 @@ struct ScannedPipelineLane {
 /// module graph rather than of file order.
 struct ScannedModule {
     let typeName: String
+    /// The parameter labels of the module's own initializer, if it declares
+    /// one — what the composer has to supply. Empty means `init()`, which is
+    /// every module that has not moved to owning its components yet.
+    let initializerLabels: [String]
+    /// Those parameters' types, positionally, so the composer can wire one
+    /// module's output into another's input.
+    let initializerTypes: [String]
     /// Dependency type names as written, `.self` and any generic argument
     /// stripped: `PostgresDataModule<PrimaryDataSource>.self` is
     /// `PostgresDataModule`.
@@ -357,13 +364,42 @@ final class ModuleVisitor: SyntaxVisitor {
                       member.declName.baseName.tokenKind == .keyword(.self),
                       let base = member.base
                 else { continue }
-                var text = base.trimmedDescription
-                if let angle = text.firstIndex(of: "<") { text = String(text[..<angle]) }
-                dependencies.append(baseName(text))
+                dependencies.append(base.trimmedDescription)
             }
         }
+        // The initializer a composer would call. `init()` conformances are
+        // the ordinary case today; a module that has moved to owning its
+        // components declares what it needs instead.
+        var labels: [String] = []
+        var types: [String] = []
+        var declaresNoArgumentInit = false
+        for member in members.members {
+            guard let initializer = member.decl.as(InitializerDeclSyntax.self) else { continue }
+            let parameters = initializer.signature.parameterClause.parameters
+            if parameters.isEmpty {
+                // A module that still declares `init()` is constructed that
+                // way, whatever else it offers. `ActuatorModule` declares
+                // both it and `init(processEnvironment:)`, and the second is
+                // a test seam — picking the first parameterized initializer
+                // found chose the seam.
+                declaresNoArgumentInit = true
+                continue
+            }
+            if labels.isEmpty {
+                labels = parameters.map {
+                    $0.firstName.tokenKind == .wildcard ? "_" : $0.firstName.text
+                }
+                types = parameters.map { $0.type.trimmedDescription }
+            }
+        }
+        if declaresNoArgumentInit {
+            labels = []
+            types = []
+        }
         modules.append(
-            ScannedModule(typeName: name, dependencies: dependencies, module: module))
+            ScannedModule(
+                typeName: name, initializerLabels: labels, initializerTypes: types,
+                dependencies: dependencies, module: module))
     }
 
     /// The elements of the array literal a `dependencies` property returns,
@@ -452,11 +488,10 @@ final class ModuleVisitor: SyntaxVisitor {
                 member.declName.baseName.tokenKind == .keyword(.self),
                 let base = member.base
             else { continue }
-            // `FlightWebModule<FlightTransport>.self` names one module; the
-            // generic argument is a transport choice, not a second module.
-            var text = base.trimmedDescription
-            if let angle = text.firstIndex(of: "<") { text = String(text[..<angle]) }
-            bootstrapModules.append(baseName(text))
+            // Kept whole: `FlightWebModule<FlightTransport>` is one module,
+            // and the generic argument is the transport it was chosen with —
+            // which the composer has to write back out to construct it.
+            bootstrapModules.append(base.trimmedDescription)
         }
     }
 
@@ -928,6 +963,18 @@ for module in manifest.modules {
     }
 }
 
+/// A module's identity for matching, with its generic argument stripped.
+///
+/// `FlightWebModule<FlightTransport>` and `FlightWebModule` are the same
+/// module named two ways: the declaration has no generic argument, a
+/// bootstrap list and a `dependencies` entry do. Matching uses this; emitting
+/// uses the text as written, because the composer has to construct it.
+func moduleKey(_ text: String) -> String {
+    var name = text
+    if let angle = name.firstIndex(of: "<") { name = String(name[..<angle]) }
+    return baseName(name)
+}
+
 /// Name-level matching everywhere below compares base names — the last dotted
 /// component — so `FlightDemo.UserRepositoryProtocol` and
 /// `UserRepositoryProtocol` refer to the same seam.
@@ -1275,18 +1322,20 @@ diagnoseUndeclaredLanes()
 @MainActor
 func resolveIncludedModules() -> [String] {
     let byName = Dictionary(
-        moduleGraph.map { (baseName($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
+        moduleGraph.map { (moduleKey($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
     var ordered: [String] = []
     var seen: Set<String> = []
 
-    func visit(_ name: String) {
-        guard !seen.contains(name) else { return }
-        seen.insert(name)
+    func visit(_ text: String) {
+        let key = moduleKey(text)
+        guard !seen.contains(key) else { return }
+        seen.insert(key)
         // Dependencies first, the order `configure` runs in.
-        for dependency in byName[name]?.dependencies ?? [] {
+        for dependency in byName[key]?.dependencies ?? [] {
             visit(dependency)
         }
-        ordered.append(name)
+        // As written, generic argument and all: this is what constructs it.
+        ordered.append(text)
     }
     for root in bootstrapModules { visit(root) }
     return ordered
@@ -1410,7 +1459,7 @@ if errorCount > 0 { exit(1) }
 @MainActor
 func lanesInModuleOrder() -> [ScannedPipelineLane] {
     let byName = Dictionary(
-        moduleGraph.map { ($0.typeName, $0) }, uniquingKeysWith: { a, _ in a })
+        moduleGraph.map { (moduleKey($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
     var position: [String: Int] = [:]
     var finished: Set<String> = []
     var inProgress: Set<String> = []
@@ -1422,7 +1471,7 @@ func lanesInModuleOrder() -> [ScannedPipelineLane] {
         guard !inProgress.contains(name) else { return }
         inProgress.insert(name)
         for dependency in module.dependencies {
-            visit(dependency)
+            visit(moduleKey(dependency))
         }
         inProgress.remove(name)
         finished.insert(name)
@@ -1430,7 +1479,7 @@ func lanesInModuleOrder() -> [ScannedPipelineLane] {
     }
 
     for module in moduleGraph {
-        visit(module.typeName)
+        visit(moduleKey(module.typeName))
     }
 
     // Stable: declarations from one module keep the order they were written
@@ -1905,6 +1954,75 @@ func emitFlightGraph(into out: inout String) {
     out += "}\n"
 }
 
+// MARK: - The composition root
+//
+// Every module this application includes, constructed in dependency order and
+// handed to `Flight.run(configuration:modules:composedBy:)`.
+//
+// `modules:` stays the declaration — the list of subsystems, written by the
+// author and read by this generator — and this is what that list *means*
+// once a module can take what it needs. Without a composer, Flight
+// instantiates each module from its type, so a module must be constructible
+// with no arguments and therefore reads configuration through the container;
+// with one, a module declares its inputs and holds what it provides
+// (COMPOSITION-MIGRATION.md D11).
+//
+// A module that still declares `init()` is called that way, so this works
+// before any module moves and each conversion is one local change.
+@MainActor
+func emitComposer(into out: inout String) {
+    guard !includedModules.isEmpty else { return }
+    let byName = Dictionary(
+        moduleGraph.map { (moduleKey($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
+
+    func binding(_ text: String) -> String {
+        let name = moduleKey(text)
+        return name.prefix(1).lowercased() + name.dropFirst()
+    }
+    /// The module whose type matches a parameter — how one module's output
+    /// becomes another's input. Matched by type name, the same way the
+    /// component graph matches an existential to its single conformer.
+    func provider(of type: String) -> String? {
+        let wanted = moduleKey(existentialProtocolName(type) ?? type)
+        return includedModules.first { moduleKey($0) == wanted }
+    }
+
+    out += "\n"
+    out += "/// Every module this application includes, in dependency order.\n"
+    out += "///\n"
+    out += "/// Pass to `Flight.run(configuration:modules:composedBy:)`. The\n"
+    out += "/// `modules:` list stays the declaration of *which* subsystems the\n"
+    out += "/// application includes; this is how they are built.\n"
+    out += "func flightComposeModules(_ configuration: FlightCore.Configuration) throws\n"
+    out += "    -> [any FlightCore.FlightModule]\n"
+    out += "{\n"
+    for name in includedModules {
+        let module = byName[moduleKey(name)]
+        var arguments: [String] = []
+        for (label, type) in zip(module?.initializerLabels ?? [], module?.initializerTypes ?? []) {
+            if baseName(type) == "Configuration" {
+                arguments.append("\(label): configuration")
+            } else if let source = provider(of: type) {
+                arguments.append("\(label): \(binding(source))")
+            } else {
+                // Nothing in the included set provides it. Emitting the call
+                // anyway makes it a compile error naming the parameter, which
+                // is a better answer than silently omitting the module.
+                arguments.append("\(label): <#\(type)#>")
+            }
+        }
+        let call = "\(name)(\(arguments.joined(separator: ", ")))"
+        let needsTry = !(module?.initializerLabels.isEmpty ?? true)
+        out += "    let \(binding(name)) = \(needsTry ? "try " : "")\(call)\n"
+    }
+    out += "    return [\n"
+    for name in includedModules {
+        out += "        \(binding(name)),\n"
+    }
+    out += "    ]\n"
+    out += "}\n"
+}
+
 // MARK: - Static route manifest
 //
 // Every route this target declares, scanned at build time through the same
@@ -2141,6 +2259,7 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
 }
 
 emitFlightGraph(into: &out)
+emitComposer(into: &out)
 
 do {
     let outputURL = URL(fileURLWithPath: manifest.output)

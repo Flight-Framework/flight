@@ -126,14 +126,34 @@ public enum Flight {
     ///
     /// Exits `0` after a graceful shutdown, `1` on a startup failure. An
     /// embedder that wants the error rather than the exit uses `bootstrap`.
+    /// `composedBy` is how a module gets to take what it needs.
+    ///
+    /// Without it, this instantiates every module from its type, so a module
+    /// must be constructible with no arguments — which is why one reads
+    /// configuration through the container rather than declaring it as a
+    /// parameter. The build plugin generates a composer that constructs them
+    /// in dependency order instead, and `flight new` writes the argument;
+    /// `modules:` stays the declaration of which subsystems this application
+    /// includes, and is what the plugin reads to know.
+    ///
+    /// Omit it and nothing changes: the type-based path is unchanged and
+    /// remains supported.
     public static func run(
         configuration: @autoclosure @Sendable () throws -> Configuration,
         modules: [any FlightModule.Type],
+        composedBy compose: (@Sendable (Configuration) throws -> [any FlightModule])? = nil,
         logger: Logger = Logger(label: "flight.bootstrap")
     ) async -> Never {
         do {
             let configuration = try configuration()
-            try await bootstrap(configuration: configuration, modules: modules, logger: logger)
+            if let compose {
+                try await _flightBootstrap(
+                    configuration: configuration, moduleInstances: try compose(configuration),
+                    logger: logger)
+            } else {
+                try await bootstrap(
+                    configuration: configuration, modules: modules, logger: logger)
+            }
             exit(0)
         } catch {
             // Written straight to file descriptor 2 rather than through
