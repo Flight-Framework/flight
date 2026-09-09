@@ -6,10 +6,9 @@ import ServiceLifecycle
 /// The scheduler's long-running half: one task per job, running until
 /// shutdown.
 ///
-/// Registered by ``FlightSchedulerModule``. Starts after the container has
-/// frozen, so every job's component is constructible and every schedule is
-/// already known — a job whose dependencies are missing has failed the build
-/// long before this runs.
+/// Provided by ``FlightSchedulerModule``. Starts after composition, so every
+/// job's component is already built and every schedule already known — a job
+/// whose dependencies are missing has failed the build long before this runs.
 public struct SchedulerService: Service, Sendable {
     private let jobs: [ScheduledJobRegistration]
     private let coordinator: (any JobCoordinator)?
@@ -62,8 +61,8 @@ public struct SchedulerService: Service, Sendable {
             logger.warning(
                 """
                 \(onceJobs.count) job(s) are set to run once per firing, and no distributed \
-                JobCoordinator is registered. That is correct on a single server. If you run \
-                more than one, every one of them will run these jobs — register a coordinator.
+                JobCoordinator is present. That is correct on a single server. If you run \
+                more than one, every one of them will run these jobs — add a coordinator.
                 """,
                 metadata: ["jobs": .string(onceJobs.map(\.name).joined(separator: ", "))])
         }
@@ -138,12 +137,9 @@ public struct SchedulerService: Service, Sendable {
         case shutdown
     }
 
-    /// A coordinator if one is registered, the single-process one otherwise.
-    ///
-    /// Throws for any resolution failure that is not "nothing registered":
-    /// a coordinator that is present but cannot be built is a wiring bug, and
-    /// starting anyway in single-process mode would run every `.once` job on
-    /// every node — the failure a coordinator is registered to prevent.
+    /// The coordination mode a coordinator implies: single-process for the
+    /// built-in ``LocalJobCoordinator`` that ``run()`` falls back to,
+    /// coordinated for anything a deployment composed in.
     static func mode(for coordinator: any JobCoordinator) -> SchedulerMode {
         coordinator is LocalJobCoordinator
             ? .singleProcess : .coordinated(coordinator.describedKind)
@@ -176,13 +172,13 @@ public enum SchedulerStartupError: Error, CustomStringConvertible, Sendable {
     }
 }
 
-/// Resolves a `@Scheduled` time zone identifier at container-freeze time.
+/// Resolves a `@Scheduled` time zone identifier at composition.
 ///
 /// Called only from macro-generated code. The macro rejects an identifier
 /// Foundation does not know, so this fires only when the build machine's
 /// time zone database and the deployment's disagree — a slim but real case,
 /// and one that used to resolve silently to GMT and run the job at the wrong
-/// hour. Failing at freeze puts it in the startup log instead.
+/// hour. Failing at composition puts it in the startup log instead.
 public func _flightTimeZone(_ identifier: String, job: String) throws -> TimeZone {
     guard let zone = TimeZone(identifier: identifier) else {
         throw SchedulerStartupError.unknownTimeZone(job: job, identifier: identifier)

@@ -12,7 +12,7 @@ import HTTPTypes
 // application's default stack binds transactions.
 
 /// Configuration for one asset mount. Mutate inside the closure
-/// `container.assets(at:root:pipelines:_:)` hands you.
+/// `AssetMountRegistration.mount(at:root:pipelines:_:)` hands you.
 public struct AssetMountOptions: Sendable {
     /// Serve this file (relative to the root) for GET/HEAD misses whose
     /// `Accept` prefers HTML — the single-page-app shell. The gate is what

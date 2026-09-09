@@ -168,7 +168,7 @@ public struct OIDCSecurityConfiguration: Sendable {
     }
 
     /// Reads the `security.oidc.*` keys from Flight Config.
-    /// Missing required keys fail here — surfaced at container freeze, so a
+    /// Missing required keys fail here — surfaced at composition, so a
     /// misconfigured app fails at startup, not on its first request.
     public init(configuration: Configuration) throws {
         try self.init(

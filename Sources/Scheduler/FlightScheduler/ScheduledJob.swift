@@ -67,7 +67,7 @@ public enum JobScope: Sendable, Equatable {
     /// Runs a single time per firing, however many servers are running.
     ///
     /// On one server that is simply "it runs". On several it requires a
-    /// ``JobCoordinator``; without one registered the scheduler says so
+    /// ``JobCoordinator``; without one provided the scheduler says so
     /// loudly at startup rather than quietly running the job everywhere.
     case once
     /// Runs on every server, every firing. For work that is per-process by
@@ -98,21 +98,21 @@ public enum OverlapPolicy: Sendable, Equatable {
     case queue
 }
 
-/// One registered scheduled job: its schedule, how it should run, and the
+/// One scheduled job as a value: its schedule, how it should run, and the
 /// work itself.
 ///
 /// Produced by the `@Scheduler` macro from a `@Scheduled` method, and
-/// gathered post-freeze by ``FlightCore/Container/collectScheduledJobs()``.
-/// Registered through the same container as everything else — scheduling is
-/// not a separate system from dependency injection.
+/// gathered from modules as values at composition. Wired the same way as
+/// every other component — scheduling is not a separate system from the rest
+/// of composition.
 public struct ScheduledJobRegistration: Sendable {
     /// `MyJobs.nightlyRollup` — what logs, diagnostics and the actuator show.
     public let name: String
     public let trigger: JobTrigger
     public let scope: JobScope
     public let overlap: OverlapPolicy
-    /// Resolves the component and calls the method. Throwing is expected and
-    /// handled: a failing job is logged and retried at its next firing, not
+    /// Calls the method on the component the graph built. Throwing is expected
+    /// and handled: a failing job is logged and retried at its next firing, not
     /// propagated into the scheduler loop.
     public let run: @Sendable () async throws -> Void
 

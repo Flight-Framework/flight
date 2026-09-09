@@ -6,7 +6,7 @@ response representation, WebSocket and Server-Sent Events, and the
 Phoenix/Bandit relationship, not bring-your-own-framework). Implements the
 flight-web design doc (as revised: §5.2 wraps a maintained low-level
 transport instead of hand-rolling HTTP; §5.6 containment) on top of Flight
-Core's `Container`/`FlightModule`/`Scope` — through exactly one channel,
+Core's `FlightModule` composition — through exactly one channel,
 `FlightModule`, like every other Flight package.
 
 ## What's here
@@ -91,13 +91,15 @@ Transport settings come from the same `flight.yaml` everything else uses:
 
 ### Middleware lanes
 
-A *lane* is the whole stack for the routes that name it. `container.pipeline
-{ }` declares the default lane; the named form declares another, and a route,
-controller or asset mount opts in with `pipelines:`:
+A *lane* is the whole stack for the routes that name it. A module declares the
+default lane as a value — `MiddlewareRegistration.lane(.default, [...])` — the
+named form declares another, and a route, controller or asset mount opts in
+with `pipelines:`:
 
 ```swift
-container.pipeline("assets") { RequestLogging.self }
-container.pipeline("admin") { RequireAdmin.self }
+// A module holds lane declarations as values; the build plugin finds them.
+let assetsLane = MiddlewareRegistration.lane("assets", [RequestLogging()])
+let adminLane  = MiddlewareRegistration.lane("admin",  [RequireAdmin()])
 ```
 
 ```swift
@@ -108,7 +110,7 @@ struct AdminController { … }
 Naming a lane alone means *only* that lane runs, which is how a static-asset
 route avoids paying for transaction binding and authentication it can never
 use. Concatenate with `.default` to get the usual behaviour plus extras.
-An empty block still declares its lane. Referencing a lane nobody declared
+An empty middleware list still declares the lane. Referencing a lane nobody declared
 fails when dispatch is built — at bootstrap, naming the route and the lane,
 never as a 500.
 
@@ -201,7 +203,7 @@ conditional and range rules — `If-None-Match`, `If-Modified-Since`,
 `fstat`s the descriptor, which closes the stat-vs-open TOCTOU at the type
 level, and reads with `pread` off the cooperative pool.
 
-`container.assets(at:root:pipelines:)` mounts a directory: content hashing,
+`AssetMountRegistration.mount(at:root:pipelines:)` mounts a directory: content hashing,
 `Accept-Encoding` negotiation against precompressed siblings, per-pattern
 cache headers, an SPA fallback, and path containment that resolves before it
 compares.
@@ -237,7 +239,7 @@ Errors default to RFC 9457 `application/problem+json`:
 ```
 
 `format: simple` keeps the older `{"status", "error"}` shape for clients that
-already parse it. For anything else, register your own `WebCoders` — its
+already parse it. For anything else, provide your own `WebCoders` — its
 `renderError` is a closure, so an error body need not be JSON at all:
 
 ```swift
@@ -247,7 +249,7 @@ var coders = WebCoders.default
 coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
 ```
 
-An application that registers its own keeps it; Flight only fills in the gap.
+An application that provides its own keeps it; Flight only fills in the gap.
 A misspelled `web.*` value fails at startup naming the key, not on the first
 request that happens to encode something.
 
@@ -363,16 +365,22 @@ Recorded here the way Core records its spec deviations in SPIKE-FINDINGS:
    `RequestContext` mutually recursive). `UpgradeResponse` pairs the handler
    with a router-built `run` closure that has the context captured; the
    transport still sees neither routing nor contexts.
-2. **Scope-per-request is created directly, not via `Container.withScope`.**
-   `withScope`'s lifetime is its body, but streaming bodies and upgraded
-   connections legitimately outlive the dispatch call. The per-request
-   `Scope` ends when the request's last reference (context, stream, or
-   connection handler) is released — same cleanup, no closed-scope trap
-   mid-SSE.
-3. **`RequestContext` gains `resolve(_:qualifier:)`** (backed by a private
-   container reference). A `Scope` is only usable through
-   `Container.resolve(_:in:)`; without this the doc's `scope` field would be
-   inert for handlers. Purely additive — the doc's fields are unchanged.
+2. **Per-request state rides `RequestContext`, not a per-request scope.** The
+   design doc scoped per-request state to a `Container` scope opened with
+   `Container.withScope`, whose lifetime is its body — but streaming bodies and
+   upgraded connections legitimately outlive the dispatch call. The composition
+   migration removed the container and its scopes: per-request state is now a
+   typed value on `RequestContext` (`identity`, and whatever a middleware
+   attaches), which the request's last reference — context, stream, or
+   connection handler — keeps alive exactly as long as it is needed, with no
+   closed-scope trap mid-SSE.
+3. **Per-request values live on `RequestContext` directly, not behind a
+   resolver.** The design doc gave `RequestContext` a `resolve(_:qualifier:)`
+   backed by the per-request container scope. With the container gone there is
+   nothing to resolve against: components take what they need through `@Inject`
+   at composition, and a handler reads per-request values such as `identity`
+   straight off the typed `RequestContext`. The doc's `scope` field has no
+   analogue and needs none.
 4. **`runMiddleware` returning early on `.respond`** means the terminal
    routing middleware *returns* the matched handler's response (and also
    records it in `context.response`); a chain that completes without
@@ -383,11 +391,12 @@ Recorded here the way Core records its spec deviations in SPIKE-FINDINGS:
    contract is version-shaped — h2 lands inside the transport without
    touching the seam.
 6. **Middleware registration mechanism.** The doc specifies the chain (§3)
-   but not how apps contribute to it. `container.pipeline { }` declares a
-   lane of `Middleware` types, composed once and ordered by registration
-   sequence — which already reflects both module order and the order within
-   a block. `registerMiddleware(_:order:_:)` was the first spelling and is
-   gone with the container.
+   but not how apps contribute to it. A module declares a lane as a value —
+   `MiddlewareRegistration.lane(_:_:)`, an ordered list of `Middleware`
+   instances the build plugin scans — composed once; the list gives the order
+   within a lane, and module order composes contributions across modules.
+   `registerMiddleware(_:order:_:)` was the first spelling and is gone with the
+   container.
 7. **WebSocket ping/pong frames are transport-internal on the default
    transport.** HummingbirdCore auto-answers pings and does not surface
    them, so `WebSocketFrame.ping`/`.pong` are never *delivered* through

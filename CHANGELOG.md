@@ -4,6 +4,78 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-09-09
+
+Finishes the container migration's cleanup: the last container-era references
+are gone from the code and the documentation, and the deprecated middleware and
+hand-registration surfaces are removed.
+
+### Breaking
+
+- **Removed the deprecated closure-middleware surface**: `ClosureMiddleware`,
+  `ClosureNext`, `MiddlewareResult`, `middleware(from:)`, and the
+  `MiddlewarePipelineBuilder` result builder. Conform a type to `Middleware`
+  and declare lanes with `MiddlewareRegistration.lane(_:_:)`.
+
+- **The build-time route manifest no longer tracks imperative registration.**
+  `FlightRouteManifest` drops its `mounts` and `handRegisteredRoutes` arrays,
+  and the build plugin no longer scans `registerRoute` / `registerChannelSocket`
+  / `assets` / `uploads` calls. Routes are declared with `@Controller` and
+  `@WebSocketRoute`; static-file and upload mounts are the values
+  `AssetMountRegistration.mount(_:)` and `RouteRegistration.uploads(_:)`, which
+  the composition root gathers like any other route. Hand-registering a route
+  is the exception, not a first-class path.
+
+### Changed
+
+- Middleware lanes are scanned from their value form: the build plugin
+  recognizes `MiddlewareRegistration.lane(_:_:)` — it previously matched the
+  removed `container.pipeline` form — so the lane manifest and the
+  undeclared-lane build warning work with the current API. `UndeclaredLaneError`
+  and the build warning name `MiddlewareRegistration.lane` too.
+
+### Documentation
+
+- Completed the container-era documentation sweep the 0.16.0 release began. The
+  `FlightCore` DocC landing page (which still documented `Container` and
+  `freeze()`), the compile-time-wiring guide, doc comments across every package,
+  the generator's own diagnostics, and the `Docs/*.md` guides now describe
+  compile-time composition rather than the removed runtime container.
+
+## [0.16.0] - 2026-09-09
+
+The container is gone. The compile-time composition the 0.15.0 release built
+alongside the runtime container is now the whole model, end to end.
+
+### Breaking
+
+- **The runtime `Container` is removed**, along with `ContainerStorage`,
+  `TestContainer`, a module's `configure(_ container:)`, `container.register` /
+  `container.resolve`, `freeze()`, and the generated `flightRegisterAll`.
+  Modules are values: a `FlightModule` holds what it provides as stored
+  properties and takes what it needs through its initializer. A generated
+  composition root — `flightComposeModules`, `FlightGraph`, `flightRoutes`,
+  `flightScheduledJobs`, `flightComponentDescriptors` — builds and wires every
+  component once, at composition, by type. Start with
+  `Flight.run(configuration:modules:composedBy: flightComposeModules)`; `flight
+  new` writes that call.
+
+- **The stereotype macros emit value forms only.** `@Component`, `@Service`,
+  `@Repository`, `@Controller`, `@Middleware`, and `@Scheduler` expand to a
+  parameterized initializer (plus per-route factories for `@Controller` and a
+  jobs factory for `@Scheduler`). The container-era `init(_flight:)`, the
+  `_flightRegister` thunk, and the `_FlightRegistrable` conformance are gone.
+
+- **`TestContainer` is removed.** Tests build what they exercise directly —
+  controllers and services constructed with their dependencies passed in, a
+  value `TestClient`, and route factories.
+
+### Changed
+
+- Module health is reported through `ModuleHealthRegistry`. Per-request web
+  state — the coders and the error mapper — rides `WebRuntime` on
+  `RequestContext`.
+
 ## [0.15.0] - 2026-09-08
 
 The composition migration, as far as it goes without breaking how an

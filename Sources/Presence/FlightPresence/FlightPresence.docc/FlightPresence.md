@@ -25,13 +25,13 @@ makes the distributed case tractable at all.
 ## The failure-detection mode decides what you actually get
 
 This is the part worth reading before deploying. ``PresenceMode`` is derived
-from what is registered, and it is logged loudly at startup because the three
-modes have genuinely different guarantees:
+from what the deployment provides, and it is logged loudly at startup because
+the three modes have genuinely different guarantees:
 
 - ``PresenceMode/singleNode`` — no distributed adapter. Node failure is not a
   distributed concern because there is only one. Exact.
 - ``PresenceMode/membership`` — a ``PresenceMembershipMonitor`` is
-  registered. A dead node's entries are removed promptly and correctly,
+  provided. A dead node's entries are removed promptly and correctly,
   because something is actually detecting the death. **The intended
   multi-node mode.**
 - ``PresenceMode/heartbeatExpiry`` — a fan-out-only adapter (Valkey-style)

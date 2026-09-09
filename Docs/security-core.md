@@ -243,7 +243,7 @@ For every request bearing `Authorization: Bearer <jwt>`:
 ## Choosing how tokens are validated
 
 `FlightSecurityModule` wires authentication — the request-scoped principal and
-the `Authentication` middleware — but registers **no validator**. How tokens
+the `Authentication` middleware — but provides **no validator**. How tokens
 are validated is chosen by listing a module:
 
 - **`FlightOIDCModule`** for OIDC/JWT. It builds `OIDCTokenValidator` from
@@ -251,8 +251,8 @@ are validated is chosen by listing a module:
   service, which takes that validator directly. It depends on
   `FlightSecurityModule`, so listing it alone is enough. Because the validator
   is built when the module is, bad `security.oidc.*` configuration fails at
-  composition rather than at `freeze()`.
-- **A module of your own** that registers `(any TokenValidator)`, for session
+  composition — startup, not the first request.
+- **A module of your own** that provides `(any TokenValidator)`, for session
   cookies, API keys, mTLS, HMAC, or anything else:
 
 ```swift
@@ -305,8 +305,8 @@ mechanism keeps the intended semantics with the real APIs:
 task-local bound around `next` therefore encloses the handler, and nothing
 downstream reads the principal after the chain unwinds — `errorResponse` uses
 the coders, the error mapper and the logger, and never touches it. The
-holder is kept for now because it is what ships; the composition migration
-replaces it with a typed value on `RequestContext`.
+composition migration replaced the holder with the typed `RequestContext.identity`
+value described above.
 
 ## Non-goals
 

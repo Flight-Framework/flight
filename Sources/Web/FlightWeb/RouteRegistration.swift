@@ -17,7 +17,7 @@ public struct RouteRegistration: Sendable {
         /// handed to, so the route table knows it statically — this is what
         /// will let bootstrap refuse a route the active transport cannot
         /// serve (a WebTransport route on an HTTP/1.1-only listener) at
-        /// freeze rather than as a runtime error on first use.
+        /// composition rather than as a runtime error on first use.
         case upgrade(UpgradeKind)
 
         /// Whether this is any upgrade kind — the question the router and
@@ -143,15 +143,6 @@ public struct MiddlewareRegistration: Sendable {
         ) { context, next in
             try await middleware.handle(context, next: next)
         }
-    }
-}
-
-/// The order a lane declares — outermost first, one entry
-/// per `@Middleware` type.
-@resultBuilder
-public enum MiddlewarePipelineBuilder {
-    public static func buildBlock(_ types: any Middleware.Type...) -> [any Middleware.Type] {
-        types
     }
 }
 

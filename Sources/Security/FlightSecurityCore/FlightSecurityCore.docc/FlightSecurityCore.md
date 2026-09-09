@@ -25,7 +25,7 @@ security:
 
 Everything else — the JWKS endpoint, cache TTLs, the algorithm allowlist —
 has a default; ``OIDCSecurityConfiguration`` is the whole list. Missing
-`issuer` or `audience` fails at container freeze, not at the first request.
+`issuer` or `audience` fails at composition, not at the first request.
 
 JWTKit owns the cryptographic core — signature verification, JWS structure,
 JWK parsing. This module owns the orchestration around it: key fetching and
@@ -36,7 +36,7 @@ leeway, and `sub` is required.
 ## When your provider is not OIDC
 
 ``TokenValidator`` is one method — token in, ``Principal`` out. Conform to it
-and register your type instead, listing ``FlightSecurityModule`` on its own
+and provide your type instead, listing ``FlightSecurityModule`` on its own
 rather than ``FlightOIDCModule``:
 
 ```swift

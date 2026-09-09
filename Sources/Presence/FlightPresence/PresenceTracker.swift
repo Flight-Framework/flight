@@ -8,13 +8,13 @@ import class Foundation.JSONEncoder
 import Logging
 
 /// Which failure-detection mode this deployment runs in —
-/// decided once at freeze from what the container holds, logged loudly at
-/// startup so nobody discovers the distinction from a bug report.
+/// decided once at composition from what the deployment provides, logged
+/// loudly at startup so nobody discovers the distinction from a bug report.
 public enum PresenceMode: Sendable, Equatable, CustomStringConvertible {
     /// No distributed PubSub adapter: one node, node failure is not a
     /// distributed concern, no gossip at all.
     case singleNode
-    /// A `PresenceMembershipMonitor` is registered (the SWIM adapter,
+    /// A `PresenceMembershipMonitor` is provided (the SWIM adapter,
     ///): prompt, correct removal of a dead node's entries. The
     /// intended multi-node deployment mode.
     case membership

@@ -5,7 +5,7 @@ resolved at build time.
 
 ## Overview
 
-A route in Flight is a method on a type the container knows how to build, not
+A route in Flight is a method on a type the composition root knows how to build, not
 a closure captured on an application object:
 
 ```swift
@@ -26,8 +26,8 @@ final class OrderController: Sendable {
 That difference is the point of the module. A controller is an ordinary
 `Sendable` type with injected dependencies, so it can be constructed in a
 test and called directly — no server, no port, no request loop. The routing
-table is assembled by the same build plugin that wires the container, so a
-handler whose dependencies are unregistered is a build error rather than a
+table is assembled by the same build plugin that generates the composition root, so a
+handler whose dependencies aren't provided is a build error rather than a
 404 at 3am.
 
 ## Requests and responses
@@ -95,10 +95,10 @@ A ``PipelineLane`` names an alternative stack that routes opt into with
 paying for authentication it can never use. Naming a lane alone runs *only*
 that lane; `[.default, "admin"]` concatenates.
 
-The older `registerMiddleware(_:order:)` closure API and its
-``MiddlewareResult`` return enum are gone with the container; conform a type to
-``Middleware`` and hand it to `MiddlewareRegistration.lane(_:_:)`, returning
-early from `handle` rather than a result enum.
+The older `registerMiddleware(_:order:)` closure API and its result-enum
+return type are gone with the container; conform a type to ``Middleware`` and
+hand it to `MiddlewareRegistration.lane(_:_:)`, returning early from `handle`
+rather than a result enum.
 
 ## WebSockets and streaming
 
@@ -196,9 +196,7 @@ whole application without binding a port.
 - ``Middleware``
 - ``Next``
 - ``PipelineLane``
-- ``MiddlewarePipelineBuilder``
 - ``MiddlewareRegistration``
-- ``MiddlewareResult``
 
 ### Routing internals
 

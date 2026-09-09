@@ -160,4 +160,4 @@ drivers carry a `scripts/test.sh` that starts throwaway servers, runs the
 suite and cleans up.
 
 An application built on Flight should not need one: depend on a protocol,
-register a fake, and let the driver's own package prove the driver works.
+pass a fake, and let the driver's own package prove the driver works.

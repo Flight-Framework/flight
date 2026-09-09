@@ -151,7 +151,8 @@ struct JobsController {
 ```
 
 Deliberately not an actuator endpoint: the actuator collects what it shows
-through generic container introspection, and adding a scheduler endpoint
+through Core's generic introspection — the scanned component list and module
+health — and adding a scheduler endpoint
 there would make every app that wants `/actuator/health` link the scheduler.
 
 ## Testing without sleeping

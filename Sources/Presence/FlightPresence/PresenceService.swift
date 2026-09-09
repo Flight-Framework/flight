@@ -7,7 +7,7 @@ import ServiceLifecycle
 /// Presence's long-running half: consumes the gossip topic,
 /// runs the periodic re-announce (heartbeats in degraded mode, anti-entropy
 /// in membership mode), the liveness sweep, and — in membership mode — the
-/// monitor's event stream. Registered in the app `ServiceGroup` by
+/// monitor's event stream. Added to the app `ServiceGroup` by
 /// `FlightPresenceModule`.
 ///
 /// Startup logs which failure-detection mode is active, loudly.

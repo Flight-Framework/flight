@@ -52,8 +52,8 @@ public struct LocalJobCoordinator: JobCoordinator {
     public var describedKind: String { "single-process" }
 }
 
-/// How the scheduler is coordinating, resolved from what is registered and
-/// logged loudly at startup.
+/// How the scheduler is coordinating, derived from the coordinator it was
+/// given and logged loudly at startup.
 ///
 /// The same discipline as `PresenceMode`: the mode is derived rather than
 /// configured, and it is reported at boot because the failure it guards
@@ -61,10 +61,10 @@ public struct LocalJobCoordinator: JobCoordinator {
 /// actually running every job on every server finds out from its data, which
 /// is the worst possible place.
 public enum SchedulerMode: Sendable, Equatable {
-    /// No distributed coordinator registered. Correct on one server; on more
+    /// No distributed coordinator provided. Correct on one server; on more
     /// than one, every `.once` job runs on every server.
     case singleProcess
-    /// A ``JobCoordinator`` is registered, named here for the log line.
+    /// A ``JobCoordinator`` is provided, named here for the log line.
     case coordinated(String)
 
     public var description: String {

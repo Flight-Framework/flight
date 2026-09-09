@@ -113,7 +113,7 @@ extension Response {
     /// `encoder` defaults to ``WebCoders/default``'s. A handler that wants the
     /// application's configured encoder should return the value itself and let
     /// `ResponseEncodable` do it, or pass `context.coders.jsonEncoder` here —
-    /// this is a static, so it cannot reach the container on its own.
+    /// this is a static, so it has no composition context to read the configured encoder from.
     public static func json(
         _ value: some Encodable,
         status: HTTPResponse.Status = .ok,

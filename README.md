@@ -13,7 +13,7 @@ and `FlightPresence`; a service behind an existing identity provider adds
 
 | Product | What it is |
 | --- | --- |
-| `FlightCore` | Container, modules, registration, application lifecycle. Everything else builds on this. |
+| `FlightCore` | Modules, compile-time composition, application lifecycle. Everything else builds on this. |
 | `FlightConfig` / `FlightConfigCore` | Layered configuration over swift-configuration; `FlightConfigCore` is the dependency-free parser and vocabulary. |
 | `FlightWeb` | Routing, middleware, `RequestContext`, `Response`, WebSocket and SSE, and the `ServerTransport` seam. |
 | `FlightTransport` | The default transport, wrapping HummingbirdCore. A peer of any third-party transport — the only target that knows what the transport wraps. |
@@ -64,7 +64,7 @@ Both are opt-in. Name what you want:
 .package(url: "https://github.com/Flight-Framework/flight.git",
          from: "0.14.0", traits: ["Security"])
 
-// Just the container and lifecycle — 7 resolved packages instead of 28.
+// Just composition and lifecycle — 7 resolved packages instead of 28.
 .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0")
 ```
 

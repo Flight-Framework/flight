@@ -100,8 +100,8 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// the macro, where the route scanner already lives, rather than being
     /// reimplemented in the generator and drifting from it.
     ///
-    /// `make` takes the context so a constructor can use request values; the
-    /// container path ignores it.
+    /// `make` takes the context so a constructor can use request values; one that
+    /// needs none simply ignores it.
     private static func routeFactory(
         for route: ScannedRoute, path: String, pipelines: String?, index: Int
     ) -> String {

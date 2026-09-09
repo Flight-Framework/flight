@@ -18,7 +18,7 @@ public struct TopicPattern: Sendable, Equatable, CustomStringConvertible {
 
     /// Parses a pattern, throwing `ChannelsError.invalidTopicPattern` for
     /// an empty pattern or a `*` anywhere but the end — surfaced at
-    /// bootstrap (`freeze()`), never at join time.
+    /// composition, never at join time.
     public init(parsing pattern: String) throws {
         guard !pattern.isEmpty else {
             throw ChannelsError.invalidTopicPattern(pattern, "pattern must not be empty")
@@ -54,9 +54,8 @@ public struct TopicPattern: Sendable, Equatable, CustomStringConvertible {
     }
 }
 
-/// Configuration and wiring failures. All of these surface at bootstrap
-/// (module `configure` / container `freeze()`), failing the app before it
-/// serves — never mid-connection.
+/// Configuration and wiring failures. All of these surface at composition,
+/// failing the app before it serves — never mid-connection.
 public enum ChannelsError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidTopicPattern(String, String)
     case duplicateTopicPattern(String)

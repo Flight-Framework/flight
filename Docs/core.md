@@ -3,8 +3,9 @@
 Dependency injection and application bootstrap for Swift servers.
 
 Components declare themselves with an attribute. A build plugin wires them
-together and checks the graph at compile time. Bootstrap builds the container
-once, freezes it, and runs your services under a `ServiceGroup`.
+together and checks the graph at compile time. Bootstrap builds every module
+and component once, at composition, and runs your services under a
+`ServiceGroup`.
 
 ```swift
 @Service
@@ -51,26 +52,29 @@ exit.
 
 ## Two phases, and why it matters
 
-A container is mutable while it registers and immutable afterwards.
+The graph is built all at once, then never changes.
 
-**Registration.** Modules run in dependency order and register what they
-provide. Single-threaded, by construction — no concurrency exists yet.
+**Composition.** At startup the generated composition root builds every module
+and component once, in dependency order, and wires what each provides into
+whatever injects it — by type. Single-threaded, by construction — no
+concurrency exists yet.
 
-**Frozen.** `freeze()` eagerly constructs every singleton, then seals the
-container. From that point resolution is a dictionary read with no lock, safe
-from any thread, and a factory that was going to fail has already failed —
-during startup, where you can see it.
+**Running.** From that point the graph is immutable, so reaching a dependency
+is a stored-property read with no lock, safe from any thread, and a
+constructor that was going to fail has already failed — during startup, where
+you can see it.
 
-That split is what makes resolution cheap enough to do per request, and it is
-why a registration after `freeze()` is a programmer error rather than a
-supported operation.
+Building the whole graph once, up front, is what lets a request reach its
+dependencies with no lookup at all, and it is why the graph is fixed after
+composition rather than something a running application adds to.
 
 ## Components are `Sendable`
 
-`register` and `resolve` both require it. A dependency container that vends a
-mutable, non-`Sendable` singleton to two actors has handed them a data race
-with no diagnostic — the container is exactly the place where shared state
-gets shared, so the requirement belongs here.
+A singleton is built once and shared for the whole application, reachable from
+every thread that serves a request. A mutable, non-`Sendable` component shared
+between two actors would be a data race with no diagnostic — composition is
+exactly the place where shared state gets shared, so the requirement belongs
+here.
 
 ```swift
 @Service final class UserService: Sendable { }        // ✅

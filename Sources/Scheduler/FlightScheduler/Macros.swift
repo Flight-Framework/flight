@@ -18,9 +18,9 @@ import Foundation
 /// }
 /// ```
 ///
-/// Nothing registers this by hand: the build plugin finds the type, and this
-/// macro registers one job per `@Scheduled` method into the same container
-/// every other component goes through.
+/// Nothing wires this by hand: the build plugin finds the type, and this
+/// macro contributes one job per `@Scheduled` method, composed the same way
+/// every other component is.
 @attached(
     member, names: named(init), named(_flightScheduledJobs))
 public macro Scheduler() =
@@ -85,7 +85,7 @@ public macro Scheduled(
 /// here — an interval firing cannot arrive while the job is running — and
 /// why `onEveryNode: false` cannot be enforced across a cluster: each node
 /// measures from its own last run, so no two ever contend for one firing.
-/// The scheduler says so at startup if a coordinator is registered.
+/// The scheduler says so at startup if a coordinator is present.
 ///
 /// Use a cron expression instead when the schedule is a wall-clock time —
 /// intervals drift relative to the clock and know nothing about time zones.

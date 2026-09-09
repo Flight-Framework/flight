@@ -5,10 +5,11 @@ import Testing
 /// registering macros the framework actually declares.
 ///
 /// `@Scheduler` shipped in 0.2.0 with a working macro, a working runtime, and
-/// no entry in that list — so every `@Scheduler` type generated a
-/// `_flightRegister` thunk that nothing ever called, and scheduled jobs
-/// silently never ran. Nothing caught it: the unit tests called
-/// `_flightRegister` by hand, which is precisely the step the bug skipped.
+/// no entry in that list — so the generator never scanned `@Scheduler` types
+/// and scheduled jobs silently never ran. This is the general guard against
+/// that: every macro that expands to a composed component — i.e. one whose
+/// declaration attaches a member initializer — must be a name the generator
+/// scans for.
 ///
 /// Reading the sources rather than restating the list is the point. A test
 /// that hard-coded the expected names would have been written from the same
@@ -28,20 +29,43 @@ struct RegistrableAttributesTests {
         return root
     }
 
-    /// Macros whose expansion emits a `_flightRegister` thunk — i.e. every
-    /// macro that makes a type something the generator must find.
+    /// Macros whose expansion attaches a member initializer — every macro that
+    /// makes a type the generator must scan and build. The peer macros
+    /// (`@Inject`, `@ConfigValue`, `@Secret`, the route attributes,
+    /// `@Scheduled`) attach no initializer and are not scanned components.
     private func registeringMacros() throws -> Set<String> {
-        let sources = packageRootSwiftFiles()
         var found: Set<String> = []
-        for file in sources where file.path.contains("MacrosImpl") {
-            let text = try String(contentsOf: file, encoding: .utf8)
-            guard text.contains("_flightRegister") else { continue }
-            // `public struct ControllerMacro: MemberMacro` → "Controller"
-            for match in text.matchingTypeNames(suffix: "Macro") {
-                found.insert(match)
+        for file in packageRootSwiftFiles() {
+            let lines = try String(contentsOf: file, encoding: .utf8)
+                .components(separatedBy: "\n")
+            for (index, line) in lines.enumerated() {
+                guard let name = macroName(declaredOn: line) else { continue }
+                // The attribute/doc block above the declaration, back to the
+                // blank line that separates it from whatever precedes it.
+                var block: [String] = []
+                var i = index - 1
+                while i >= 0, !lines[i].trimmingCharacters(in: .whitespaces).isEmpty {
+                    block.append(lines[i])
+                    i -= 1
+                }
+                if block.joined(separator: "\n").range(
+                    of: #"@attached\(\s*member[\s\S]*?named\(init\)"#,
+                    options: .regularExpression) != nil
+                {
+                    found.insert(name)
+                }
             }
         }
         return found
+    }
+
+    /// `public macro Component(` → "Component".
+    private func macroName(declaredOn line: String) -> String? {
+        guard
+            let range = line.range(
+                of: #"public macro ([A-Z][A-Za-z0-9_]*)"#, options: .regularExpression)
+        else { return nil }
+        return String(line[range].dropFirst("public macro ".count))
     }
 
     private func packageRootSwiftFiles() -> [URL] {
@@ -81,8 +105,8 @@ struct RegistrableAttributesTests {
         #expect(
             unscanned.isEmpty,
             """
-            \(unscanned.joined(separator: ", ")) generate a _flightRegister thunk that the \
-            build plugin never calls, so types using them are silently never registered. \
+            \(unscanned.joined(separator: ", ")) expand to a composed component but are \
+            not scanned, so types using them are silently left out of composition. \
             Add them to registrableAttributes in flight-registration-gen.
             """)
     }
@@ -92,24 +116,6 @@ struct RegistrableAttributesTests {
         // The specific regression, named, so its absence cannot be argued
         // away as a change in how the general check works.
         #expect(try scannedAttributes().contains("Scheduler"))
-    }
-}
-
-extension String {
-    /// Type names declared in this source with the given suffix, minus the
-    /// suffix: `public struct ControllerMacro:` → `Controller`.
-    func matchingTypeNames(suffix: String) -> [String] {
-        var names: [String] = []
-        for line in split(separator: "\n") {
-            guard line.contains("struct "), line.contains(suffix) else { continue }
-            guard
-                let range = line.range(of: #"struct ([A-Z][A-Za-z0-9_]*)\#(suffix)"#,
-                                       options: .regularExpression)
-            else { continue }
-            let declaration = line[range].dropFirst("struct ".count)
-            names.append(String(declaration.dropLast(suffix.count)))
-        }
-        return names
     }
 }
 

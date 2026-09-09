@@ -78,8 +78,8 @@ public struct ChannelRegistration: Sendable {
 
 /// Maps a join's topic to the channel registration that serves it.
 /// Immutable: built once at composition from the declared registrations and
-/// validated then (duplicate patterns fail startup, before the container is
-/// even frozen).
+/// validated then (duplicate patterns fail startup at composition, before
+/// the socket route serves).
 public struct ChannelRouter: Sendable {
     /// Sorted most-specific-first at construction, so `match` is a linear
     /// scan returning the first hit. Channel tables are small (tens, not

@@ -222,10 +222,9 @@ extension RegistrationMacro {
                 context.diagnoseError(
                     "injected.static",
                     """
-                    Injection is per-instance: the container populates properties in the \
-                    generated initializer, and a static property has no instance to belong \
-                    to. Make it an instance property, or resolve it explicitly where it is \
-                    used.
+                    Injection is per-instance: the generated initializer assigns the \
+                    properties, and a static property has no instance to belong to. Make \
+                    it an instance property, or set it explicitly where it is used.
                     """,
                     at: variable
                 )

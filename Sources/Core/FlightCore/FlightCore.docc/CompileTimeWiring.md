@@ -4,7 +4,7 @@ What the build plugin checks, and what to do when it complains.
 
 ## Overview
 
-A build plugin scans your sources, generates the registration code, and
+A build plugin scans your sources, generates the wiring, and
 checks the graph before anything runs. The point is that the failures a DI
 container is famous for — a component nobody registered, a cycle nobody
 noticed — become build errors.
@@ -44,13 +44,13 @@ final class UserService: Sendable {
 ```
 
 Two conformers is genuine ambiguity, and the plugin declines to guess. Add a
-qualifier, or register the bridge yourself.
+qualifier, or provide it yourself.
 
-## Hand-registered components
+## Dependencies the scan can't see
 
-Not everything is scanned. A component registered inside a module's
-`configure(_:)` — a third-party type, something built from configuration — is
-invisible to a source scanner.
+Not everything is a scanned component. A dependency provided some other way —
+a value a module holds and the composition root wires by type, or something
+supplied from outside the graph — is invisible to a source scanner.
 
 Acknowledge it, and the check stays quiet:
 
@@ -66,20 +66,20 @@ to the program.
 ## Limits worth knowing
 
 **Nested types are not scanned.** A `@Component` declared inside another type
-is skipped silently, and will fail at startup with `notRegistered`. Declare
+is skipped silently, so nothing that depends on it will be wired. Declare
 components at file scope.
 
 **Matching is by base name.** Two modules each with a `UserService` look like
-one type to the checker. Registration itself is unambiguous — it keys on type
+one type to the checker. Composition itself is unambiguous — it keys on type
 identity — so this affects diagnostic quality, not correctness.
 
 **Xcode does not run it.** The plugin is a `BuildToolPlugin`, which SwiftPM
-runs and Xcode projects do not. An Xcode-only target needs its registrations
+runs and Xcode projects do not. An Xcode-only target needs its wiring
 written by hand.
 
 ## When the plugin is wrong
 
 It is a checker, not an oracle. If it reports a missing registration for
-something you register by hand, the marker comment is the intended answer —
+something you provide as a value, the marker comment is the intended answer —
 not disabling the plugin. If it reports a cycle you believe is not one, the
 cycle is usually real and mediated by a type you forgot participates.

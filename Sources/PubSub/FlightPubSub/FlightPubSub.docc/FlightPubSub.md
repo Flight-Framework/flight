@@ -6,7 +6,7 @@ configured.
 ## Overview
 
 ``PubSub`` is the whole interface: publish a ``Message`` to a topic,
-subscribe to one. Everything else is which implementation is registered.
+subscribe to one. Everything else is which implementation is composed behind it.
 
 ```swift
 @Inject var pubsub: any PubSub
@@ -36,7 +36,7 @@ paths rather than to run them.
 
 ## Local first, clustered by configuration
 
-A single-node application registers ``LocalPubSub`` and never learns that
+A single-node application uses ``LocalPubSub`` and never learns that
 clustering exists. Adding an adapter does not change a call site: the same
 `publish` reaches the same subscribers plus the ones on other nodes.
 

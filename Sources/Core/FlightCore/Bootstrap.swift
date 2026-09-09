@@ -53,9 +53,9 @@ public enum BootstrapError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .moduleConfigurationFailed(let module, let underlying):
-            return "Module \(module) failed during configure(_:): \(underlying)"
+            return "Module \(module) failed to build during composition: \(underlying)"
         case .singletonConstructionFailed(let underlying):
-            return "Eager singleton construction failed at freeze(): \(underlying)"
+            return "Eager singleton construction failed at composition: \(underlying)"
         case .duplicateRegistration(let key):
             return """
                 Duplicate registration for \(key). Two registrations claim the same type \
@@ -78,8 +78,8 @@ public enum BootstrapError: Error, CustomStringConvertible {
     }
 }
 
-/// Steps 4–8 of the bootstrap sequence: container, module DAG, serial
-/// registration, freeze, service collection. Steps 1–3 (environment, YAML,
+/// Steps 4–8 of the bootstrap sequence: modules composed eagerly in dependency
+/// order, health seeding, service collection. Steps 1–3 (environment, YAML,
 /// Configuration assembly) belong to Flight Config; this function receives
 /// their output. Config must be fully resolved before modules configure —
 /// that ordering is enforced here by the signature itself.

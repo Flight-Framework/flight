@@ -16,8 +16,8 @@ import class Foundation.ProcessInfo
 /// What gets registered is decided by ``ActuatorExposure``, resolved at
 /// configuration time and never re-checked per request:
 ///
-/// - ``ActuatorExposure/disabled`` — `configure` returns before touching the
-///   container, so nothing exists in the route table to probe.
+/// - ``ActuatorExposure/disabled`` — the module produces no routes, so
+///   nothing exists in the route table to probe.
 /// - ``ActuatorExposure/healthOnly`` — the default anywhere that has not
 ///   declared itself a development environment, including a deployment that
 ///   set nothing at all. The health routes are registered and the dashboard
@@ -37,10 +37,11 @@ public struct ActuatorModule: FlightModule {
 
     /// Holds the controller the routes serve from.
     ///
-    /// The routes are values, built when the module is; the controller needs
-    /// the container it introspects, which only exists at `configure`. So the
-    /// routes close over this box and `configure` fills it — which is what
-    /// replaced `context.resolve(ActuatorController.self)` in every handler.
+    /// The routes are values, built when the module is; the controller they
+    /// serve from is built a step later in the same init, once the components
+    /// and health it reports are in hand. So the routes close over this box
+    /// and `installController` fills it — which is what replaced
+    /// `context.resolve(ActuatorController.self)` in every handler.
     final class ControllerBox: @unchecked Sendable {
         private let storage = Mutex<ActuatorController?>(nil)
         func set(_ controller: ActuatorController) { storage.withLock { $0 = controller } }
@@ -168,8 +169,8 @@ public struct ActuatorModule: FlightModule {
     /// Resolved once, when the module is built, so `routes` can be a stored
     /// value — and kept as a `Result` because `FlightModule` requires a
     /// non-throwing `init()`. A malformed `FLIGHT_ACTUATOR_EXPOSURE` still
-    /// fails bootstrap: `configure` rethrows it below, and nothing serves
-    /// before every module has configured.
+    /// fails bootstrap: composition surfaces it, and nothing serves before
+    /// every module is built.
     private var resolvedExposure: Result<ActuatorExposure, any Error> {
         Result {
             try exposureOverride
@@ -186,7 +187,7 @@ public struct ActuatorModule: FlightModule {
     /// `registerRoute` calls. As values the gate is an ordinary `if`, and the
     /// composition root collects them like any other contribution.
     ///
-    /// Each handler resolves the controller from the request's context: a
+    /// Each handler reads the controller from the box the routes close over: a
     /// lock-free singleton lookup, not reconstruction.
     public let routes: [RouteRegistration]
 

@@ -95,7 +95,7 @@ public struct FlightPubSubModule: FlightModule {
     }
 
     /// Projects what this module already holds. Nothing is constructed here:
-    /// the components exist before `configure` runs, which is the difference
+    /// the components already exist, built at composition — the difference
     /// between a module that registers and one that owns.
     /// The relay, when clustered. It belongs here rather than to the adapter
     /// module because this is what has both halves — the adapter to drain and

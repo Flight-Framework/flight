@@ -4,15 +4,15 @@ import FlightPubSub
 import FlightWeb
 import HTTPTypes
 
-/// Registers Channels with the container. Three components, no service —
+/// Provides Channels as values. Three components, no service —
 /// the socket-owning handler's lifetime is per connection, driven by the
 /// upgrade hook, not a `ServiceGroup` member:
 ///
 /// - `ChannelsConfiguration` — heartbeat settings, read from the app
 ///   configuration once.
 /// - `ChannelRouter` — built at composition from every `ChannelRegistration`
-///   any module declared; duplicate or malformed topic patterns fail before
-///   the container is frozen, let alone before the socket route serves.
+///   any module declared; duplicate or malformed topic patterns fail at
+///   composition, long before the socket route serves.
 /// - `ChannelBroadcaster` — the broadcast seam over `any PubSub`.
 ///
 /// An app module *declares* its channels as a value. It no longer depends on
@@ -88,7 +88,7 @@ public struct FlightChannelsModule: FlightModule {
     }
 
     /// Projects what this module already holds. Nothing is built here, and in
-    /// particular the router is not: it exists before any container does.
+    /// particular the router is not: it was built at composition.
     /// This module's socket endpoint, as a route value.
     ///
     /// Nothing is looked up: the handler is built from what this module

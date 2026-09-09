@@ -4,7 +4,7 @@ import FlightPubSub
 import ServiceLifecycle
 import struct Foundation.UUID
 
-/// Registers Presence with the container. Depends on the
+/// Composes Presence into the application. Depends on the
 /// PubSub and Channels modules; provides:
 ///
 /// - `settings` (`PresenceConfiguration`) — node name and liveness intervals,
@@ -29,7 +29,7 @@ import struct Foundation.UUID
 ///     }
 ///
 /// A struct holding what it provides: the tracker exists as a value before
-/// anything runs, and the service is built from it — nothing is resolved at
+/// anything runs, and the service is built from it — nothing is looked up at
 /// `run()`.
 public struct FlightPresenceModule: FlightModule {
     public static var dependencies: [any FlightModule.Type] {

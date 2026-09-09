@@ -1,8 +1,8 @@
 @_spi(FlightInternal) import FlightChannels
 import FlightPresenceProtocol
 
-/// The application-facing surface. Resolve `(any Presence)`
-/// from the container; call it from channel handlers:
+/// The application-facing surface. Inject `(any Presence)`
+/// and call it from channel handlers:
 ///
 ///     struct RoomChannel: Channel {
 ///         let presence: any Presence

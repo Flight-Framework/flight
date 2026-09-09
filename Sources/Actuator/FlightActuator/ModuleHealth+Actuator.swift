@@ -91,7 +91,7 @@ extension Stereotype {
     /// `@Middleware` and `@Settings` were added to `Stereotype` without
     /// updating this list — a component with a stereotype missing here is not
     /// swept into `.component`, it is silently absent from the dashboard
-    /// entirely, present only to `container.allRegistrations()`. Caught by
+    /// entirely, present only in `flightComponentDescriptors()`. Caught by
     /// booting Flightdeck and looking for "Settings" on its own actuator
     /// page rather than by any test, which is exactly the class of gap this
     /// project's own `GAPS.md` describes: a suite can pass entirely above

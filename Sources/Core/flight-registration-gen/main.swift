@@ -78,10 +78,10 @@ struct ScannedComponent {
     /// `UserRepository(pool: dataSource)`, never `(postgresDataSource:)`.
     let injectPropertyNames: [String]
     /// `@Inject` types whose property carries a `flight:hand-registered`
-    /// marker comment — the author's acknowledgment that the type is
-    /// registered by hand in a module's `configure(_:)` (invisible to this
-    /// scanner, P-2) and the missing-registration warning should not fire.
-    /// Still participates in cycle detection.
+    /// marker comment — the author's acknowledgment that the type is provided
+    /// some other way (a value a module holds, or an external input) and so is
+    /// invisible to this scanner (P-2), and the missing-registration warning
+    /// should not fire. Still participates in cycle detection.
     let acknowledgedTypeNames: [String]
     /// Every dependency, injected and acknowledged alike, in **declaration
     /// order** with its property name.
@@ -103,7 +103,7 @@ struct ScannedComponent {
     /// Without this the scan registers every annotated type in every app that
     /// merely links the package. `Authentication` is the worked example: it
     /// injects `(any TokenValidator)`, which only a security module provides,
-    /// and `freeze()` eagerly builds every singleton — so an app that linked
+    /// and composition eagerly builds every singleton — so an app that linked
     /// FlightSecurityCore without including a security module failed to boot.
     let isModuleRegistered: Bool
     let configValues: [ScannedConfigValue]
@@ -239,58 +239,6 @@ struct ScannedModule {
     let module: String
 }
 
-/// A route family mounted by a framework convenience, or a route registered
-/// by hand.
-///
-/// The three imperative doors are not one problem. `assets(at:root:)` and
-/// `uploads(at:store:)` expand one call into several routes whose paths the
-/// framework derives from a prefix the application supplies — so the *mount*
-/// is the declaration, and it is scannable at the call site even though the
-/// `registerRoute` calls inside the convenience are not.
-/// `registerChannelSocket` is the same shape with one route.
-/// `registerRoute` itself is the raw escape hatch, and the only one where a
-/// path can be genuinely uncomputable.
-struct ScannedMount {
-    enum Kind: String {
-        case assets
-        case uploads
-        case socket
-        /// A direct `registerRoute` — no prefix to derive routes from.
-        case route
-    }
-    let kind: Kind
-    /// The literal prefix or path, when the argument is a plain string
-    /// literal. nil for an interpolated or computed one, which is the case
-    /// the manifest cannot carry and the acknowledgment exists for.
-    let path: String?
-    /// The `pipelines:` argument's source text, verbatim.
-    let pipelinesText: String?
-    /// Carries a `flight:hand-registered` marker — the author's
-    /// acknowledgment that this route is invisible to the scan, the same
-    /// convention `@Inject` uses for a type registered by hand.
-    let isAcknowledged: Bool
-    let declaredIn: String?
-    let module: String
-    let file: String
-    let line: Int
-}
-
-extension ScannedMount.Kind {
-    /// The framework spellings that put a route in the table without an
-    /// attribute. `registerChannelSocket` is a wrapper over `registerRoute`,
-    /// but it is recognized separately because its call site carries a
-    /// literal path where the wrapper's does not.
-    init?(callee name: String) {
-        switch name {
-        case "assets": self = .assets
-        case "uploads": self = .uploads
-        case "registerChannelSocket": self = .socket
-        case "registerRoute": self = .route
-        default: return nil
-        }
-    }
-}
-
 /// Finds `MiddlewareRegistration.lane(_:_:)` calls and `FlightModule` declarations.
 ///
 /// A second pass rather than work folded into `ComponentVisitor`: that one
@@ -308,7 +256,6 @@ final class ModuleVisitor: SyntaxVisitor {
     let converter: SourceLocationConverter
     var lanes: [ScannedPipelineLane] = []
     var modules: [ScannedModule] = []
-    var mounts: [ScannedMount] = []
     /// Module types named in a `modules:` argument — the bootstrap list.
     ///
     /// This is the fact that makes conditional inclusion static. It was
@@ -469,50 +416,6 @@ final class ModuleVisitor: SyntaxVisitor {
     }
 
 
-    /// Records one mount or hand-registered route.
-    private func collectMount(_ kind: ScannedMount.Kind, _ node: FunctionCallExprSyntax) {
-        // `assets(at:)` and `uploads(at:)` label the prefix; the socket and
-        // raw-route forms pass it positionally — second for `registerRoute`,
-        // which leads with the HTTP method.
-        var pathExpression: ExprSyntax?
-        switch kind {
-        case .assets, .uploads:
-            pathExpression = node.arguments.first { $0.label?.text == "at" }?.expression
-        case .socket:
-            pathExpression = node.arguments.first { $0.label == nil }?.expression
-        case .route:
-            let unlabeled = Array(node.arguments.filter { $0.label == nil })
-            pathExpression = unlabeled.count >= 2 ? unlabeled[1].expression : nil
-        }
-
-        var path: String?
-        if let literal = pathExpression?.as(StringLiteralExprSyntax.self) {
-            let segments = literal.segments.compactMap { $0.as(StringSegmentSyntax.self) }
-            // An interpolated path is the uncomputable case, not a path.
-            if segments.count == literal.segments.count {
-                path = segments.map(\.content.text).joined()
-            }
-        } else if pathExpression == nil, kind == .socket {
-            // `registerChannelSocket()` defaults to "/socket".
-            path = "/socket"
-        }
-
-        mounts.append(
-            ScannedMount(
-                kind: kind,
-                path: path,
-                pipelinesText: node.arguments.first { $0.label?.text == "pipelines" }?
-                    .expression.trimmedDescription,
-                isAcknowledged: node.leadingTrivia.description.contains(
-                    "flight:hand-registered"),
-                declaredIn: typeStack.last,
-                module: module,
-                file: file,
-                line: converter.location(for: node.position).line
-            ))
-    }
-
-
     /// Records the module types a `modules:` argument names.
     private func collectBootstrapModules(_ node: FunctionCallExprSyntax) {
         guard let argument = node.arguments.first(where: { $0.label?.text == "modules" }),
@@ -538,15 +441,6 @@ final class ModuleVisitor: SyntaxVisitor {
         guard let callee = node.calledExpression.as(MemberAccessExprSyntax.self) else {
             return .visitChildren
         }
-        // Mounts and hand-registered routes: the three imperative doors, plus
-        // the raw one. Recognized by method name, like the lane declaration
-        // below — a build tool matches source text, and these are the
-        // framework's own spellings.
-        if let kind = ScannedMount.Kind(callee: callee.declName.baseName.text) {
-            collectMount(kind, node)
-            return .visitChildren
-        }
-
         // A lane declaration: `MiddlewareRegistration.lane(name, [A(), B()])`.
         // Matched by method name and shape — a name, then an array of
         // middleware instances — like the framework spellings above. (The
@@ -945,7 +839,6 @@ var routes: [ScannedControllerRoute] = []
 var lanes: [ScannedPipelineLane] = []
 var moduleGraph: [ScannedModule] = []
 var bootstrapModules: [String] = []
-var mounts: [ScannedMount] = []
 var extensionConformances: [(typeName: String, protocols: [String])] = []
 for module in manifest.modules {
     for file in module.files {
@@ -1000,7 +893,6 @@ for module in manifest.modules {
             if module.name == manifest.targetModuleName {
                 bootstrapModules.append(contentsOf: moduleScan.bootstrapModules)
             }
-            mounts.append(contentsOf: moduleScan.mounts)
         }
     }
 }
@@ -1053,9 +945,9 @@ if !extensionConformances.isEmpty {
 // produce registrations — nobody autowires `(any Sendable)`.
 //
 // A `// flight:hand-registered` marker on the demanding property suppresses
-// synthesis: it is the author's statement that the key is populated by hand
-// in a configure(_:) body this scanner cannot see (P-2), and a synthesized
-// duplicate would trap at registration. Ambiguity (multiple scanned
+// synthesis: it is the author's statement that the key is supplied some other
+// way this scanner cannot see (P-2), and a synthesized duplicate would collide
+// at composition. Ambiguity (multiple scanned
 // conformers) also synthesizes nothing — warning, not error, because a hand
 // bridge may already resolve it invisibly; guessing a winner silently would
 // be worse than asking.
@@ -1157,7 +1049,7 @@ func synthesizeBridges() -> [SynthesizedBridge] {
         // Module-registered types are not bridge candidates: a bridge
         // resolving one asserts it exists, and whether it exists is exactly
         // the runtime question its module answers. Bridging to it would
-        // reintroduce the eager-freeze failure the marker exists to prevent.
+        // reintroduce the eager-construction failure the marker exists to prevent.
         let conformers = components.filter { component in
             !component.isModuleRegistered
                 && component.conformanceNames.contains { baseName($0) == base }
@@ -1171,7 +1063,7 @@ func synthesizeBridges() -> [SynthesizedBridge] {
         default:
             emit(
                 "warning",
-                "@Inject type '(any \(demand.protocolName))' in \(demand.demandedBy.typeName) has \(conformers.count) scanned conformers (\(conformers.map(\.typeName).sorted().joined(separator: ", "))) — no bridge was generated. Register the existential by hand in a module's configure(_:) and acknowledge the property with a `// flight:hand-registered` comment.",
+                "@Inject type '(any \(demand.protocolName))' in \(demand.demandedBy.typeName) has \(conformers.count) scanned conformers (\(conformers.map(\.typeName).sorted().joined(separator: ", "))) — no bridge was generated. Provide it from a module and acknowledge the property with a `// flight:hand-registered` comment.",
                 file: demand.demandedBy.file, line: demand.demandedBy.line
             )
         }
@@ -1183,12 +1075,12 @@ let bridgedProtocolBaseNames = Set(bridges.map { baseName($0.protocolName) })
 
 // MARK: - Validation
 
-// Missing-registration checks are *warnings*: components registered by hand inside
-// a module's configure(_:) are invisible to a source scanner, so an unknown
+// Missing-registration checks are *warnings*: a dependency a module provides as a
+// value, or one supplied from outside the graph, is invisible to the scan, so an unknown
 // type name is suspicious, not proven wrong. Cycles among scanned components
 // are errors: those are fully decidable from what the scanner sees.
 let knownTypeNames = Set(components.map(\.typeName))
-// Types the container answers for without anyone registering them. A demand
+// Types available without anyone providing them. A demand
 // for one of these is satisfied at runtime no matter what the scanner sees,
 // so warning about it would be a false positive on correct code — and a
 // false positive that appears on every build is how a useful warning gets
@@ -1238,7 +1130,7 @@ for component in components {
         if !known {
             emit(
                 "warning",
-                "@Inject type '\(base)' in \(component.typeName) is not a scanned @Component. If it is hand-registered in a module's configure(_:), acknowledge it with a `// flight:hand-registered` comment on the property; otherwise resolution will fail at startup.",
+                "@Inject type '\(base)' in \(component.typeName) is not a scanned @Component. If it is provided some other way — a value a module holds, or an external input — acknowledge it with a `// flight:hand-registered` comment on the property; otherwise composition will fail at startup.",
                 file: component.file, line: component.line
             )
         }
@@ -1281,19 +1173,17 @@ func detectCycles() {
 }
 detectCycles()
 
-// MARK: - Captive dependency (compile-time case)
+// MARK: - Removed lifetimes (compile-time case)
 //
-// A singleton is constructed once, at `freeze()`, and outlives every request.
-// One that injects a `.scoped` component either fails the freeze — the
-// factory finds no ambient `Scope.active` and throws `scopeRequired`, naming
-// the type — or, on a dynamic path that does have a scope, captures one
-// request's instance for the life of the process.
+// Singleton is the only lifetime: a component is built once, at composition,
+// and shared. `.scoped` and `.transient` are gone — per-request state rides
+// `RequestContext`, and a per-operation resource is leased where the operation
+// is — so removing them removed the captive-dependency class of bug with them
+// (COMPOSITION-MIGRATION.md §2.2).
 //
-// The scan already knows both scopes and already walks `@Inject` edges for
-// `detectCycles()`, so this is a comparison on an existing traversal. Moving
-// it from startup to build time is the whole of the improvement: the runtime
-// check stays, and stays correct, until composition removes the lifetime
-// concept entirely (COMPOSITION-MIGRATION.md §2.2).
+// A `scope: .scoped` or `.transient` argument therefore names a lifetime that
+// no longer exists. The scan reports it here, at build time and pointing at
+// the site, rather than letting a now-meaningless argument pass silently.
 @MainActor
 func diagnoseRemovedLifetimes() {
     for component in components
@@ -1425,38 +1315,6 @@ func resolveIncludedModules() -> [String] {
     return ordered
 }
 let includedModules = resolveIncludedModules()
-
-// MARK: - Routes the manifest cannot see
-//
-// `registerRoute` is the escape hatch beside the macro path, the way Core's
-// `register` is beside `@Component`, and it is deliberately arbitrary Swift:
-// a path can come from configuration or a loop. So the scan cannot enumerate
-// what it registers, and a static route table that silently omitted it would
-// turn a working route into a 404 with nothing to grep for.
-//
-// The same answer the component scan already uses: acknowledge it at the call
-// site with `// flight:hand-registered`, and name every skipped route in the
-// generated file so nothing disappears quietly.
-//
-// Mounts (`assets`, `uploads`, `registerChannelSocket`) are exempt: their
-// call site carries the prefix the framework derives routes from, so they are
-// recorded rather than skipped.
-@MainActor
-func reportHandRegisteredRoutes() {
-    for mount in mounts where mount.kind == .route && !mount.isAcknowledged {
-        emit(
-            "warning",
-            """
-            This route is registered by hand, so the static route manifest \
-            cannot see it. Declare it with @GetRoute/@PostRoute on a \
-            @Controller, or acknowledge it with a `// flight:hand-registered` \
-            comment above the call.
-            """,
-            file: mount.file, line: mount.line
-        )
-    }
-}
-reportHandRegisteredRoutes()
 
 // MARK: - @ConfigValue key check (compile-time case)
 //
@@ -1632,9 +1490,9 @@ graphRegistrable.flatMap { $0.injectTypeNames + $0.acknowledgedTypeNames }.map(b
 //   the whole of §2.1a — unless something else injects it, in which case
 //   the graph does have to build it;
 // - `@Settings` calls `validate()` after construction and `@Scheduler`
-//   registers its jobs, both inside their own thunk. Projecting those
-//   would drop the extra, so the container keeps constructing them and
-//   they arrive here as root parameters if anything depends on them.
+//   registers its jobs, both inside their own initializer. Projecting those
+//   would drop the extra, so they keep being built through their own init and
+//   arrive here as root parameters if anything depends on them.
 let containerConstructed: Set<String> = ["settings", "scheduler"]
 let graphNodes = graphRegistrable.filter { component in
     let kind = stereotype(forAttribute: component.attributeName)
@@ -1676,8 +1534,8 @@ where module != "FlightCore" && !dependencyModules.contains(module) {
 ///
 /// The graph's roots are exactly the things modules provide — a data source, a
 /// token validator — so once a module holds what it provides, the composition
-/// root can build the graph rather than a container factory building it at
-/// `freeze()`.
+/// root can build the graph directly, in dependency order, rather than a
+/// factory building it lazily.
 struct GraphRoots {
     var emitted = false
     var needsConfiguration = false
@@ -1713,8 +1571,8 @@ var emittedComponentDescriptors = false
 // marked `flight:hand-registered`, anything the scan never saw — becomes an
 // initializer parameter instead. That is §2.6's escape hatch: externally
 // supplied values arrive through the same typed parameters everything else
-// uses, visible at one root rather than scattered across N `configure(_:)`
-// bodies.
+// uses, visible at one root rather than scattered across many separate
+// configuration sites.
 @MainActor
 func emitFlightGraph(into out: inout String) {
     // Module-registered types are excluded for the same reason the component
@@ -1750,7 +1608,7 @@ func emitFlightGraph(into out: inout String) {
         return nil
     }
 
-    // Dependencies first, the order `freeze()` already constructs in.
+    // Dependencies first, the order composition already constructs in.
     var ordered: [ScannedComponent] = []
     var finished: Set<String> = []
     var visiting: Set<String> = []
@@ -1816,7 +1674,7 @@ func emitFlightGraph(into out: inout String) {
     let needsConfiguration = constructed.contains { !$0.configValues.isEmpty }
 
     // Published for `emitComposer`, which builds the graph from module
-    // properties rather than leaving it to a container factory at freeze().
+    // properties rather than leaving it to a factory to build lazily.
     graphRoots = GraphRoots(
         emitted: true,
         needsConfiguration: needsConfiguration,
@@ -1950,7 +1808,7 @@ func emitFlightGraph(into out: inout String) {
 
     // Scheduled jobs, the same way: the macro generated a value form beside
     // its registration form, and this closes it over the component the graph
-    // built rather than one a container resolves when the job fires.
+    // built at composition rather than one resolved when the job fires.
     let schedulers = ordered.filter { $0.attributeName == "Scheduler" }
     guard !schedulers.isEmpty else { return }
     emittedScheduledJobValues = true
@@ -1977,8 +1835,8 @@ func emitFlightGraph(into out: inout String) {
 // author and read by this generator — and this is what that list *means*
 // once a module can take what it needs. Without a composer, Flight
 // instantiates each module from its type, so a module must be constructible
-// with no arguments and therefore reads configuration through the container;
-// with one, a module declares its inputs and holds what it provides
+// with no arguments; with one, a module declares its inputs and holds what it
+// provides
 // (COMPOSITION-MIGRATION.md D11).
 //
 // A module that still declares `init()` is called that way, so this works
@@ -2162,7 +2020,7 @@ func emitComposer(into out: inout String) {
 
     var constructions: [Construction] = []
 
-    // The graph, built here rather than by a container factory at freeze().
+    // The graph, built here rather than by a factory building it lazily.
     //
     // Its roots are the components modules provide, so they are matched the
     // same way a module's initializer parameters are — which is the whole
@@ -2324,11 +2182,10 @@ func emitComposer(into out: inout String) {
 // MARK: - Static route manifest
 //
 // Every route this target declares, scanned at build time through the same
-// `FlightRouteScan` parser `@Controller` expands with. Nothing consumes it
-// yet: dispatch still collects `RouteRegistration` components out of the
-// container (COMPOSITION-MIGRATION.md §2.9, work plan step 1). It is emitted
-// now so the manifest and the container's route table can be compared on
-// real applications before anything depends on the manifest being right.
+// `FlightRouteScan` parser `@Controller` expands with. This is the static,
+// build-time record of the routes — for tooling that reads them before the
+// process runs; the live route table is built from the `RouteRegistration`
+// values the composition root gathers (COMPOSITION-MIGRATION.md §2.9).
 //
 // Emitted only when the target actually declares routes, so a target with no
 // controllers gets a generated file of exactly the shape it had before.
@@ -2336,7 +2193,7 @@ func emitComposer(into out: inout String) {
 // components-only target — a library of `@Service` types with no routes —
 // gets one too, since the component list is the part a composition function
 // is built from.
-if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
+if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty
     || !components.isEmpty
 {
     let sorted = routes.sorted {
@@ -2442,76 +2299,9 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
     }
     out += "    ]\n"
 
-    // Mounts, and the routes the scan could not see. Both are emitted even
-    // when empty: "this application hand-registers nothing" is a fact worth
-    // being able to read, and the whole point of the acknowledgment is that
-    // a skipped route leaves a trace.
-    out += "\n"
-    out += "    /// A route family mounted by a framework convenience.\n"
-    out += "    ///\n"
-    out += "    /// The call site carries the prefix the framework derives its\n"
-    out += "    /// routes from, so the mount is scannable even though the\n"
-    out += "    /// `registerRoute` calls inside the convenience are not.\n"
-    out += "    public struct Mount: Sendable {\n"
-    out += "        /// \"assets\", \"uploads\", or \"socket\".\n"
-    out += "        public let kind: String\n"
-    out += "        /// nil when the prefix is interpolated or computed.\n"
-    out += "        public let path: String?\n"
-    out += "        public let pipelines: String?\n"
-    out += "        public let declaredIn: String?\n"
-    out += "        public let module: String\n"
-    out += "    }\n"
-    out += "\n"
-    out += "    public static let mounts: [Mount] = [\n"
-    for mount in mounts.filter({ $0.kind != .route }) {
-        let path = mount.path.map { "\"\(escaped($0))\"" } ?? "nil"
-        let pipelines = mount.pipelinesText.map { "\"\(escaped($0))\"" } ?? "nil"
-        let declaredIn = mount.declaredIn.map { "\"\(escaped($0))\"" } ?? "nil"
-        out += "        Mount("
-        out += "kind: \"\(mount.kind.rawValue)\", "
-        out += "path: \(path), "
-        out += "pipelines: \(pipelines), "
-        out += "declaredIn: \(declaredIn), "
-        out += "module: \"\(escaped(mount.module))\"),\n"
-    }
-    out += "    ]\n"
-
-    out += "\n"
-    out += "    /// Routes registered by hand, which this manifest does not\n"
-    out += "    /// carry. Named so a route the scan cannot see still leaves a\n"
-    out += "    /// trace — the reason `registerRoute` asks for a\n"
-    out += "    /// `flight:hand-registered` acknowledgment.\n"
-    out += "    public struct HandRegistered: Sendable {\n"
-    out += "        /// nil when the path is interpolated or computed.\n"
-    out += "        public let path: String?\n"
-    out += "        public let declaredIn: String?\n"
-    out += "        public let module: String\n"
-    out += "        public let file: String\n"
-    out += "        public let line: Int\n"
-    out += "    }\n"
-    out += "\n"
-    out += "    public static let handRegisteredRoutes: [HandRegistered] = [\n"
-    for mount in mounts.filter({ $0.kind == .route }) {
-        let path = mount.path.map { "\"\(escaped($0))\"" } ?? "nil"
-        let declaredIn = mount.declaredIn.map { "\"\(escaped($0))\"" } ?? "nil"
-        out += "        HandRegistered("
-        out += "path: \(path), "
-        out += "declaredIn: \(declaredIn), "
-        out += "module: \"\(escaped(mount.module))\", "
-        // Basename, not the absolute path the scan carries: this string is
-        // baked into generated source, and an absolute path would make the
-        // output differ between machines for no gain — the module name plus
-        // the file name already locates it.
-        let fileName = mount.file.split(separator: "/").last.map(String.init) ?? mount.file
-        out += "file: \"\(escaped(fileName))\", "
-        out += "line: \(mount.line)),\n"
-    }
-    out += "    ]\n"
-
-    // The component list. What `allRegistrations()` answers at runtime, known
-    // before the binary exists — and, unlike the runtime's answer, carrying
-    // the dependency edges, which is what a composition function is built
-    // from (COMPOSITION-MIGRATION.md §2.1).
+    // The component list — every scanned component with its stereotype,
+    // lifetime, qualifier, and dependency edges. The edges are what the
+    // composition root is built from (COMPOSITION-MIGRATION.md §2.1).
     out += "\n"
     out += "    /// A registrable component, as scanned.\n"
     out += "    public struct Component: Sendable {\n"

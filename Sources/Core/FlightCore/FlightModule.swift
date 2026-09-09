@@ -1,9 +1,10 @@
 import ServiceLifecycle
 
 /// The one extension point. Deliberately the smallest possible surface:
-/// register components in `configure`, optionally hand one `Service` to the
-/// lifecycle group. If a future starter seems to need more, extend this
-/// deliberately — never via a side channel.
+/// declare the modules this one depends on, hold what this module provides as
+/// stored properties, and optionally hand one `Service` to the lifecycle
+/// group. If a future starter seems to need more, extend this deliberately —
+/// never via a side channel.
 public protocol FlightModule {
     /// Modules that must be *included* when this one is — the composition root
     /// pulls in prerequisites so naming one module names its stack. Not an

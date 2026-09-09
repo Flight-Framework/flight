@@ -53,8 +53,8 @@ public struct Dispatch: Sendable {
 }
 
 /// Builds the dispatch closure Flight Web hands to whichever
-/// `ServerTransport` is active (§5.3): collect routes and middleware from
-/// the frozen container, validate the route table, and wrap the whole §3
+/// `ServerTransport` is active (§5.3): collect routes and middleware as values
+/// at composition, validate the route table, and wrap the whole §3
 /// pipeline — scope-per-request, request-stamped logger, trace extraction
 /// and a server span — around it. The transport never sees any of this.
 public enum DispatchBuilder {
@@ -70,8 +70,8 @@ public enum DispatchBuilder {
         }
     }
 
-    /// Post-freeze only: routes and middleware are components, and components exist to
-    /// be read once the container is frozen (Flight Core §2.1).
+    /// Routes and middleware arrive as values, read once at composition and
+    /// immutable thereafter (Flight Core §2.1).
     ///
     /// Dispatch routes **first**, then runs the matched route's own lane
     /// chain — composed once per route, here, not per request. That
@@ -268,8 +268,8 @@ public enum DispatchBuilder {
 
 
     /// The assembled per-request pipeline, exposed separately so test
-    /// harnesses can run a hand-built chain — via `collectMiddleware()` on a
-    /// container that never has a single controller in it — without needing
+    /// harnesses can run a hand-built chain — a plain `[MiddlewareRegistration]`,
+    /// not a single controller in it — without needing
     /// a full application's worth of components.
     ///
     /// `chain` is folded around `responder` **once, here** — a request pays

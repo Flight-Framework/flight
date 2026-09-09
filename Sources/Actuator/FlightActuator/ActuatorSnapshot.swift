@@ -3,7 +3,7 @@ import FlightCore
 /// Everything the dashboard serves, assembled per request: data Core
 /// already tracks as a natural consequence of bootstrap — no new
 /// instrumentation, no caching or polling layer. Both underlying calls are
-/// cheap reads against frozen (or externally-tracked, for module health)
+/// cheap reads against fixed (or externally-tracked, for module health)
 /// state.
 public struct ActuatorSnapshot: Sendable {
     public let environment: FlightEnvironment

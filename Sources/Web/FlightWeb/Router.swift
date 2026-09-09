@@ -111,9 +111,9 @@ public enum RouterError: Error, CustomStringConvertible {
     }
 }
 
-/// The route table (§4). Built once, post-freeze, from the collected
-/// `RouteRegistration` components; immutable thereafter — matching is a pure
-/// concurrent read, same discipline as Core's frozen container.
+/// The route table (§4). Built once, at composition, from the collected
+/// `RouteRegistration` values; immutable thereafter — matching is a pure
+/// concurrent read, the same discipline composition builds everything with.
 ///
 /// Matching semantics, in priority order per segment: constant beats
 /// parameter beats catch-all. `HEAD` falls back to the `GET` route when no

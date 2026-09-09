@@ -10,8 +10,8 @@ import ServiceLifecycle
 ///         modules: [FlightWebModule<FlightTransport>.self, AppModule.self]
 ///     )
 ///
-/// Its `configure` registers nothing; controllers register themselves (and
-/// their routes) through the ordinary pipeline from any module. Its service
+/// It provides no routes of its own; controllers contribute their routes as
+/// values, gathered from every module by the composition root. Its service
 /// slots into bootstrap step 8, and request serving begins only once step
 /// 9's ServiceGroup runs — which is what guarantees every handler's
 /// `@Inject` dependencies are fully resolved before the first request
@@ -48,7 +48,7 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
     /// The transport's own settings come from here at start-up.
     private let configuration: Configuration
 
-    /// Built in `configure`, read by `service`.
+    /// Built in `init`, read by `service`.
     private let dispatch: Dispatch
 
     /// - Parameter coders: An application's own encoders/decoders, when it

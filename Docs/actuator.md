@@ -62,8 +62,9 @@ for the reason given under [What gets published, and where](#what-gets-published
 whether an endpoint disclosing your topology exists.
 
 `FLIGHT_ACTUATOR_EXPOSURE` overrides it. That is an environment variable
-rather than a config key because the decision is made while routes are being
-registered, before the configuration container has resolved.
+rather than a config key because it gates whether an endpoint that discloses
+your topology exists at all — a deployment decision Actuator reads from the raw
+environment, its one sanctioned exception to reading configuration instead.
 
 The dashboard is unauthenticated wherever it is on, so `full` in production
 needs something in front of it. `health_only` is safe to expose: it answers
@@ -121,12 +122,13 @@ Recorded here the same way sibling packages record theirs:
    their own infrastructure. `ActuatorModule` builds the controller and serves
    it through route values (`RouteRegistration`, the escape hatch `@GetRoute`
    sits beside).
-2. **The container is no longer a registered component at all.** A consequence
-   of (1): `ActuatorController` now holds `container` as a plain stored
-   property, captured directly from `configure(_:)`'s own parameter — no
-   `@Inject`, so nothing needs `Container` to be resolvable, and the
-   guarded self-registration (and its duplicate-registration-avoidance
-   dance) is gone.
+2. **The controller is handed its data, not a container.** A consequence
+   of (1): `ActuatorController` holds its inputs as plain stored properties —
+   the scanned component list from the composition root, and a
+   `ModuleHealthRegistry` for module health — set when `ActuatorModule` builds
+   it. Nothing is `@Inject`ed and nothing is resolved at request time, so the
+   guarded self-registration (and its duplicate-registration-avoidance dance)
+   is gone with the container.
 3. **The gate's environment is a qualified component.** The dashboard reports
    the same environment the registration gate ran against, injected as
    `FlightEnvironment` with qualifier `"flight.actuator"`, rather than
@@ -136,17 +138,14 @@ Recorded here the same way sibling packages record theirs:
    test sketch uses `health.isFailed`; Core keeps `ModuleHealth` minimal,
    so the presentation predicates and stable labels ship in this package
    as extensions.
-5. **Config read happens at freeze, not `configure`.** `resolve()` is
-   illegal during the registration phase by Core's contract, so
-   `actuator.format` is read inside the controller's registration factory,
-   which runs once at `freeze()`'s eager singleton construction — before
-   any request, matching what `@ConfigValue` would have given. Reached via
-   `Configuration.getIfPresent(_:as:) ?? .ssr`, not `get(_:default:)`: the
-   latter is non-throwing and `fatalError`s on a malformed *present* value;
-   `getIfPresent` throws instead, so a malformed value still fails module
-   configuration loudly rather than trapping the process — the same
-   distinction the `@ConfigValue` macro's own `default:` expansion relies
-   on.
+5. **Config is read at composition, not per request.** `actuator.format` is
+   read once when `ActuatorModule` is built — the composition root hands it the
+   `Configuration` — before any request, matching what `@ConfigValue` would
+   have given. Reached via `Configuration.getIfPresent(_:as:) ?? .ssr`, not
+   `get(_:default:)`: the latter is non-throwing and `fatalError`s on a
+   malformed *present* value; `getIfPresent` throws instead, so a malformed
+   value fails composition loudly rather than trapping the process — the same
+   distinction the `@ConfigValue` macro's own `default:` expansion relies on.
 
 `ActuatorController`'s registration is explicitly tagged
 `stereotype: .controller`, so it groups under *Controllers* on its own
@@ -156,8 +155,8 @@ whatever `@Controller`'s own stereotype-tagging does upstream.
 ## Testing
 
 No HTTP round-trip is required to test the data assembly —
-`ActuatorSnapshot` is a plain `Sendable` struct assembled from
-`Container.moduleStatuses()` / `allRegistrations()`. The suite covers
+`ActuatorSnapshot` is a plain `Sendable` struct assembled from a
+`ModuleHealthRegistry`'s statuses and the component list the build scanned. The suite covers
 environment gating, snapshot assembly (including a module whose service
 fails through the real `assemble` health-tracking path), both renderings,
 HTML escaping of hostile registration metadata, and config resolution:
@@ -212,11 +211,12 @@ component list, no type names, no failure text. They are safe to publish
 unauthenticated precisely because of what they leave out.
 
 Health inputs are Core's module lifecycle by default: a module is `running`
-once it configures and `failed` if its `Service.run()` throws. A module that
-is up but cannot reach its database says so by calling
+once it is composed and `failed` if its `Service.run()` throws. A module that
+is up but cannot reach its database says so on the `ModuleHealthRegistry` the
+composition root provides:
 
 ```swift
-container.reportHealth(.failed(error), forModule: "DataModule")
+health.reportHealth(.failed(error), forModule: "DataModule")
 ```
 
 on whatever cadence suits it — a background check, a connection-pool
@@ -231,9 +231,10 @@ FLIGHT_ACTUATOR_EXPOSURE=full
 ```
 
 That is an environment variable rather than a `flight.yaml` key because it
-decides whether a route is *registered at all*, and registration happens
-before configuration is resolvable. It is the env-var spelling of
-`actuator.exposure` under Flight Config's own convention. An unrecognized
+decides whether a topology-disclosing route exists *at all* — a deployment
+question Actuator answers from the raw environment, its one sanctioned
+exception to a module reading configuration instead. It is the env-var spelling
+of `actuator.exposure` under Flight Config's own convention. An unrecognized
 value stops startup rather than quietly choosing for you.
 
 **Put authentication in front of it.** `full` in an environment reachable

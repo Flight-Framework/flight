@@ -58,7 +58,7 @@ private func validateInjectedProperty(
     if binding.initializer != nil {
         context.diagnoseError(
             "injected.initialized",
-            "\(name) properties must not have an initial value; the container supplies the value at construction.",
+            "\(name) properties must not have an initial value; the generated initializer supplies the value at construction.",
             at: variable
         )
     }

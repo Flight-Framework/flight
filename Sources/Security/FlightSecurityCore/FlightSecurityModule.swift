@@ -13,11 +13,11 @@ import ServiceLifecycle
 ///   `PipelineLane.authenticated`, filled with what their documentation says
 ///   they contain.
 ///
-/// It does **not** register a ``TokenValidator``. Supplying one is the
+/// It does **not** provide a ``TokenValidator``. Supplying one is the
 /// application's choice, made by listing a module:
 ///
 /// - ``FlightOIDCModule`` for OIDC/JWT — the common case;
-/// - any module of your own that registers `(any TokenValidator)`, for
+/// - any module of your own that provides `(any TokenValidator)`, for
 ///   session cookies, API keys, mTLS, HMAC, or anything else.
 ///
 /// With neither, there is no `(any TokenValidator)` to supply, and
@@ -86,15 +86,15 @@ public struct FlightSecurityModule: FlightModule {
 /// OIDC/JWT token validation: the default implementation of the seam
 /// ``FlightSecurityModule`` leaves open.
 ///
-/// Registers ``OIDCTokenValidator`` — configured from `security.oidc.*` — as
+/// Provides ``OIDCTokenValidator`` — configured from `security.oidc.*` — as
 /// `(any TokenValidator)`, and owns the JWKS maintenance service that keeps
 /// its key cache warm. Both travel together, because both are OIDC's and
 /// neither means anything without the other.
 ///
 /// Missing required configuration (`security.oidc.issuer` / `audience`) fails
-/// at container freeze — startup, not first request.
+/// at composition — startup, not first request.
 ///
-/// List this module to get OIDC. Omit it and register your own
+/// List this module to get OIDC. Omit it and provide your own
 /// `(any TokenValidator)` to authenticate any other way.
 public final class FlightOIDCModule: FlightModule {
     public static var dependencies: [any FlightModule.Type] {

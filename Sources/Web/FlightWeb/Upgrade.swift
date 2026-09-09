@@ -133,7 +133,7 @@ public typealias UpgradedConnection = WebSocketConnection
 /// WebTransport and other RFC 8441 `:protocol` kinds are additive cases. In
 /// the route table (``RouteRegistration/Kind``) this is what will let a
 /// bootstrap check refuse a route the active transport cannot serve —
-/// at freeze, not at the first request that hits it.
+/// at composition, not at the first request that hits it.
 public enum UpgradeKind: Sendable, Equatable, CaseIterable {
     case webSocket
 }

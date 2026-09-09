@@ -19,9 +19,8 @@ import ServiceLifecycle
 public struct PubSubRelayService: Service, Sendable {
 
     private enum Source: Sendable {
-        /// Resolve lazily in `run()` — the module wiring path, where the
-        /// service is constructed pre-freeze (Core collects services
-        /// during configuration) and components exist only later.
+        /// The module wiring path: holds the `ClusteredPubSub` the module
+        /// built at composition, and drains it in `run()`.
         case clustered(ClusteredPubSub)
     }
 

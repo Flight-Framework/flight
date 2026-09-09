@@ -5,7 +5,7 @@ import Synchronization
 
 /// A `ServerTransport` that touches no socket (§5.4): requests go in through
 /// `InMemoryTransportHub.execute`, responses come back, and the full
-/// bootstrap path — module DAG, freeze, `FlightWebModule`, dispatch assembly,
+/// bootstrap path — module DAG, composition, `FlightWebModule`, dispatch assembly,
 /// ServiceGroup — is exercised for real. Its `run()` parks until graceful
 /// shutdown or cancellation, like any suspending `Service` (§5.3).
 ///

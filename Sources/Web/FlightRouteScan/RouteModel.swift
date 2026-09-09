@@ -162,7 +162,7 @@ public enum RouteScanning {
         if isTypeLevel {
             diagnostics.error(
                 "route.static",
-                "Route handler '\(name)' must be an instance method — the container resolves the controller instance per registration.",
+                "Route handler '\(name)' must be an instance method — the route factory constructs a controller instance to call it on.",
                 at: function
             )
             return []

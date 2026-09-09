@@ -89,8 +89,8 @@ changes — no flap — and share one rulebook, asserted by twin test suites
 
 ## Failure-detection modes
 
-Decided at freeze from what the container holds, and **logged loudly at
-startup**:
+Decided at composition from what the module is built with, and **logged loudly
+at startup**:
 
 | Deployment | Mode | Behavior |
 | --- | --- | --- |
@@ -225,7 +225,7 @@ scale is worse than an honest limit.
   `flight:presence`, with per-topic payloads inside — still "PubSub's
   existing fan-out machinery, no transport of Presence's own".
 - **The Channels seam is explicit.** Untracking is automatic when the
-  connection's Scope closes, realized through two small
+  connection's topic membership ends, realized through two small
   `@_spi(FlightInternal)` additions to `FlightChannels.Socket` —
   `onTopicActivated`/`onTopicTerminated` (driven by `SocketSession` on
   join/leave/teardown) and `pushReserved` (single-socket delivery of

@@ -8,8 +8,8 @@ import SwiftSyntaxMacros
 /// A `@Scheduler` type is an ordinary singleton component: it may inject
 /// dependencies with `@Inject` exactly as any other component does. What
 /// this macro adds is one `ScheduledJobRegistration` per `@Scheduled` method,
-/// registered into the same container as everything else. Scheduling is not a
-/// separate system from dependency injection.
+/// wired the same way as everything else. Scheduling is not a separate system
+/// from the rest of the component graph.
 ///
 /// A separate attribute rather than teaching `@Component` about `@Scheduled`,
 /// because that would make FlightCore's macros depend on the scheduler's
@@ -45,7 +45,7 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
         }
 
         // Duplicate method names cannot happen, but duplicate *job* names can
-        // if someone hand-registers the same qualifier. The qualifier embeds
+        // if someone hand-writes the same qualifier. The qualifier embeds
         // the fully-qualified type so two schedulers may share a method name.
         var jobValueLines: [String] = []
         for job in jobs {
@@ -58,7 +58,7 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
 
         // A @Scheduler type is an ordinary component: it injects what its
         // jobs need, exactly as @Controller and @Component do. Without the
-        // resolving initializer, @Inject in a scheduler would not compile
+        // generated initializer, @Inject in a scheduler would not compile
         // — which the compiled doc snippet caught.
         let properties = Injection.scan(declaration.memberBlock.members)
 

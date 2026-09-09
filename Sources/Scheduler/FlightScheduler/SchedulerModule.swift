@@ -2,7 +2,7 @@ import FlightCore
 import Foundation
 import ServiceLifecycle
 
-/// Registers the scheduler.
+/// Provides the scheduler.
 ///
 /// ```swift
 /// try await Flight.bootstrap(
@@ -11,13 +11,13 @@ import ServiceLifecycle
 /// )
 /// ```
 ///
-/// A struct holding what it provides: the jobs exist before any container
-/// does, so `configure` registers only the status the actuator reads.
+/// A struct holding what it provides: the jobs as values, and the status the
+/// actuator reads.
 ///
-/// Registers no coordinator of its own. A deployment that needs `.once` to
-/// mean once across several servers registers a ``JobCoordinator`` from a
-/// module that has something to coordinate *through* — a database, a cache —
-/// exactly as a distributed PubSub deployment registers an adapter.
+/// Provides no coordinator of its own. A deployment that needs `.once` to
+/// mean once across several servers adds a ``JobCoordinator`` from a module
+/// that has something to coordinate *through* — a database, a cache —
+/// exactly as a distributed PubSub deployment adds an adapter.
 public struct FlightSchedulerModule: FlightModule {
 
     /// Every scheduled job in the application, as values. The generated
@@ -30,7 +30,7 @@ public struct FlightSchedulerModule: FlightModule {
     /// server. Nil is the single-node case, which is the default — and the
     /// scheduler says so, loudly, at startup.
     ///
-    /// A parameter rather than a container lookup: whether a deployment has
+    /// A parameter, not a runtime lookup: whether a deployment has
     /// something to coordinate *through* is a fact about how it was composed.
     private let coordinator: (any JobCoordinator)?
 

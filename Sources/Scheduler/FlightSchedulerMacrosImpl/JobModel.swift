@@ -40,8 +40,8 @@ enum JobScanning {
             }
             // Every job's registration qualifier is `Type.method`, so two
             // `@Scheduled` attributes on one method produced two
-            // registrations under one qualifier — either a duplicate the
-            // container refuses at freeze, or one schedule silently winning.
+            // registrations under one qualifier — either a duplicate name
+            // that collides, or one schedule silently winning.
             // Neither is what "run this twice on two schedules" should mean,
             // and neither said so.
             if scheduled.count > 1 {
@@ -49,7 +49,7 @@ enum JobScanning {
                     "scheduled.duplicate",
                     """
                     '\(function.name.text)' has \(scheduled.count) @Scheduled attributes, and \
-                    a job is registered under its method name — so they would collide rather \
+                    a job is named after its method — so they would collide rather \
                     than both run. Split the schedules across separate methods, or declare \
                     the extra one as a `ScheduledJobRegistration` value.
                     """,

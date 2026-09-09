@@ -48,6 +48,6 @@ public protocol ServerTransport: Service, Sendable {
     /// Bind and begin accepting connections (on `run()`). Every parsed
     /// request is handed to `dispatch`. The transport has zero opinion about
     /// routing, middleware, or dispatch order — it never sees a route table,
-    /// never sees `RequestContext`, never sees `Container`.
+    /// never sees `RequestContext`, never sees how dispatch was composed.
     init(configuration: Configuration, dispatch: Dispatch)
 }

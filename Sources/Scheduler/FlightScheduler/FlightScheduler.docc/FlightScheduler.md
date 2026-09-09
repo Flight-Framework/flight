@@ -25,7 +25,7 @@ struct ReportJobs {
 }
 ```
 
-Nothing registers this by hand — the build plugin finds the type, exactly as
+Nothing wires this by hand — the build plugin finds the type, exactly as
 it finds a `@Controller`. And because a scheduled job is an ordinary method
 on an ordinary component, testing it needs no scheduler at all: construct the
 type with a stub service and call the method.
@@ -74,13 +74,13 @@ report that runs once never is. `onEveryNode` is the opt-in for work that is
 per-process by nature — warming an in-memory cache, trimming a local buffer.
 
 On one server, "once" is simply what happens. On several it needs a
-``JobCoordinator``, and if none is registered the scheduler **says so at
+``JobCoordinator``, and if none is provided the scheduler **says so at
 startup**:
 
 ```
 warning: 3 job(s) are set to run once per firing, and no distributed
-JobCoordinator is registered. That is correct on a single server. If you run
-more than one, every one of them will run these jobs — register a coordinator.
+JobCoordinator is present. That is correct on a single server. If you run
+more than one, every one of them will run these jobs — add a coordinator.
 ```
 
 That line exists because the failure it describes is otherwise silent: an
@@ -158,6 +158,6 @@ and a suite that would otherwise go red on a loaded machine does not.
 - ``SchedulerClock``
 - ``SystemSchedulerClock``
 
-### Registering by hand
+### Building jobs by hand
 
 - ``ScheduledJobRegistration``

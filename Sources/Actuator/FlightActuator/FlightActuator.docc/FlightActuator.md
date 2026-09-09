@@ -48,7 +48,7 @@ Core: `.running` once it configures, `.failed` if its `Service.run()` throws.
 The actuator aggregates those and nothing else, so out of the box health
 answers "did a module's service die", not "can this module reach its
 database". A module that wants to say more calls
-`Container.reportHealth(_:forModule:)` on whatever cadence suits
+`reportHealth(_:forModule:)` on the `ModuleHealthRegistry` it is handed, on whatever cadence suits
 it — a background check, a connection-pool callback — and the probes pick it
 up. Nothing here polls and no check runs on the request path, which is what
 removes the whole hung-check-and-timeout class of bug.

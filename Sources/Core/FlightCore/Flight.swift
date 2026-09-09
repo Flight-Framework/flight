@@ -116,7 +116,7 @@ public enum Flight {
     ///
     /// Without it, this instantiates every module from its type, so a module
     /// must be constructible with no arguments — which is why one reads
-    /// configuration through the container rather than declaring it as a
+    /// configuration directly rather than declaring it as a
     /// parameter. The build plugin generates a composer that constructs them
     /// in dependency order instead, and `flight new` writes the argument;
     /// `modules:` stays the declaration of which subsystems this application

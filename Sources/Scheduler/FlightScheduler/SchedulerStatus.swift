@@ -3,8 +3,8 @@ import Synchronization
 
 /// What the scheduler is doing, for anything that wants to show it.
 ///
-/// Registered as a singleton by ``FlightSchedulerModule``, so a controller
-/// can resolve it and expose `/jobs`, or a health check can assert that a
+/// Provided as a singleton by ``FlightSchedulerModule``, so a controller
+/// can inject it and expose `/jobs`, or a health check can assert that a
 /// critical job ran recently:
 ///
 /// ```swift
@@ -20,11 +20,11 @@ import Synchronization
 /// ```
 ///
 /// Deliberately *not* an actuator endpoint. The actuator collects what it
-/// shows through `Container.allRegistrations()` — generic introspection with
-/// no per-feature coupling — and adding a scheduler endpoint there would
-/// make every application that wants `/actuator/health` link the scheduler.
-/// Publishing a resolvable component instead keeps the dependency pointing
-/// the way it already points, and an application that wants the data on an
+/// shows by generic introspection over the composed modules — no per-feature
+/// coupling — and adding a scheduler endpoint there would make every
+/// application that wants `/actuator/health` link the scheduler. Publishing
+/// an injectable component instead keeps the dependency pointing the way it
+/// already points, and an application that wants the data on an
 /// actuator-shaped URL can put it there in four lines.
 ///
 /// Kept small on purpose: enough to answer "is this running, and did it
@@ -36,7 +36,7 @@ public final class SchedulerStatus: Sendable {
 
     public init() {}
 
-    /// How coordination is resolved, as reported at startup.
+    /// How coordination is decided, as reported at startup.
     public var mode: SchedulerMode { modeBox.withLock { $0 } }
 
     /// Every known job, sorted by name so output is stable between calls —

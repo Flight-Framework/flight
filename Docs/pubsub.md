@@ -105,8 +105,8 @@ pubsub:
 ```
 
 They are deployment knobs, so they live in `flight.yaml` with the other
-deployment knobs — `FlightPubSubModule(configuration:)` reads them at
-construction, before `configure(_:)` runs. Until 0.13.0 they were constructor
+deployment knobs — `FlightPubSubModule(configuration:)` reads them in its
+initializer, where the composition root hands it the configuration. Until 0.13.0 they were constructor
 arguments that could not be reached: both entry points took
 `[any FlightModule.Type]` and instantiated with `init()`, so nothing a
 deployment wrote could set them, and the example here passed a module instance
@@ -239,8 +239,7 @@ contract; observable semantics are exactly as specified.
    actor cannot mutate isolated state from a synchronous call — actor-backed
    registration would lag the returned stream and race the very next
    publish. The registry keeps the required serialized mutation, via the
-   primitive that can do it synchronously (Core precedent: health tracking,
-   `Scope`).
+   primitive that can do it synchronously (Core precedent: health tracking).
 
 2. **No `AsyncChannel`** (the obvious choice for per-subscriber back-pressure,
    and the header listed swift-async-algorithms as a dependency). A

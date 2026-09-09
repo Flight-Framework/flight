@@ -75,8 +75,8 @@ public struct ComponentDescriptor: Sendable, Equatable {
     public let stereotype: Stereotype
 
     /// Public because the *generated* component list constructs these: the
-    /// build knows what it scanned, and Actuator renders that rather than
-    /// asking the container what it holds.
+    /// build knows what it scanned, and Actuator renders that — there is no
+    /// runtime container to ask what it holds.
     public init(
         typeName: String,
         scope: Lifetime,

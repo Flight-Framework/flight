@@ -8,9 +8,10 @@ A dependency container usually trades one problem for another: you stop
 writing constructor plumbing, and you start finding out at 3am that a
 component was never registered.
 
-This one is wired by a build plugin that reads your sources, so a missing
-registration or a dependency cycle is a build error rather than a runtime
-surprise:
+Flight wires dependencies with a build plugin that reads your sources, so a
+missing dependency or a dependency cycle is a build error rather than a
+runtime surprise — and there is no container to resolve against once the
+process is running:
 
 ```swift
 @Service
@@ -27,34 +28,27 @@ try await Flight.bootstrap(
 )
 ```
 
-## Two phases
+## Composition
 
-A ``Container`` is mutable while it registers and immutable afterwards, and
-almost everything else follows from that.
+Modules are values. A ``FlightModule`` holds what it provides — its stored
+properties — and takes what it needs — its initializer parameters. A generated
+*composition root* builds every module and component **once**, in dependency
+order, wiring them by type. There is no registration step and no lookup.
 
-During **registration**, modules run in dependency order and register what
-they provide. Single-threaded by construction — no concurrency exists yet.
-
-``Container/freeze()`` eagerly constructs every singleton and seals the
-container. Afterwards, resolution is a dictionary read with no lock, safe from
-any thread. A factory that was going to fail has already failed, during
-startup, where someone is watching.
-
-That is why resolution is cheap enough to do per request, and why registering
-after `freeze()` is a programmer error rather than a supported operation.
+Construction is **eager**, at composition: a `@ConfigValue` that fails to read,
+or an initializer that throws, fails startup — where someone is watching —
+rather than the first request unlucky enough to touch it. Afterwards every
+component is a shared singleton, reached directly, so there is nothing to
+resolve per request.
 
 ## Components are Sendable
 
-``Container/register(_:qualifier:scope:stereotype:factory:)`` and
-``Container/resolve(_:qualifier:)`` both require `Sendable`.
+A singleton is shared across every task in the process, so it must be
+`Sendable`, and the compiler enforces it: a shared, mutable, non-`Sendable`
+singleton handed to two tasks is a data race with no diagnostic at all.
 
-A container that vends a mutable, non-`Sendable` singleton to two actors has
-handed them a data race with no diagnostic at all. The container is precisely
-where shared state becomes shared, so the requirement belongs here rather
-than in a convention nobody can enforce.
-
-For per-request mutable state, use ``Lifetime/scoped`` — one instance per
-request, never shared between them.
+Per-request mutable state does not belong on a singleton. It rides the request
+context as a typed value — one copy per request, never shared between them.
 
 ## Topics
 
@@ -67,18 +61,17 @@ request, never shared between them.
 - ``ServiceCompletionPolicy``
 - ``BootstrapError``
 
-### The container
-
-- ``Container``
-- ``Lifetime``
-- ``Scope``
-- ``ResolutionError``
-
 ### Modules
 
 - ``FlightModule``
 - ``ModuleHealth``
 - ``ModuleStatus``
+- ``ModuleHealthRegistry``
+
+### Lifetime and resolution
+
+- ``Lifetime``
+- ``ResolutionError``
 
 ### Introspection
 
