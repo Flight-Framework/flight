@@ -84,7 +84,6 @@ public struct FlightSecurityModule: FlightModule {
                 + "provides `(any TokenValidator)`, and let the composition root wire it.")
     }
 
-    public func configure(_ container: Container) throws {}
 }
 
 /// OIDC/JWT token validation: the default implementation of the seam
@@ -137,14 +136,6 @@ public final class FlightOIDCModule: FlightModule {
                 + "instantiated from its type. Pass `composedBy: flightComposeModules` to "
                 + "Flight.run — `flight new` writes that argument — or construct the module "
                 + "yourself and use the entry point taking module instances.")
-    }
-
-    public func configure(_ container: Container) throws {
-        let settings = self.settings
-        let validator = self.validator
-        container.register(OIDCSecurityConfiguration.self, scope: .singleton) { _ in settings }
-        container.register(OIDCTokenValidator.self, scope: .singleton) { _ in validator }
-        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
     }
 
     public var service: (any Service)? {

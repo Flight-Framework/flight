@@ -103,13 +103,6 @@ public struct FlightPubSubModule: FlightModule {
     /// Projects what this module already holds. Nothing is constructed here:
     /// the components exist before `configure` runs, which is the difference
     /// between a module that registers and one that owns.
-    public func configure(_ container: Container) throws {
-        let local = self.local
-        let bus = self.bus
-        container.register(LocalPubSub.self, scope: .singleton) { _ in local }
-        container.register((any PubSub).self, scope: .singleton) { _ in bus }
-    }
-
     /// The relay, when clustered. It belongs here rather than to the adapter
     /// module because this is what has both halves — the adapter to drain and
     /// the local core to drain it into. An adapter module used to have to

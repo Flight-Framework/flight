@@ -111,14 +111,6 @@ public struct FlightPresenceModule: FlightModule {
     }
 
     /// Projects what this module already holds.
-    public func configure(_ container: Container) throws {
-        let settings = self.settings
-        let tracker = self.tracker
-        container.register(PresenceConfiguration.self, scope: .singleton) { _ in settings }
-        container.register(PresenceTracker.self, scope: .singleton) { _ in tracker }
-        container.register((any Presence).self, scope: .singleton) { _ in tracker }
-    }
-
     /// Built from what this module holds. It used to be built from the
     /// stashed `Container` and resolve at `run()`, because the service is
     /// constructed pre-freeze and the components did not exist yet — they do

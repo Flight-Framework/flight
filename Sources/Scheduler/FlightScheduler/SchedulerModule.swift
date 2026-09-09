@@ -49,11 +49,6 @@ public struct FlightSchedulerModule: FlightModule {
         self.coordinator = coordinator
     }
 
-    public func configure(_ container: Container) throws {
-        let status = self.status
-        container.register(SchedulerStatus.self, scope: .singleton) { _ in status }
-    }
-
     /// Built from what this module holds. It used to be built from a stashed
     /// `Container` and collect its jobs at `run()`, because the jobs were
     /// registrations gathered post-`freeze()`.

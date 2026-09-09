@@ -15,28 +15,22 @@ import FlightWebTesting
 import Foundation
 
 // snippet.hide
-struct SnippetModule: FlightModule {
-    init() {}
-    func configure(_ container: Container) throws {}
+struct FakeRepo: Sendable { func all() -> [String] { [] } }
+struct GreetController {
+    let repo: FakeRepo
+    func index(_ context: RequestContext) -> [String] { repo.all() }
 }
 // snippet.show
 
-func testingShapes() throws {
-    // Components registers named components; TestClient dispatches in process.
-    let container = try TestContainer.build {
-        SnippetModule()
-    }
-    _ = try TestClient(container: container)
+func testingShapes() async throws {
+    // A controller is a struct and a route is a method: construct it with
+    // fakes and call the method directly — no container, no dispatch.
+    let controller = GreetController(repo: FakeRepo())
+    _ = controller.index(.mock())
 
-    // A context for calling a handler directly.
-    _ = RequestContext.mock()
-
-    // Overriding one seam in a booted graph.
-    _ = try TestContainer.build {
-        SnippetModule()
-    } overriding: { container in
-        container.override(String.self, scope: .singleton) { _ in "fake" }
-    }
+    // A TestClient when the pipeline itself is under test — built from route
+    // values, the way a composition root hands them to FlightWebModule.
+    _ = try TestClient(routes: [])
 
     // PubSub: a cluster with no network, one adapter per node.
     let cluster = InMemoryCluster()

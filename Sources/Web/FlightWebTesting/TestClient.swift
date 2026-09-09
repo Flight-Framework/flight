@@ -26,33 +26,23 @@ public struct TestClient: Sendable {
     /// whole promise is that it drives the real pipeline.
     public let coders: WebCoders
 
-    /// Builds dispatch from a frozen container, exactly as `FlightWebModule`
-    /// would at service start (route-table validation included).
-    /// - Parameter routes: Routes a module *declares* rather than registers.
-    ///   Since `FlightWebModule` takes the application's routes as a value,
-    ///   a module's `routes` property never reaches the container — so a suite
-    ///   exercising those endpoints passes them here, which is the same thing
-    ///   the composition root does.
-    /// - Parameter middleware: Middleware a module *declares*, for the same
-    ///   reason `routes` exists.
+    /// Builds dispatch from values — the routes, middleware and mounts a
+    /// composition root hands `FlightWebModule`, plus the `WebRuntime` that
+    /// carries coders and the error mapper. Route-table validation happens
+    /// here, exactly as it does at service start. A test that exercises a
+    /// module's endpoints builds one of these from the module's own values.
     public init(
-        container: Container,
         routes: [RouteRegistration] = [],
-        middleware: [MiddlewareRegistration] = []
+        middleware: [MiddlewareRegistration] = [],
+        assetMounts: [AssetMountRegistration] = [],
+        web: WebRuntime = .default
     ) throws {
         var logger = Logger(label: "flight.web.test-client")
         logger.logLevel = .critical
-        let coders = (try? container.resolve(WebCoders.self)) ?? WebCoders.default
         self.dispatch = try DispatchBuilder.build(
-            routes: container.collectRoutes() + routes,
-            middleware: container.collectRegistrations(of: MiddlewareRegistration.self)
-                + middleware,
-            assetMounts: container.collectAssetMounts(),
-            web: WebRuntime(
-                coders: coders,
-                errorMapper: (try? container.resolve(ErrorMapper.self)) ?? .none),
-            logger: logger)
-        self.coders = coders
+            routes: routes, middleware: middleware, assetMounts: assetMounts,
+            web: web, logger: logger)
+        self.coders = web.coders
     }
 
     /// Wraps an existing dispatch closure (for transport-free harnesses).
