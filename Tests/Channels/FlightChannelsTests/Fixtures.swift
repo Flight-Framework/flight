@@ -125,13 +125,14 @@ struct ChannelsFixtureModule: FlightModule {
     /// `FlightChannelsModule` — it is the other way round now.
     let channels: [ChannelRegistration]
 
+    /// Held, not resolved: a module owns what it declares its channels with.
+    let events = ChannelEvents()
+
     init() {
+        let events = self.events
         self.channels = [
-            ChannelRegistration("room:*", source: "ChannelsFixtureModule") { context in
-                RoomChannel(
-                    broadcaster: try context.resolve(ChannelBroadcaster.self),
-                    events: try context.resolve(ChannelEvents.self)
-                )
+            ChannelRegistration("room:*", source: "ChannelsFixtureModule") { channel in
+                RoomChannel(broadcaster: channel.broadcaster, events: events)
             },
             ChannelRegistration("lobby", source: "ChannelsFixtureModule") { _ in
                 LobbyChannel()
@@ -143,7 +144,8 @@ struct ChannelsFixtureModule: FlightModule {
     }
 
     func configure(_ container: Container) throws {
-        container.register(ChannelEvents.self, scope: .singleton) { _ in ChannelEvents() }
+        let events = self.events
+        container.register(ChannelEvents.self, scope: .singleton) { _ in events }
 
         container.registerChannelSocket("/socket") { context in
             principal(from: context)

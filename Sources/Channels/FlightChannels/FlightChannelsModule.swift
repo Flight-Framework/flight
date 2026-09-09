@@ -69,12 +69,14 @@ public struct FlightChannelsModule: FlightModule {
         configuration: Configuration,
         channels: [ChannelRegistration] = []
     ) throws {
-        self.settings = try ChannelsConfiguration(configuration: configuration)
-        self.broadcaster = ChannelBroadcaster(pubsub: bus)
+        let settings = try ChannelsConfiguration(configuration: configuration)
+        let broadcaster = ChannelBroadcaster(pubsub: bus)
         let router = try ChannelRouter(registrations: channels)
+        self.settings = settings
+        self.broadcaster = broadcaster
         self.router = router
         self.sockets = ChannelSockets(
-            router: router, pubsub: bus, configuration: self.settings)
+            router: router, pubsub: bus, configuration: settings, broadcaster: broadcaster)
     }
 
     /// This module takes what it provides, so it cannot be built from its

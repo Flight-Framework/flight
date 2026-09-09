@@ -99,8 +99,8 @@ struct WireChannel: Channel {
 
 struct E2EModule: FlightModule {
     let channels: [ChannelRegistration] = [
-        ChannelRegistration("wire:*") { context in
-            WireChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
+        ChannelRegistration("wire:*") { channel in
+            WireChannel(broadcaster: channel.broadcaster)
         }
     ]
 

@@ -91,11 +91,19 @@ struct AppModule: FlightModule {
     // from every module declaring any and hands them all to
     // FlightChannelsModule, so a package the framework has never heard of
     // contributes channels without the application enumerating it.
-    let channels: [ChannelRegistration] = [
-        ChannelRegistration("room:*") { context in
-            RoomChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
-        }
-    ]
+    let channels: [ChannelRegistration]
+
+    init(graph: FlightGraph) {
+        let chat = graph.chatRepository
+        self.channels = [
+            // The broadcaster arrives per join, in the `ChannelContext`.
+            // Everything else is closed over — a channel is handed what it
+            // needs, not a container to look it up in.
+            ChannelRegistration("room:*") { channel in
+                RoomChannel(broadcaster: channel.broadcaster, chat: chat)
+            }
+        ]
+    }
 }
 
 @Controller

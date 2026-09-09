@@ -34,11 +34,13 @@ struct AppModule: FlightModule {
         [FlightPresenceModule.self, FlightChannelsModule.self]
     }
 
-    let channels: [ChannelRegistration] = [
-        ChannelRegistration("room:*") { context in
-            RoomChannel(presence: try context.resolve((any Presence).self))
-        }
-    ]
+    let channels: [ChannelRegistration]
+
+    init(presence: any Presence) {
+        self.channels = [
+            ChannelRegistration("room:*") { _ in RoomChannel(presence: presence) }
+        ]
+    }
 
     func configure(_ container: Container) throws {
         container.registerChannelSocket("/socket") { context in

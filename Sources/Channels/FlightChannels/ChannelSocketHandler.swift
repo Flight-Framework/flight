@@ -34,17 +34,25 @@ public struct ChannelSockets: Sendable {
     let router: ChannelRouter
     let pubsub: any PubSub
     let configuration: ChannelsConfiguration
+    let broadcaster: ChannelBroadcaster
 
-    public init(router: ChannelRouter, pubsub: any PubSub, configuration: ChannelsConfiguration) {
+    public init(
+        router: ChannelRouter,
+        pubsub: any PubSub,
+        configuration: ChannelsConfiguration,
+        broadcaster: ChannelBroadcaster
+    ) {
         self.router = router
         self.pubsub = pubsub
         self.configuration = configuration
+        self.broadcaster = broadcaster
     }
 
     /// A handler for one connection.
     public func handler(principal: (any ChannelPrincipal)? = nil) -> ChannelSocketHandler {
         ChannelSocketHandler(
-            router: router, pubsub: pubsub, configuration: configuration, principal: principal)
+            router: router, pubsub: pubsub, configuration: configuration,
+            broadcaster: broadcaster, principal: principal)
     }
 }
 
@@ -52,17 +60,20 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
     private let router: ChannelRouter
     private let pubsub: any PubSub
     private let configuration: ChannelsConfiguration
+    private let broadcaster: ChannelBroadcaster
     private let principal: (any ChannelPrincipal)?
 
     public init(
         router: ChannelRouter,
         pubsub: any PubSub,
         configuration: ChannelsConfiguration,
+        broadcaster: ChannelBroadcaster,
         principal: (any ChannelPrincipal)? = nil
     ) {
         self.router = router
         self.pubsub = pubsub
         self.configuration = configuration
+        self.broadcaster = broadcaster
         self.principal = principal
     }
 
@@ -100,7 +111,7 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
             socket: socket,
             outbound: outboundContinuation,
             logger: context.logger,
-            context: context
+            broadcaster: broadcaster
         )
         context.logger.debug("channel socket opened", metadata: [
             "socket": "\(socket.id)",

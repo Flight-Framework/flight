@@ -1809,6 +1809,9 @@ struct GraphRoots {
     var needsConfiguration = false
     /// (label, type as written), in initializer order.
     var supplied: [(label: String, type: String)] = []
+    /// Extra parameters of `flightRoutes(_:…)` — values only a controller
+    /// needs, deliberately kept out of the graph.
+    var terminalSupplied: [(label: String, type: String)] = []
 }
 var graphRoots = GraphRoots()
 
@@ -1895,15 +1898,37 @@ func emitFlightGraph(into out: inout String) {
     // held by the graph, and it reaches its dependencies *through* the
     // graph — so a root input only a controller needs still has to be
     // stored there.
-    let constructed = ordered + registrable.filter { component in
+    let terminalOnly = registrable.filter { component in
         !ordered.contains { baseName($0.typeName) == baseName(component.typeName) }
     }
+    let constructed = ordered + terminalOnly
+
+    /// Roots the **graph itself** needs — a dependency of a stored component
+    /// that the graph cannot build.
     var supplied: [String] = []
     var seenSupplied: Set<String> = []
-    for node in constructed {
-        for dependency in node.injectTypeNames + node.acknowledgedTypeNames
+    for node in ordered {
+        for dependency in node.dependencyOrder.map(\.type)
         where provider(of: dependency) == nil {
             if seenSupplied.insert(dependency).inserted { supplied.append(dependency) }
+        }
+    }
+
+    /// Roots only a **route terminal** needs — a controller's dependency that
+    /// no stored component shares.
+    ///
+    /// These are deliberately *not* graph properties, and the distinction is
+    /// load-bearing rather than tidiness. A controller injecting
+    /// `ChannelBroadcaster` used to make it a graph root, so the graph
+    /// depended on `FlightChannelsModule` — and `FlightChannelsModule` takes
+    /// the channel list, so nothing that builds channels from the graph could
+    /// ever compose. A controller is not a component: it is constructed by its
+    /// terminal, so what only it needs belongs to the terminal.
+    var terminalSupplied: [String] = []
+    for node in terminalOnly {
+        for dependency in node.dependencyOrder.map(\.type)
+        where provider(of: dependency) == nil && !seenSupplied.contains(dependency) {
+            if !terminalSupplied.contains(dependency) { terminalSupplied.append(dependency) }
         }
     }
     func suppliedBinding(_ typeText: String) -> String {
@@ -1918,7 +1943,8 @@ func emitFlightGraph(into out: inout String) {
     graphRoots = GraphRoots(
         emitted: true,
         needsConfiguration: needsConfiguration,
-        supplied: supplied.map { (label: suppliedBinding($0), type: $0) })
+        supplied: supplied.map { (label: suppliedBinding($0), type: $0) },
+        terminalSupplied: terminalSupplied.map { (label: suppliedBinding($0), type: $0) })
 
     out += "\n"
     out += "/// Every component this module declares, constructed once, in\n"
@@ -2050,7 +2076,18 @@ func emitFlightGraph(into out: inout String) {
     out += "/// `includingRoutes: false`, so the two do not both contribute the\n"
     out += "/// same route.\n"
     emittedRouteValues = true
-    out += "func flightRoutes(_ graph: FlightGraph) -> [FlightWeb.RouteRegistration] {\n"
+    if !terminalSupplied.isEmpty {
+        out += "///\n"
+        out += "/// The extra parameters are values only a *controller* needs —\n"
+        out += "/// no stored component shares them, so they are not graph\n"
+        out += "/// properties. Keeping them here is what lets a module provide\n"
+        out += "/// one *and* be built from the graph.\n"
+    }
+    let terminalParameters =
+        terminalSupplied.map { ", \(suppliedBinding($0)): \($0)" }.joined()
+    out += "func flightRoutes(_ graph: FlightGraph\(terminalParameters))\n"
+    out += "    -> [FlightWeb.RouteRegistration]\n"
+    out += "{\n"
     out += "    [\n"
     for route in routes {
         guard let controller = componentsByName[baseName(route.controllerTypeName)] else { continue }
@@ -2063,6 +2100,8 @@ func emitFlightGraph(into out: inout String) {
         for (dependency, label) in edges {
             if let source = provider(of: dependency) {
                 arguments.append("\(label): graph.\(binding(source))")
+            } else if terminalSupplied.contains(dependency) {
+                arguments.append("\(label): \(suppliedBinding(dependency))")
             } else {
                 arguments.append("\(label): graph.\(suppliedBinding(dependency))")
             }
@@ -2232,7 +2271,24 @@ func emitComposer(into out: inout String) {
             // `flightRegisterAll` produced when they were registrations.
             if emittedRouteValues, providedTypeKey(element) == "RouteRegistration" {
                 needed.insert("FlightGraph")
-                expressions.append("flightRoutes(flightGraph)")
+                // Values only a controller needs are passed here rather than
+                // stored on the graph, so a module can provide one and still
+                // be built from the graph.
+                var callArguments = ["flightGraph"]
+                for root in graphRoots.terminalSupplied {
+                    if let source = provider(of: root.type, for: "flightRoutes") {
+                        needed.insert(moduleKey(source.module))
+                        callArguments.append("\(root.label): \(source.expression)")
+                    } else {
+                        callArguments.append(
+                            "\(root.label): <#nothing provides \(root.type)#>")
+                        compositionDiagnostics.append(
+                            "A route terminal needs \(root.type), and no module in this "
+                                + "application provides it. A module that owns it should expose "
+                                + "it as a stored property.")
+                    }
+                }
+                expressions.append("flightRoutes(\(callArguments.joined(separator: ", ")))")
             }
             if emittedScheduledJobValues, providedTypeKey(element) == "ScheduledJobRegistration" {
                 needed.insert("FlightGraph")

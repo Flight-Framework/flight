@@ -40,8 +40,8 @@ struct CounterChannel: Channel {
 
 struct ClientFixtureModule: FlightModule {
     let channels: [ChannelRegistration] = [
-        ChannelRegistration("counter:*") { context in
-            CounterChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
+        ChannelRegistration("counter:*") { channel in
+            CounterChannel(broadcaster: channel.broadcaster)
         }
     ]
 

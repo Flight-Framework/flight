@@ -2,6 +2,37 @@ import FlightChannelsProtocol
 import FlightCore
 import FlightWeb
 
+/// What a channel is handed when a join creates it.
+///
+/// Carries the values `FlightChannelsModule` itself owns. They arrive here
+/// rather than being injected because a channel is *declared* by a module the
+/// channels module is built from — so a channel cannot depend on it at
+/// construction without a cycle. At join time there is no such problem: the
+/// broadcaster has existed since composition.
+///
+/// Everything else a channel needs — repositories, services, presence — is an
+/// ordinary value the declaring module closes over.
+public struct ChannelContext: Sendable {
+    /// The topic that matched, with wildcards resolved.
+    public let topic: String
+
+    /// The broadcast seam, for fan-out from inside the channel.
+    public let broadcaster: ChannelBroadcaster
+
+    /// The socket's principal, established at upgrade.
+    public let principal: (any ChannelPrincipal)?
+
+    public init(
+        topic: String,
+        broadcaster: ChannelBroadcaster,
+        principal: (any ChannelPrincipal)? = nil
+    ) {
+        self.topic = topic
+        self.broadcaster = broadcaster
+        self.principal = principal
+    }
+}
+
 /// One declared channel: the topic pattern it serves plus the factory that
 /// makes a fresh `Channel` instance per join ("joining creates a channel
 /// instance").
@@ -16,10 +47,10 @@ import FlightWeb
 /// cycle was only that one module both provided and aggregated. Declaring
 /// channels as values a module holds removes it.
 ///
-/// The factory takes the `RequestContext` the socket was upgraded from, which
-/// is the same shape a route terminal has. Every component is a singleton
-/// (``FlightCore/Lifetime``), so resolving from it later in the socket's life
-/// is the same lookup it would have been at join time.
+/// The factory takes a ``ChannelContext`` — the values Channels owns, handed
+/// over at join time. It used to take the upgrade's `RequestContext` and
+/// resolve out of it, which meant a channel created ten minutes into a
+/// socket's life reached through the request that opened it.
 public struct ChannelRegistration: Sendable {
     /// The pattern as written. Parsed by ``ChannelRouter``, not here, so that
     /// declaring a channel is non-throwing: `FlightModule` requires a
@@ -31,12 +62,12 @@ public struct ChannelRegistration: Sendable {
     /// Where this channel was declared, for startup logs and diagnostics.
     public let source: String
     /// Called once per successful topic match at join time.
-    public let makeChannel: @Sendable (RequestContext) throws -> any Channel
+    public let makeChannel: @Sendable (ChannelContext) throws -> any Channel
 
     public init(
         _ topicPattern: String,
         source: String = "<direct>",
-        makeChannel: @escaping @Sendable (RequestContext) throws -> any Channel
+        makeChannel: @escaping @Sendable (ChannelContext) throws -> any Channel
     ) {
         self.topicPattern = topicPattern
         self.source = source

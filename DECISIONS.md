@@ -35,6 +35,58 @@ correct rather than something misconfigured.
 
 ---
 
+## D24 — A route terminal's own roots are not graph properties
+
+**Chosen.** `FlightGraph` stores only what a *component* needs. A dependency
+that only a controller has becomes a parameter of `flightRoutes(_:…)` instead.
+
+**Why.** This is what unblocked channels. A controller injecting
+`ChannelBroadcaster` made it a graph root, so `FlightGraph` depended on
+`FlightChannelsModule` — and `FlightChannelsModule` takes the channel list, so
+*nothing that builds channels from the graph could ever compose*. The build
+said so, by name, the moment I tried.
+
+The fix follows from what the graph is: a controller is **not a component**.
+It is constructed by its terminal, per request, and never stored. So a value
+only it needs belongs to the terminal, not to the graph. The demo's graph went
+from six roots to two.
+
+**What it makes possible.** `DemoChannelsModule(graph:presence:)` — a module
+that takes the graph *and* provides what Channels is built from, which was a
+cycle an hour earlier.
+
+---
+
+## D25 — A channel is handed what Channels owns; it closes over the rest
+
+**Chosen.** `ChannelRegistration`'s factory takes a ``ChannelContext`` —
+topic, broadcaster, principal — instead of the upgrade's `RequestContext`.
+Everything else a channel needs is an ordinary value its declaring module
+closes over.
+
+**Why the split is exactly there.** A channel is declared by a module that
+`FlightChannelsModule` is *built from*, so it cannot depend on Channels at
+construction. At join time there is no such problem: the broadcaster has
+existed since composition. So the values Channels owns arrive per join, and
+everything else — repositories, services, presence — arrives by ordinary
+capture.
+
+**What it fixed beyond the lookup.** The factory used to take the
+`RequestContext` the socket was upgraded from, which meant a channel created
+ten minutes into a socket's life reached back through the request that opened
+it. Nothing depended on that, and now nothing can.
+
+**Result.** No template code calls `context.resolve`. The framework has one
+call left, in `ChannelSocketHandler(context:)` — the imperative escape hatch,
+in the same category as `container.registerRoute`.
+
+**Not done: the `@Channel` macro.** Declaring channels as types with `@Inject`
+properties would be the natural third instance of the routes/jobs pattern. It
+is sugar over what now works, and worth doing when channels get complicated
+enough to want it.
+
+---
+
 ## D23 — The outbound writer does not get a vote on why a socket closed
 
 **Chosen.** The writer task no longer yields `.normal` when its queue

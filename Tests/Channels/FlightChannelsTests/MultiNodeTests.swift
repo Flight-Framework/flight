@@ -45,7 +45,8 @@ struct MultiNodeTests {
             let configuration = Configuration()
             let container = Container()
             container.register(Configuration.self, scope: .singleton) { _ in configuration }
-            container.register(ChannelEvents.self, scope: .singleton) { _ in ChannelEvents() }
+            let events = ChannelEvents()
+            container.register(ChannelEvents.self, scope: .singleton) { _ in events }
             // The adapter is handed to PubSub rather than registered for it
             // to find, and PubSub's bus is handed to Channels along with this
             // node's declared channels — the whole node, wired explicitly.
@@ -55,11 +56,8 @@ struct MultiNodeTests {
                 bus: pubsub.bus,
                 configuration: configuration,
                 channels: [
-                    ChannelRegistration("room:*") { context in
-                        RoomChannel(
-                            broadcaster: try context.resolve(ChannelBroadcaster.self),
-                            events: try context.resolve(ChannelEvents.self)
-                        )
+                    ChannelRegistration("room:*") { channel in
+                        RoomChannel(broadcaster: channel.broadcaster, events: events)
                     }
                 ])
             try pubsub.configure(container)

@@ -662,8 +662,7 @@ struct GeneratorTests {
             ))
         // Routes are a value the composition root passes to FlightWebModule,
         // so the graph arrives as a parameter rather than being resolved.
-        #expect(
-            result.generated.contains("func flightRoutes(_ graph: FlightGraph) -> [FlightWeb.RouteRegistration]"))
+        #expect(result.generated.contains("func flightRoutes(_ graph: FlightGraph)"))
     }
 
     @Test("a controller is not a graph node — it is built per request")
@@ -689,10 +688,13 @@ struct GeneratorTests {
         #expect(!result.generated.contains("let userController: UserController"))
     }
 
-    @Test("a root input only a controller needs is still stored on the graph")
-    func controllerOnlyRootInputIsStored() throws {
-        // The terminal reaches its dependencies *through* the graph, so a
-        // root input no graph node uses still has to be there.
+    @Test("a root input only a controller needs is a terminal parameter, not a graph property")
+    func controllerOnlyRootInputIsTerminalParameter() throws {
+        // It used to be stored on the graph, and that was the cycle: a
+        // controller injecting `ChannelBroadcaster` made the graph depend on
+        // `FlightChannelsModule`, which takes the channel list — so nothing
+        // that builds channels from the graph could compose. A controller is
+        // not a component; what only it needs belongs to its terminal.
         let result = try generate([
             "Sources.swift": """
             import FlightWeb
@@ -706,11 +708,16 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
-        // Named for the type, not the property: two properties of one type
-        // are one root input, which is what makes them the *same* value.
-        #expect(result.generated.contains("let tokenValidator: (any TokenValidator)"))
+        // Not a graph property...
+        #expect(!result.generated.contains("let tokenValidator: (any TokenValidator)"))
+        // ...a parameter of the route list, named for the type: two properties
+        // of one type are one root input, which is what makes them the *same*
+        // value.
         #expect(
-            result.generated.contains("SocketController(validator: graph.tokenValidator)"))
+            result.generated.contains(
+                "func flightRoutes(_ graph: FlightGraph, tokenValidator: (any TokenValidator))"))
+        #expect(
+            result.generated.contains("SocketController(validator: tokenValidator)"))
     }
 
     @Test("the graph constructs; the container projects onto it")
@@ -1106,7 +1113,7 @@ struct GeneratorTests {
         #expect(result.exitCode == 0)
         #expect(
             result.generated.contains(
-                "SocketController(validator: graph.tokenValidator, sockets: graph.sockets)"))
+                "SocketController(validator: tokenValidator, sockets: graph.sockets)"))
     }
 
     @Test("a module is never built out of its own property")

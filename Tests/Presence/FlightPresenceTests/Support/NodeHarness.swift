@@ -52,23 +52,28 @@ final class PresenceNode: Sendable {
         let adapter = cluster?.makeAdapter()
         let pubsub = try FlightPubSubModule(
             configuration: nodeConfiguration, adapter: adapter)
-        let channels = try FlightChannelsModule(
-            bus: pubsub.bus,
-            configuration: nodeConfiguration,
-            channels: [
-                ChannelRegistration("room:*") { context in
-                    PresenceRoomChannel(presence: try context.resolve((any Presence).self))
-                }
-            ])
+        // Presence before Channels: the channel is declared *with* presence,
+        // which is the ordering a composition root derives from the same
+        // value flow — a channel closes over what it needs rather than
+        // looking it up when a join creates it.
         let presence = try FlightPresenceModule(
             configuration: nodeConfiguration,
             localBus: pubsub.local,
             gossipBus: pubsub.bus,
             adapter: adapter,
             membershipMonitor: monitor)
+        let tracker = presence.presence
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus,
+            configuration: nodeConfiguration,
+            channels: [
+                ChannelRegistration("room:*") { _ in
+                    PresenceRoomChannel(presence: tracker)
+                }
+            ])
 
         var services: [any Service] = []
-        for module in [pubsub, channels, presence] as [any FlightModule] {
+        for module in [pubsub, presence, channels] as [any FlightModule] {
             try module.configure(container)
             if let service = module.service { services.append(service) }
         }
