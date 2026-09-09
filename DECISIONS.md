@@ -35,6 +35,38 @@ correct rather than something misconfigured.
 
 ---
 
+## D23 — The outbound writer does not get a vote on why a socket closed
+
+**Chosen.** The writer task no longer yields `.normal` when its queue
+finishes, and the frame loop records its close intent *before* tearing the
+session down.
+
+**The bug.** `invalidEnvelopeCloses` intermittently saw close code 1000 where
+4400 was documented — only under parallel execution, never in isolation. It was
+not a flaky test. Three tasks feed one `AsyncStream<CloseIntent>` and the
+handler takes the first: "first exit wins". The undecodable-frame path read
+
+    await session.teardown()
+    finishedContinuation.yield(protocolViolation)
+
+and `teardown()` finishes the outbound queue — which wakes the writer, whose
+last act was `yield(.normal)`. Under contention the writer's `.normal` beat the
+violation the frame loop had *already decided on*, and the peer was told the
+socket closed normally. The `.binary` path had the identical shape, and the
+graceful `flight:close` path could lose its code and reason the same way.
+
+**Why the writer stays silent now.** Its queue finishing is a *consequence* of
+teardown, never a reason to close — and teardown always follows a decision made
+somewhere else. The one reason that task genuinely owns, a write timing out, is
+still yielded, before its `break`. Nothing is lost: whatever tore the session
+down also ends `connection.frames`, and the frame loop's own `.normal` covers
+the no-reason case.
+
+**Verified** by 20 consecutive runs of the channels suite with zero failures;
+the rate before was roughly one in six.
+
+---
+
 ## D22 — A socket route injects the channels stack; the crash was a stale build
 
 **Chosen.** `ChannelSockets` bundles the router, the bus and the channels

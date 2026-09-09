@@ -169,7 +169,18 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                     break  // connection gone; remaining outbound is undeliverable
                 }
             }
-            finishedContinuation.yield(.normal)
+            // Deliberately silent: the outbound queue finishing is a
+            // *consequence* of teardown, never a reason to close. It used to
+            // yield `.normal` here, which raced every deliberate intent —
+            // `session.teardown()` finishes the queue, so the writer woke and
+            // could win "first exit wins" against the protocol-violation the
+            // frame loop had already decided on. The client then saw 1000
+            // where 4400 was documented. The one reason this task *does* own
+            // — a write timing out — is yielded above, before the break.
+            //
+            // Nothing is lost by staying quiet: whatever tore the session down
+            // also ends `connection.frames`, and the frame loop's own
+            // `.normal` covers the no-reason case.
         }
 
         let watchdog = Task { [configuration] in
@@ -212,11 +223,14 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                         context.logger.warning("undecodable channel frame", metadata: [
                             "socket": "\(socket.id)", "error": "\(error)",
                         ])
-                        await session.teardown()
+                        // Intent first, teardown second: teardown finishes
+                        // the outbound queue and wakes the writer, and
+                        // whatever is recorded first is what the peer is told.
                         finishedContinuation.yield(
                             CloseIntent(
                                 code: WebSocketCloseCode(ChannelCloseCode.protocolViolation),
                                 reason: "invalid envelope"))
+                        await session.teardown()
                         break frames
                     }
                     if case .close(let code, let reason) = await session.handle(envelope) {
@@ -231,11 +245,12 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
                     // JSON text frames only in v1; the binary codec is a
                     // documented later addition, negotiated, never
                     // sprung on a server.
-                    await session.teardown()
+                    // Intent first, teardown second — see the text case.
                     finishedContinuation.yield(
                         CloseIntent(
                             code: .unacceptableData,
                             reason: "binary frames are not part of protocol v1"))
+                    await session.teardown()
                     break frames
                 case .close:
                     break frames // peer closed; stream finishes right after
