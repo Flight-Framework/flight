@@ -18,20 +18,9 @@ private struct UploadHarness {
     let client: TestClient
     let store: DiskUploadStore
     let directory: URL
-    let container: Container
-}
-
-/// Hoisted: a type cannot nest in a generic function. Its configuration
-/// rides a static box because TestContainer instantiates modules itself.
-private struct UploadModule: FlightModule {
-    static let state = Mutex<(store: DiskUploadStore?, maxSize: Int64)>((nil, 0))
-
-    func configure(_ container: Container) throws {
-        let (store, maxSize) = Self.state.withLock { $0 }
-        container.uploads(at: "/uploads", store: store!) { options in
-            options.maxSize = maxSize
-        }
-    }
+    /// The mount's five route values — what a composition root hands
+    /// `FlightWebModule`, kept so a test can inspect the route table shape.
+    let routes: [RouteRegistration]
 }
 
 private func withUploads<T>(
@@ -44,11 +33,12 @@ private func withUploads<T>(
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = try DiskUploadStore(directory: directory, flushInterval: flushInterval)
 
-    UploadModule.state.withLock { $0 = (store, maxSize) }
-    let container = try TestContainer.build { UploadModule() }
-    let client = try TestClient(container: container)
+    let routes = RouteRegistration.uploads(at: "/uploads", store: store) { options in
+        options.maxSize = maxSize
+    }
+    let client = try TestClient(routes: routes)
     return try await body(
-        UploadHarness(client: client, store: store, directory: directory, container: container))
+        UploadHarness(client: client, store: store, directory: directory, routes: routes))
 }
 
 extension TestClient {
@@ -74,9 +64,9 @@ extension TestClient {
     }
 }
 
-// Serialized: the mount's configuration reaches TestContainer through a
-// static box (it instantiates modules itself), so two tests building
-// mounts concurrently would swap each other's stores.
+// Serialized: each test builds its own on-disk store and mount, and they
+// share the tus protocol version constant; running them one at a time keeps
+// the temporary directories and stores cleanly separated.
 @Suite("tus 1.0 — protocol", .serialized)
 struct TusProtocolTests {
 
@@ -275,8 +265,7 @@ struct TusProtocolTests {
     @Test("the mount registers as ordinary routes, streaming where it must")
     func routeTableShape() async throws {
         try await withUploads { app in
-            let routes = try app.container.collectRoutes()
-                .filter { $0.source.hasPrefix("uploads@") }
+            let routes = app.routes.filter { $0.source.hasPrefix("uploads@") }
             #expect(routes.count == 5)
             let patch = try #require(routes.first { $0.method == .patch })
             guard case .streaming = patch.bodyMode else {

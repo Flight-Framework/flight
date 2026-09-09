@@ -150,7 +150,8 @@ public struct ActuatorModule: FlightModule {
         environment: FlightEnvironment,
         exposure: ActuatorExposure,
         components: [ComponentDescriptor] = [],
-        health: ModuleHealthRegistry = ModuleHealthRegistry()
+        health: ModuleHealthRegistry = ModuleHealthRegistry(),
+        format: ActuatorFormat = .ssr
     ) {
         self.components = components
         self.health = health
@@ -158,7 +159,7 @@ public struct ActuatorModule: FlightModule {
         self.exposureOverride = exposure
         self.isEnvironmentDeclared = true
         self.routes = Self.makeRoutes(exposure: exposure, controller: controller)
-        installController(format: .ssr)
+        installController(format: format)
     }
 
     private let exposureOverride: ActuatorExposure?

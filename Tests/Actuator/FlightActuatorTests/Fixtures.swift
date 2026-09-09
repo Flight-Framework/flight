@@ -6,14 +6,14 @@ import ServiceLifecycle
 // Shared test fixtures. All go through public Flight contracts only —
 // Actuator is a consumer of the stack, and so are its tests.
 
-/// A module registering one component of each stereotype the dashboard needs
-/// to distinguish, plus a qualified duplicate-type pair.
-struct SampleAppModule: FlightModule {
-    /// What the build would have scanned for this module, in the shape the
-    /// generated `flightComponentDescriptors()` produces. Written out here
-    /// because these fixtures register by hand and no plugin runs over them —
-    /// the dashboard lists what the *build* found, not what the container
-    /// happens to hold.
+/// The components one sample app would contribute — one of each stereotype
+/// the dashboard needs to distinguish, plus a qualified duplicate-type pair.
+///
+/// This is the shape the generated `flightComponentDescriptors()` produces
+/// and the composition root hands `ActuatorModule(components:)`. Written out
+/// here because no plugin runs over these fixtures — the dashboard lists what
+/// the *build* found, not what any container happened to hold.
+enum SampleAppModule {
     static let components: [ComponentDescriptor] = [
         ComponentDescriptor(
             typeName: "FlightActuatorTests.SampleService", scope: .singleton,
@@ -37,33 +37,6 @@ struct SampleAppModule: FlightModule {
             typeName: "FlightActuatorTests.SampleController", scope: .singleton,
             sourceModule: "SampleAppModule", qualifier: nil, stereotype: .controller),
     ]
-
-    func configure(_ container: Container) throws {
-        container.register(SampleService.self, scope: .singleton, stereotype: .service) { _ in
-            SampleService()
-        }
-        container.register(SampleRepository.self, scope: .singleton, stereotype: .repository) { _ in
-            SampleRepository()
-        }
-        container.register(SampleQualified.self, qualifier: "primary", scope: .singleton) { _ in
-            SampleQualified()
-        }
-        container.register(SampleQualified.self, qualifier: "secondary", scope: .singleton) { _ in
-            SampleQualified()
-        }
-        container.register(SampleMiddleware.self, scope: .singleton, stereotype: .middleware) { _ in
-            SampleMiddleware()
-        }
-        container.register(SampleSettings.self, scope: .singleton, stereotype: .settings) { _ in
-            SampleSettings()
-        }
-        // A real `@Controller`, expanded by the macro, rather than a
-        // hand-registered stand-in passing `stereotype:` itself. Which
-        // stereotype a controller lands under is the macro's decision, and
-        // every other entry here being hand-registered is why it went
-        // unnoticed that the macro was not making it.
-        try SampleController._flightRegister(container)
-    }
 }
 
 struct SampleService: Sendable {}
@@ -72,15 +45,17 @@ struct SampleQualified: Sendable {}
 struct SampleMiddleware: Sendable {}
 struct SampleSettings: Sendable {}
 
+/// A real `@Controller`, expanded by the macro, so the fixture's controller
+/// descriptor stands for an actual controller type rather than a string.
 @Controller("/sample")
 struct SampleController {
     @GetRoute("/ping")
     func ping(_ context: RequestContext) -> String { "pong" }
 }
 
-/// A module registering a component whose qualifier is an XSS probe — the SSR
-/// escaping tests feed the renderer through this.
-struct HostileQualifierModule: FlightModule {
+/// The components for a module whose qualifier is an XSS probe — the SSR
+/// escaping tests feed the renderer through these.
+enum HostileQualifierModule {
     static let hostileQualifier = #"<script>alert("pwned")</script>"#
 
     static let components: [ComponentDescriptor] = [
@@ -89,19 +64,11 @@ struct HostileQualifierModule: FlightModule {
             sourceModule: "HostileQualifierModule", qualifier: hostileQualifier,
             stereotype: .component)
     ]
-
-    func configure(_ container: Container) throws {
-        container.register(
-            SampleQualified.self,
-            qualifier: Self.hostileQualifier,
-            scope: .singleton
-        ) { _ in SampleQualified() }
-    }
 }
 
 /// A module whose service fails during the run phase — the only way module
-/// health legitimately reaches `.failed` on a live container (Flight Core
-///: configure failures abort bootstrap entirely).
+/// health legitimately reaches `.failed` on a live assembly (Flight Core:
+/// configure failures abort bootstrap entirely).
 struct FailingServiceModule: FlightModule {
     struct Boom: Error, CustomStringConvertible {
         var description: String { "boom: the flux capacitor de-fluxed" }
@@ -112,8 +79,6 @@ struct FailingServiceModule: FlightModule {
             throw Boom()
         }
     }
-
-    func configure(_ container: Container) throws {}
 
     var service: (any Service)? { FailingService() }
 }

@@ -11,8 +11,7 @@ struct HTMLRenderingTests {
     @Test("dashboard serves text/html by default — no config needed")
     func servesHTMLByDefault() async throws {
         let actuator = ActuatorModule(environment: .dev)
-        let container = try TestContainer.build { actuator }
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let client = try TestClient(routes: actuator.routes)
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
         #expect(response.headers[.contentType] == "text/html; charset=utf-8")
@@ -24,11 +23,7 @@ struct HTMLRenderingTests {
         let actuator = ActuatorModule(
             environment: .staging, exposure: .full,
             components: SampleAppModule.components)
-        let container = try TestContainer.build {
-            actuator
-            SampleAppModule()
-        }
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let client = try TestClient(routes: actuator.routes)
         let body = await client.get("/actuator").bodyText
 
         #expect(body.contains("Environment: <strong>staging</strong>"))
@@ -56,11 +51,7 @@ struct HTMLRenderingTests {
     func escapesHostileContent() async throws {
         let actuator = ActuatorModule(
             environment: .dev, components: HostileQualifierModule.components)
-        let container = try TestContainer.build {
-            actuator
-            HostileQualifierModule()
-        }
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let client = try TestClient(routes: actuator.routes)
         let body = await client.get("/actuator").bodyText
 
         #expect(!body.contains("<script>"))
@@ -71,12 +62,13 @@ struct HTMLRenderingTests {
     func rendersModuleFailure() async throws {
         let app = try Flight.assemble(
             configuration: Configuration(),
-            modules: [FailingServiceModule.self]
+            modules: [FailingServiceModule()]
         )
         let failing = try #require(app.services.first)
         _ = try? await failing.service.run()
 
-        let snapshot = ActuatorSnapshot(container: app.container, environment: .test)
+        let snapshot = ActuatorSnapshot(
+            health: app.health, components: [], environment: .test)
         let html = renderActuatorHTML(snapshot)
         #expect(html.contains("FailingServiceModule"))
         #expect(html.contains(#"<td class="health-failed">failed</td>"#))
@@ -85,10 +77,10 @@ struct HTMLRenderingTests {
 
     @Test("empty module list renders a note, not an empty table")
     func emptyModules() throws {
-        // TestContainer does no health tracking — exactly the empty case.
-        let actuator = ActuatorModule(environment: .dev)
-        let container = try TestContainer.build { actuator }
-        let snapshot = ActuatorSnapshot(container: container, environment: .dev)
+        // A fresh health registry has recorded nothing — exactly the empty
+        // case.
+        let snapshot = ActuatorSnapshot(
+            health: ModuleHealthRegistry(), components: [], environment: .dev)
         let html = renderActuatorHTML(snapshot)
         #expect(html.contains("<h2>Modules (0)</h2>"))
         #expect(html.contains("No module health recorded."))

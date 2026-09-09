@@ -5,16 +5,16 @@ import Testing
 
 @testable import FlightScheduler
 
-/// The macro's real output, exercised through a real container.
+/// The macro's real output, exercised as values.
 ///
 /// Macro fixture tests pin the generated text; this pins that the generated
-/// text actually *works* — resolves the component, produces a registration,
-/// and calls the method.
+/// text actually *works* — builds the component, produces registrations, and
+/// calls the method.
 @Suite("Scheduler — registration")
 struct SchedulerRegistrationTests {
 
     @Scheduler
-    final class Jobs: Sendable {
+    struct Jobs: Sendable {
         static let ran = Mutex<[String]>([])
 
         @Scheduled("0 0 3 * * *")
@@ -28,18 +28,16 @@ struct SchedulerRegistrationTests {
         }
     }
 
-    // No hand registration of `Jobs` itself: @Scheduler registers the
-    // component as well as its jobs, exactly as @Controller does.
-    private func freeze() throws -> Container {
-        let container = Container()
-        try Jobs._flightRegister(container)
-        try container.freeze()
-        return container
+    /// The jobs as values — what the composition root's `flightScheduledJobs`
+    /// collects. `@Scheduler` emits one factory returning them all, built from
+    /// a component the caller supplies.
+    private func scheduledJobs() -> [ScheduledJobRegistration] {
+        Jobs._flightScheduledJobs { Jobs() }
     }
 
     @Test("every @Scheduled method becomes a registration")
     func bothJobsRegister() throws {
-        let jobs = try freeze().collectScheduledJobs()
+        let jobs = scheduledJobs()
         #expect(jobs.count == 2)
         // Names are fully qualified, so two schedulers may share a method name.
         #expect(jobs.allSatisfy { $0.name.contains("Jobs.") })
@@ -47,7 +45,7 @@ struct SchedulerRegistrationTests {
 
     @Test("the default scope is once, and onEveryNode opts out of it")
     func scopes() throws {
-        let jobs = try freeze().collectScheduledJobs()
+        let jobs = scheduledJobs()
         let nightly = try #require(jobs.first { $0.name.hasSuffix(".nightly") })
         let refresh = try #require(jobs.first { $0.name.hasSuffix(".refresh") })
         #expect(nightly.scope == .once, "a job that says nothing must run once")
@@ -56,7 +54,7 @@ struct SchedulerRegistrationTests {
 
     @Test("a cron job carries its parsed expression and time zone")
     func cronTrigger() throws {
-        let jobs = try freeze().collectScheduledJobs()
+        let jobs = scheduledJobs()
         let nightly = try #require(jobs.first { $0.name.hasSuffix(".nightly") })
         guard case .cron(let expression, let zone) = nightly.trigger else {
             Issue.record("expected a cron trigger"); return
@@ -71,7 +69,7 @@ struct SchedulerRegistrationTests {
 
     @Test("an interval job carries its period")
     func intervalTrigger() throws {
-        let jobs = try freeze().collectScheduledJobs()
+        let jobs = scheduledJobs()
         let refresh = try #require(jobs.first { $0.name.hasSuffix(".refresh") })
         guard case .interval(let period, _) = refresh.trigger else {
             Issue.record("expected an interval trigger"); return
@@ -82,17 +80,21 @@ struct SchedulerRegistrationTests {
     @Test("running a registration calls the method")
     func runCallsTheMethod() async throws {
         Jobs.ran.withLock { $0.removeAll() }
-        let jobs = try freeze().collectScheduledJobs()
+        let jobs = scheduledJobs()
         for job in jobs { try await job.run() }
         #expect(Jobs.ran.withLock { $0.sorted() } == ["nightly", "refresh"])
     }
 
-    @Test("a hand-registered job collects alongside the macro's")
+    @Test("a hand-declared job collects alongside the macro's")
     func handRegistered() throws {
-        let container = Container()
-        try Jobs._flightRegister(container)
-        container.registerScheduledJob("reconcile", cron: try CronExpression("0 */10 * * * *")) {}
-        try container.freeze()
-        #expect(try container.collectScheduledJobs().count == 3)
+        // A job declared as a plain value, the way a module contributes one
+        // that isn't attached to a `@Scheduler` type.
+        var all = scheduledJobs()
+        all.append(
+            ScheduledJobRegistration(
+                name: "reconcile",
+                trigger: .cron(try CronExpression("0 */10 * * * *"), timeZone: TimeZone(identifier: "UTC")!)
+            ) {})
+        #expect(all.count == 3)
     }
 }

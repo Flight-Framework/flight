@@ -37,17 +37,17 @@ struct NegotiationFixtureController {
     }
 }
 
-private struct NegotiationModule: FlightModule {
-    func configure(_ container: Container) throws {
-        try NegotiationFixtureController._flightRegister(container)
-    }
-}
-
 @Suite("body negotiation — end to end")
 struct BodyNegotiationTests {
 
+    /// The controller's routes as values — no @Inject, so a bare init per
+    /// request, which is exactly what the composition root would emit.
     private func client() throws -> TestClient {
-        try TestClient(container: TestContainer.build { NegotiationModule() })
+        try TestClient(routes: [
+            NegotiationFixtureController._flightRoute_signup_0 { _ in NegotiationFixtureController() },
+            NegotiationFixtureController._flightRoute_bytes_1 { _ in NegotiationFixtureController() },
+            NegotiationFixtureController._flightRoute_note_2 { _ in NegotiationFixtureController() },
+        ])
     }
 
     private func post(

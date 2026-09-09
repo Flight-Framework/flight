@@ -175,28 +175,6 @@ struct StubValidator: TokenValidator {
     }
 }
 
-/// Registers a caller-supplied validator (plus the `PrincipalHolder` scoped
-/// component) — the "custom validator installed before FlightSecurityModule"
-/// shape from design
-final class CustomValidatorModule: FlightModule {
-    static let defaultValidator = Mutex<(any TokenValidator)?>(nil)
-
-    private let validator: any TokenValidator
-
-    convenience init() {
-        self.init(validator: Self.defaultValidator.withLock { $0 } ?? StubValidator())
-    }
-
-    init(validator: any TokenValidator) {
-        self.validator = validator
-    }
-
-    func configure(_ container: Container) throws {
-        let validator = self.validator
-        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
-    }
-}
-
 func testPrincipal(
     subject: String = "user-123",
     roles: Set<String> = [],

@@ -32,28 +32,27 @@ struct StreamFixtureController {
     }
 }
 
-private struct StreamModule: FlightModule {
-    func configure(_ container: Container) throws {
-        try StreamFixtureController._flightRegister(container)
-        // The wiring-defect case: a handler that wants a stream on a route
-        // whose table entry says buffered.
-        container.registerRoute(.post, "/mismatched", source: "StreamModule") { context in
+/// The controller's routes plus the wiring-defect case as values — the
+/// routes a composition root would hand `FlightWebModule`. `/mismatched` is a
+/// buffered-delivery route whose handler asks for a stream, which must fail
+/// loudly rather than hang.
+private func streamRoutes() -> [RouteRegistration] {
+    [
+        StreamFixtureController._flightRoute_ingest_0 { _ in StreamFixtureController() },
+        StreamFixtureController._flightRoute_bounded_1 { _ in StreamFixtureController() },
+        RouteRegistration(method: "POST", path: "/mismatched", source: "StreamModule") { context in
             _ = try FlightWeb.decodeRequestBody(RequestBodyStream.self, from: context)
             return .text("unreachable")
-        }
-    }
+        },
+    ]
 }
 
 @Suite("streaming request bodies — in process")
 struct BodyStreamTests {
 
-    private func container() throws -> Container {
-        try TestContainer.build { StreamModule() }
-    }
-
     @Test("the macro records streaming mode and the cap in the route table")
     func routeTableRecordsBodyMode() throws {
-        let routes = try container().collectRoutes()
+        let routes = streamRoutes()
         let ingest = try #require(routes.first { $0.path == "/ingest" })
         #expect(ingest.bodyMode == .streaming(maxBytes: 1_000_000))
 
@@ -63,7 +62,7 @@ struct BodyStreamTests {
 
     @Test("dispatch answers bodyMode from the table, like acceptsUpgrade")
     func dispatchAnswersBodyMode() throws {
-        let dispatch = try DispatchBuilder.build(container: container())
+        let dispatch = try TestClient(routes: streamRoutes()).dispatch
         #expect(
             dispatch.bodyMode(Request(method: .post, path: "/ingest"))
                 == .streaming(maxBytes: 1_000_000))
@@ -74,7 +73,7 @@ struct BodyStreamTests {
 
     @Test("a handler receives the chunks exactly as they arrive")
     func chunksArriveLive() async throws {
-        let client = try TestClient(container: container())
+        let client = try TestClient(routes: streamRoutes())
         let response = await client.post(
             "/ingest",
             bodyChunks: [Data("abc".utf8), Data("defgh".utf8), Data("i".utf8)])
@@ -83,7 +82,7 @@ struct BodyStreamTests {
 
     @Test("a mid-stream error reaches the handler as a thrown error, rendered honestly")
     func midStreamError() async throws {
-        let client = try TestClient(container: container())
+        let client = try TestClient(routes: streamRoutes())
         var request = Request(method: .post, path: "/ingest")
         let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
         continuation.yield(Data("partial".utf8))
@@ -95,32 +94,28 @@ struct BodyStreamTests {
 
     @Test("a streaming handler on a buffered delivery is a 500, not a hang")
     func wiringMismatchIsLoud() async throws {
-        let client = try TestClient(container: container())
+        let client = try TestClient(routes: streamRoutes())
         let response = await client.post("/mismatched", body: Data("buffered".utf8))
         #expect(response.status == .internalServerError)
     }
 
     @Test("multipart parses over the live stream — B and C composed")
     func multipartOverStream() async throws {
-        struct UploadModule: FlightModule {
-            func configure(_ container: Container) throws {
-                container.registerRoute(
-                    .post, "/upload", source: "UploadModule",
-                    bodyMode: .streaming(maxBytes: nil)
-                ) { context in
-                    var summary: [String] = []
-                    for try await part in try context.request.multipart() {
-                        if part.filename != nil {
-                            var bytes = 0
-                            for try await chunk in part.body { bytes += chunk.count }
-                            summary.append("\(part.name)=file(\(bytes))")
-                        } else {
-                            summary.append("\(part.name)=\(try await part.text())")
-                        }
-                    }
-                    return .text(summary.joined(separator: ";"))
+        let upload = RouteRegistration(
+            method: "POST", path: "/upload", source: "UploadModule",
+            bodyMode: .streaming(maxBytes: nil)
+        ) { context in
+            var summary: [String] = []
+            for try await part in try context.request.multipart() {
+                if part.filename != nil {
+                    var bytes = 0
+                    for try await chunk in part.body { bytes += chunk.count }
+                    summary.append("\(part.name)=file(\(bytes))")
+                } else {
+                    summary.append("\(part.name)=\(try await part.text())")
                 }
             }
+            return .text(summary.joined(separator: ";"))
         }
         let boundary = "----seam"
         let wire = Data(
@@ -132,7 +127,7 @@ struct BodyStreamTests {
                 + "Content-Type: application/octet-stream\r\n\r\n"
                 + String(repeating: "z", count: 10_000) + "\r\n"
                 + "--\(boundary)--").utf8)
-        let client = try TestClient(container: TestContainer.build { UploadModule() })
+        let client = try TestClient(routes: [upload])
         // Delivered in awkward 1KiB chunks — boundaries straddle seams.
         let chunks = stride(from: 0, to: wire.count, by: 1024).map {
             Data(wire[$0..<min($0 + 1024, wire.count)])

@@ -160,43 +160,28 @@ struct GeneratorTests {
         ])
 
         #expect(result.exitCode == 0)
-        // The header carries a component count and the target name; the
-        // registration function below it is what this test pins. The static
-        // manifest that follows has its own golden test — one assertion over
-        // both would fail on every manifest field, which is not what this is
-        // watching for.
-        // Internal, not public: it takes `FlightGraph`, which is internal.
-        let marker = "func flightRegisterAll("
+        // The construction the whole migration turns on: `FlightGraph`, which
+        // builds every component once, in dependency order, without a
+        // container. It is the last declaration this fixture emits (no routes,
+        // no composer), and its body is what this test pins so a shape
+        // regression in the graph fails here. The `@Inject var _: (any Greeter)`
+        // resolves through the one scanned conformer — inlined as
+        // `greeter: englishGreeter` rather than a runtime bridge.
+        let marker = "struct FlightGraph {"
         let start = try #require(result.generated.range(of: marker)).lowerBound
-        // The manifest's own doc comment precedes its declaration, so the
-        // boundary is that comment, not the `public enum`.
-        let end =
-            result.generated.range(of: "/// Every route this module declares")?.lowerBound
-            ?? result.generated.endIndex
-        let body = String(result.generated[start..<end])
+        let body = String(result.generated[start...])
             .trimmingCharacters(in: .newlines)
         #expect(
             body == """
-                func flightRegisterAll(
-                    _ container: FlightCore.Container, graph: FlightGraph
-                ) throws {
-                    // Projected, not built: route terminals resolve it to reach root
-                    // inputs, and they see the instance the composition root made.
-                    container.register(FlightGraph.self, scope: .singleton) { _ in graph }
+                struct FlightGraph {
+                    let englishGreeter: EnglishGreeter
+                    let welcomer: Welcomer
 
-                    container.register(EnglishGreeter.self, scope: .singleton, stereotype: .service) { _ in
-                        graph.englishGreeter
-                    }
-                    container.register(Welcomer.self, scope: .singleton) { _ in
-                        graph.welcomer
-                    }
-
-                    // Existential bridges (demand-driven): each `@Inject var _: (any P)`
-                    // with exactly one scanned conformer resolves through that conformer,
-                    // mirroring its scope. A `// flight:hand-registered` marker on the
-                    // demanding property suppresses the bridge.
-                    container.register((any Greeter).self) { c in
-                        try c.resolve(EnglishGreeter.self)
+                    init(englishGreeter: EnglishGreeter? = nil, welcomer: Welcomer? = nil) throws {
+                        let englishGreeter = englishGreeter ?? EnglishGreeter()
+                        self.englishGreeter = englishGreeter
+                        let welcomer = welcomer ?? Welcomer(greeter: englishGreeter)
+                        self.welcomer = welcomer
                     }
                 }
                 """)
@@ -215,19 +200,16 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
-        // Ordinary is a graph node, so its registration projects onto the
-        // graph rather than calling its own thunk.
-        #expect(result.generated.contains("graph.ordinary"))
+        // Ordinary is a graph node — the graph builds it.
+        #expect(result.generated.contains("let ordinary: Ordinary"))
         #expect(
             !result.generated.contains("let gated: Gated"),
-            "a module-registered type is not a graph node either")
-        #expect(
-            !result.generated.contains("try Gated._flightRegister(container)"),
-            "a module-registered type must not be registered by the scan")
-        // Named rather than silently dropped: "why is my type not registered"
-        // has to be answerable by reading the generated file.
+            "a module-registered type is not a graph node — its own module builds it")
+        // Named rather than silently dropped: the scanned manifest still
+        // carries it, flagged, so "why is my type not built here" is
+        // answerable by reading the generated file.
         #expect(result.generated.contains("Gated"))
-        #expect(result.generated.contains("flight:module-registered"))
+        #expect(result.generated.contains("isModuleRegistered: true"))
     }
 
     /// The hazard the marker exists for, in miniature: `freeze()` builds every
@@ -613,12 +595,12 @@ struct GeneratorTests {
         #expect(!result.generated.contains("let authentication: Authentication"))
     }
 
-    @Test("the graph is constructible from a container, not just compilable")
-    func graphIsConstructibleFromAContainer() throws {
-        // A function rather than a registration, deliberately: every
-        // component is built eagerly at freeze, so registering the graph
-        // would make a missing root parameter fail the boot of an
-        // application that works today — for a value nothing calls yet.
+    @Test("a hand-registered dependency becomes a required graph input, not a container resolve")
+    func handRegisteredDependencyIsAGraphInput() throws {
+        // A `flight:hand-registered` @Inject names something the scan does not
+        // build — a root input the composition root supplies. The graph takes
+        // it as a required init parameter (no `= nil` default) and builds the
+        // component from it; there is no container to resolve it from.
         let result = try generate([
             "Sources.swift": """
             import FlightCore
@@ -630,12 +612,9 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
-        #expect(
-            result.generated.contains(
-                "func makeFlightGraph(_ container: FlightCore.Container) throws -> FlightGraph"))
-        #expect(
-            result.generated.contains(
-                "postgresDataSource: container.resolve(PostgresDataSource.self)"))
+        #expect(result.generated.contains("let postgresDataSource: PostgresDataSource"))
+        #expect(result.generated.contains("init(postgresDataSource: PostgresDataSource"))
+        #expect(result.generated.contains("UserRepository(pool: postgresDataSource)"))
     }
 
     @Test("routes are emitted with a per-request controller, through the macro's factory")
@@ -780,13 +759,13 @@ struct GeneratorTests {
         #expect(result.generated.contains("UserService(store: userRepository)"))
     }
 
-    @Test("an application whose only component is a controller still registers the graph")
-    func controllerOnlyAppRegistersTheGraph() throws {
+    @Test("an application whose only component is a controller still emits the graph")
+    func controllerOnlyAppEmitsTheGraph() throws {
         // The skeleton template's shape, and a bug it caught that a richer
         // application could not: with the controller excluded from the graph
-        // there are no nodes, but the route terminals still resolve
-        // FlightGraph — so gating its registration on "has nodes" emitted
-        // terminals that resolved a type nothing registered.
+        // there are no nodes, but `flightRoutes` still takes a `FlightGraph` —
+        // so gating the graph's *emission* on "has nodes" would emit a route
+        // list referencing a type that was never defined.
         let result = try generate([
             "Sources.swift": """
             import FlightWeb
@@ -798,8 +777,9 @@ struct GeneratorTests {
             """
         ])
         #expect(result.exitCode == 0)
-        #expect(result.generated.contains("container.register(FlightGraph.self"))
-        // The graph reaches route terminals as `flightRoutes`' parameter.
+        // The (empty) graph is emitted regardless...
+        #expect(result.generated.contains("struct FlightGraph {"))
+        // ...so the route terminals can take it as `flightRoutes`' parameter.
         #expect(result.generated.contains("func flightRoutes(_ graph: FlightGraph)"))
     }
 

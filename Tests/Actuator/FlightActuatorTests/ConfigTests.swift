@@ -10,10 +10,15 @@ import Testing
 @Suite("Format configuration")
 struct ConfigTests {
 
+    /// The composer reads `actuator.format` from configuration and hands the
+    /// decoded format to the module; this mirrors that, then serves the
+    /// dashboard and reports the content type the format produced.
     private func contentType(for values: [String: String]) async throws -> String? {
-        let actuator = ActuatorModule(environment: .dev)
-        let container = try TestContainer.build(configuration: Configuration(values: values)) { actuator }
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let configuration = Configuration(values: values)
+        let format =
+            try configuration.getIfPresent("actuator.format", as: ActuatorFormat.self) ?? .ssr
+        let actuator = ActuatorModule(environment: .dev, exposure: .full, format: format)
+        let client = try TestClient(routes: actuator.routes)
         return await client.get("/actuator").headers[.contentType]
     }
 
@@ -37,14 +42,13 @@ struct ConfigTests {
         #expect(try await contentType(for: ["actuator.format": " JSON "]) == "application/json; charset=utf-8")
     }
 
-    @Test("a malformed value fails bootstrap loudly instead of defaulting")
+    @Test("a malformed value fails composition loudly instead of defaulting")
     func malformedValueFailsBootstrap() {
+        // The composer init reads `actuator.format`; a value it cannot decode
+        // throws rather than silently falling back to SSR.
         #expect(throws: ConfigError.self) {
-            _ = try TestContainer.build(
-                configuration: Configuration(values: ["actuator.format": "xml"])
-            ) {
-                ActuatorModule(environment: .dev)
-            }
+            _ = try ActuatorModule(
+                configuration: Configuration(values: ["actuator.format": "xml"]))
         }
     }
 }

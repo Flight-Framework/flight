@@ -123,6 +123,34 @@ public struct AssetMountRegistration: Sendable {
     /// Present exactly when `options.etag == .contentHash` — constructed
     /// with the mount, so "declared but never initialized" cannot happen.
     let hashCache: ContentHashCache?
+
+    /// The value a module declares to mount a directory of static files at
+    /// `prefix`, served as a routing fallback (a real route always wins).
+    /// The composition root hands these to `FlightWebModule(assetMounts:)`,
+    /// the same way it hands over routes.
+    ///
+    ///     let assets = AssetMountRegistration.mount(at: "/", root: "web/build") { o in
+    ///         o.spaFallback = "index.html"
+    ///         o.exclude = ["/api", "/actuator"]
+    ///     }
+    public static func mount(
+        at prefix: String = "/",
+        root: String,
+        pipelines: [PipelineLane] = [.default],
+        _ configure: (inout AssetMountOptions) -> Void = { _ in }
+    ) -> AssetMountRegistration {
+        var options = AssetMountOptions()
+        configure(&options)
+        let hashCache: ContentHashCache?
+        if case .contentHash = options.etag {
+            hashCache = ContentHashCache()
+        } else {
+            hashCache = nil
+        }
+        return AssetMountRegistration(
+            prefix: prefix.hasSuffix("/") && prefix != "/" ? String(prefix.dropLast()) : prefix,
+            root: root, pipelines: pipelines, options: options, hashCache: hashCache)
+    }
 }
 
 

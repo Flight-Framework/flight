@@ -29,19 +29,14 @@ struct SnapshotWire: Decodable {
 @Suite("JSON rendering")
 struct JSONRenderingTests {
 
-    /// The container plus the actuator's declared routes — a module's routes
-    /// are values now, so a client that serves them has to be given them.
+    /// The actuator's declared routes — a module's routes are values now, so
+    /// a client that serves them is given them. The controller is built with
+    /// the JSON format, the way the composer's `actuator.format` would.
     private func jsonClient(environment: FlightEnvironment = .staging) throws -> TestClient {
         let actuator = ActuatorModule(
             environment: environment, exposure: .full,
-            components: SampleAppModule.components)
-        let container = try TestContainer.build(
-            configuration: Configuration(values: ["actuator.format": "json"])
-        ) {
-            actuator
-            SampleAppModule()
-        }
-        return try TestClient(container: container, routes: actuator.routes)
+            components: SampleAppModule.components, format: .json)
+        return try TestClient(routes: actuator.routes)
     }
 
     @Test("dashboard serves application/json when configured")
@@ -82,12 +77,13 @@ struct JSONRenderingTests {
     func failedModuleOnTheWire() async throws {
         let app = try Flight.assemble(
             configuration: Configuration(),
-            modules: [FailingServiceModule.self]
+            modules: [FailingServiceModule()]
         )
         let failing = try #require(app.services.first)
         _ = try? await failing.service.run()
 
-        let snapshot = ActuatorSnapshot(container: app.container, environment: .test)
+        let snapshot = ActuatorSnapshot(
+            health: app.health, components: [], environment: .test)
         let data = try JSONEncoder().encode(snapshot)
         let wire = try JSONDecoder().decode(SnapshotWire.self, from: data)
 
@@ -98,8 +94,8 @@ struct JSONRenderingTests {
 
     @Test("a healthy module encodes with a null error")
     func healthyModuleOnTheWire() throws {
-        let app = try Flight.assemble(configuration: Configuration(), modules: [FailingServiceModule.self])
-        let snapshot = ActuatorSnapshot(container: app.container, environment: .dev)
+        let app = try Flight.assemble(configuration: Configuration(), modules: [FailingServiceModule()])
+        let snapshot = ActuatorSnapshot(health: app.health, components: [], environment: .dev)
         let data = try JSONEncoder().encode(snapshot)
         let wire = try JSONDecoder().decode(SnapshotWire.self, from: data)
 

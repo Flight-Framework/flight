@@ -98,19 +98,14 @@ struct FrameworkSeamTests {
     private func harness() throws -> (client: TestClient, probe: SeamProbe) {
         let probe = SeamProbe()
         let configuration = Configuration()
-        let container = Container()
-        container.register(Configuration.self, scope: .singleton) { _ in configuration }
-        // Both modules take what they provide, so both are built here and
-        // configured directly — no type-based walk to substitute into.
+        // Both modules take what they provide and hold it as values — PubSub's
+        // bus feeds Channels, and the socket route is a value.
         let pubsub = try FlightPubSubModule(configuration: configuration)
         let channels = try FlightChannelsModule(
             bus: pubsub.bus,
             configuration: configuration,
             channels: [ChannelRegistration("seam:*") { _ in SeamChannel(probe: probe) }])
-        try pubsub.configure(container)
-        try channels.configure(container)
-        try container.freeze()
-        return (try TestClient(container: container, routes: [channels.socketRoute("/socket")]), probe)
+        return (try TestClient(routes: [channels.socketRoute("/socket")]), probe)
     }
 
     @Test("onTopicActivated fires after the join is fully established")

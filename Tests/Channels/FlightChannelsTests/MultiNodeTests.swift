@@ -25,7 +25,7 @@ struct MultiNodeTests {
             let harness = try NodeHarness(cluster: cluster)
             // The relay is the long-running half a real adapter module would
             // register as its service (PubSub README); tests run it directly.
-            guard let clustered = try harness.container.resolve((any PubSub).self) as? ClusteredPubSub else {
+            guard let clustered = harness.bus as? ClusteredPubSub else {
                 throw NotClustered()
             }
             return Node(harness: harness, relay: Task { await clustered.runIncomingRelay() })
@@ -38,15 +38,13 @@ struct MultiNodeTests {
     }
 
     private struct NodeHarness {
-        let container: Container
         let client: TestClient
+        /// This node's bus — clustered when an adapter was supplied.
+        let bus: any PubSub
 
         init(cluster: InMemoryCluster) throws {
             let configuration = Configuration()
-            let container = Container()
-            container.register(Configuration.self, scope: .singleton) { _ in configuration }
             let events = ChannelEvents()
-            container.register(ChannelEvents.self, scope: .singleton) { _ in events }
             // The adapter is handed to PubSub rather than registered for it
             // to find, and PubSub's bus is handed to Channels along with this
             // node's declared channels — the whole node, wired explicitly.
@@ -60,12 +58,8 @@ struct MultiNodeTests {
                         RoomChannel(broadcaster: channel.broadcaster, events: events)
                     }
                 ])
-            try pubsub.configure(container)
-            try channels.configure(container)
-            try container.freeze()
-            self.container = container
-            self.client = try TestClient(
-                container: container, routes: [channels.socketRoute("/socket")])
+            self.client = try TestClient(routes: [channels.socketRoute("/socket")])
+            self.bus = pubsub.bus
         }
 
         func wire() async throws -> ChannelWireClient {

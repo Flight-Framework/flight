@@ -164,36 +164,38 @@ struct SideEffectController {
     }
 }
 
-struct SideEffectModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] { [UserModule.self] }
-    func configure(_ container: Container) throws {
-        try SideEffectController._flightRegister(container)
+// MARK: - Route values (what a composition root hands FlightWebModule)
+
+/// UserController + EchoSocketController's routes as values. One shared
+/// `UserService` singleton across every route, a fresh `RequestTracer` per
+/// request — the identities the container used to arrange, arranged here by
+/// the constructing closure instead.
+private func userRoutes() -> [RouteRegistration] {
+    let userService = UserService()
+    let make: @Sendable (RequestContext) throws -> UserController = { _ in
+        UserController(userService: userService, tracer: RequestTracer())
     }
+    return [
+        UserController._flightRoute_getUser_0(make),
+        UserController._flightRoute_createUser_1(make),
+        UserController._flightRoute_deleteUser_2(make),
+        UserController._flightRoute_renameUser_3(make),
+        UserController._flightRoute_listUsers_4(make),
+        UserController._flightRoute_whoami_5(make),
+        UserController._flightRoute_scopedPair_6(make),
+        UserController._flightRoute_events_7(make),
+        EchoSocketController._flightRoute_echo_0 { _ in EchoSocketController() },
+    ]
 }
 
-// MARK: - Modules
-
-struct UserModule: FlightModule {
-    func configure(_ container: Container) throws {
-        // The build plugin's flightRegisterAll would make these calls in an
-        // app target; tests call the same generated thunks directly.
-        try UserService._flightRegister(container)
-        try RequestTracer._flightRegister(container)
-        try UserController._flightRegister(container)
-        try EchoSocketController._flightRegister(container)
-    }
-}
-
-struct AuthedModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] { [UserModule.self] }
-
-    func configure(_ container: Container) throws {
-        container.registerMiddleware("auth", order: 10) { context in
-            guard context.request.headers[.authorization] != nil else {
-                return .respond(.problem(status: .unauthorized, message: "Unauthorized"))
-            }
-            return .continue
+/// Rejects an unauthenticated request before routing — the value form of the
+/// old `registerMiddleware("auth")` closure.
+struct AuthMiddleware: Middleware {
+    func handle(_ context: RequestContext, next: Next) async throws -> Response {
+        guard context.request.headers[.authorization] != nil else {
+            return .problem(status: .unauthorized, message: "Unauthorized")
         }
+        return try await next(context)
     }
 }
 
@@ -203,7 +205,7 @@ struct AuthedModule: FlightModule {
 struct ControllerIntegrationTests {
 
     private func client() throws -> TestClient {
-        try TestClient(container: TestContainer.build { UserModule() })
+        try TestClient(routes: userRoutes())
     }
 
     @Test func getUserReturnsJSON() async throws {
@@ -299,17 +301,19 @@ struct ControllerIntegrationTests {
         #expect(honored.headers[.xRequestID] == "abc-123")
     }
 
-    @Test func routesAreVisibleInCoreIntrospection() throws {
-        // Routes are components (§4): Core's own introspection lists them.
-        let container = try TestContainer.build { UserModule() }
-        let routeBeans = container.allRegistrations().filter {
-            $0.typeName == String(reflecting: RouteRegistration.self)
-        }
-        // One per @*Mapping on UserController; adding a route here means
-        // updating this number, which is the point — a route that appears
-        // without anyone noticing is a route nobody meant to publish.
-        #expect(routeBeans.count == 9)
-        #expect(routeBeans.allSatisfy { $0.qualifier != nil })
+    @Test("every mapped method produces exactly one route value")
+    func everyMappingProducesOneRoute() throws {
+        // Routes are function calls now (§4): the controller emits one factory
+        // per @*Route, and the composition root lists them. Adding a route here
+        // means adding a line to `userRoutes()` — a route that appears without
+        // anyone noticing is a route nobody meant to publish.
+        let routes = userRoutes()
+        #expect(routes.count == 9)
+        #expect(routes.allSatisfy { !$0.source.isEmpty })
+        // Each source names its controller and method — the identity the
+        // container qualifier used to carry.
+        #expect(routes.contains { $0.source.hasSuffix(".getUser") })
+        #expect(routes.contains { $0.source.hasSuffix(".echo") })
     }
 }
 
@@ -317,7 +321,9 @@ struct ControllerIntegrationTests {
 struct MiddlewareIntegrationTests {
 
     @Test func middlewareRunsBeforeRouting() async throws {
-        let client = try TestClient(container: TestContainer.build { AuthedModule() })
+        let client = try TestClient(
+            routes: userRoutes(),
+            middleware: MiddlewareRegistration.lane(.default, [AuthMiddleware()]))
         #expect(await client.get("/users/1").status == .unauthorized)
 
         var headers = HTTPFields()
@@ -326,18 +332,22 @@ struct MiddlewareIntegrationTests {
     }
 
     @Test func middlewareOrderIsRespected() async throws {
-        struct OrderModule: FlightModule {
-            func configure(_ container: Container) throws {
-                container.registerMiddleware("second", order: 20) { context in
-                    .respond(.text((context.pathParam("mark") ?? "") + "second"))
-                }
-                container.registerMiddleware("first", order: 10) { context in
-                    context.pathParameters["mark"] = "first-then-"
-                    return .continue
-                }
+        // First runs outermost, sets a path parameter, and continues; second
+        // reads it and answers. Declared order within a lane is preserved.
+        struct First: Middleware {
+            func handle(_ context: RequestContext, next: Next) async throws -> Response {
+                var context = context
+                context.pathParameters["mark"] = "first-then-"
+                return try await next(context)
             }
         }
-        let client = try TestClient(container: TestContainer.build { OrderModule() })
+        struct Second: Middleware {
+            func handle(_ context: RequestContext, next: Next) async throws -> Response {
+                .text((context.pathParam("mark") ?? "") + "second")
+            }
+        }
+        let client = try TestClient(
+            middleware: MiddlewareRegistration.lane(.default, [First(), Second()]))
         let response = await client.get("/anything")
         #expect(response.bodyText == "first-then-second")
     }
@@ -347,7 +357,7 @@ struct MiddlewareIntegrationTests {
 struct WebSocketIntegrationTests {
 
     @Test func upgradeRouteEchoes() async throws {
-        let client = try TestClient(container: TestContainer.build { UserModule() })
+        let client = try TestClient(routes: userRoutes())
         let socket = try await client.webSocket("/echo/lobby")
 
         var received: [String] = []
@@ -364,7 +374,7 @@ struct WebSocketIntegrationTests {
     }
 
     @Test func nonUpgradeRouteRefusesWebSocket() async throws {
-        let client = try TestClient(container: TestContainer.build { UserModule() })
+        let client = try TestClient(routes: userRoutes())
         await #expect(throws: TestClient.TestClientError.self) {
             _ = try await client.webSocket("/users/1")
         }
@@ -378,8 +388,9 @@ struct WebSocketIntegrationTests {
         // its response, so any GET route was reachable by anyone willing to
         // attach upgrade headers. The route table now answers first.
         SideEffect.reset()
-        let container = try TestContainer.build { SideEffectModule() }
-        let dispatch = try DispatchBuilder.build(container: container)
+        let dispatch = try TestClient(
+            routes: [SideEffectController._flightRoute_run_0 { _ in SideEffectController() }]
+        ).dispatch
 
         let request = Request(method: .get, path: "/side-effect")
         #expect(dispatch.acceptsUpgrade(request) == false)
@@ -392,15 +403,16 @@ struct WebSocketIntegrationTests {
 
     @Test("a genuine upgrade route is recognized from the route table alone")
     func upgradeRouteIsRecognized() throws {
-        let container = try TestContainer.build { UserModule() }
-        let dispatch = try DispatchBuilder.build(container: container)
+        let dispatch = try TestClient(routes: userRoutes()).dispatch
         #expect(dispatch.acceptsUpgrade(Request(method: .get, path: "/echo/lobby")))
         #expect(!dispatch.acceptsUpgrade(Request(method: .get, path: "/users/1")))
         #expect(!dispatch.acceptsUpgrade(Request(method: .get, path: "/nope")))
     }
 
     @Test func middlewareGuardsUpgradeRoutes() async throws {
-        let client = try TestClient(container: TestContainer.build { AuthedModule() })
+        let client = try TestClient(
+            routes: userRoutes(),
+            middleware: MiddlewareRegistration.lane(.default, [AuthMiddleware()]))
         // No Authorization header: the middleware answers 401 before any
         // upgrade happens — exactly the §6.1 "no further middleware" contract
         // in reverse.
@@ -438,18 +450,20 @@ struct GadgetController {
     }
 }
 
-struct WidgetModule: FlightModule {
-    func configure(_ container: Container) throws {
-        try WidgetController._flightRegister(container)
-        try GadgetController._flightRegister(container)
-    }
+private func widgetRoutes() -> [RouteRegistration] {
+    [
+        WidgetController._flightRoute_index_0 { _ in WidgetController() },
+        WidgetController._flightRoute_show_1 { _ in WidgetController() },
+        WidgetController._flightRoute_create_2 { _ in WidgetController() },
+        GadgetController._flightRoute_show_0 { _ in GadgetController() },
+    ]
 }
 
 @Suite("@Controller base path (§4 addendum)", .serialized)
 struct ControllerBasePathTests {
 
     private func client() throws -> TestClient {
-        try TestClient(container: TestContainer.build { WidgetModule() })
+        try TestClient(routes: widgetRoutes())
     }
 
     @Test func rootMappingResolvesToTheBasePathItself() async throws {
@@ -482,15 +496,13 @@ struct ControllerBasePathTests {
         #expect(response.bodyText == "gadget 7")
     }
 
-    @Test func routesAppearCombinedInCoreIntrospection() throws {
-        // Routes are components (§4): the qualifier — and hence introspection —
-        // reflects the combined path, not the bare method-level literal.
-        let container = try TestContainer.build { WidgetModule() }
-        let qualifiers = container.allRegistrations()
-            .filter { $0.typeName == String(reflecting: RouteRegistration.self) }
-            .compactMap(\.qualifier)
-        #expect(qualifiers.contains { $0.hasPrefix("GET /api/v1/widgets/:id @") })
-        #expect(qualifiers.contains { $0.hasPrefix("GET /api/v1/widgets @") })
-        #expect(!qualifiers.contains { $0.hasPrefix("GET /:id @") })
+    @Test("the base path is combined into each route's path, not left bare")
+    func routesCarryTheCombinedPath() throws {
+        // The macro combines base + method path at expansion time; the route
+        // value carries the already-combined literal.
+        let paths = Set(widgetRoutes().map(\.path))
+        #expect(paths.contains("/api/v1/widgets/:id"))
+        #expect(paths.contains("/api/v1/widgets"))
+        #expect(!paths.contains("/:id"))
     }
 }
