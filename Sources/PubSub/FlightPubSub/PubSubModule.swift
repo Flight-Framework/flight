@@ -83,15 +83,9 @@ public struct FlightPubSubModule: FlightModule {
         self.bus = clustered
     }
 
-    /// This module takes its configuration, so it cannot be built from its
-    /// type alone — `isTypeConstructible` says so, and every supported path
-    /// checks that flag and throws before reaching this initializer.
-    public static var isTypeConstructible: Bool { false }
-
-    /// The backstop behind that flag, for a caller that writes
-    /// `FlightPubSubModule()` directly. `FlightModule` still requires `init()`
-    /// while the type-based entry points exist; the message says what to do
-    /// rather than trapping anonymously.
+    /// The backstop the generated composer falls back to when it emits
+    /// `FlightPubSubModule()`: a caller that reaches this gets a message
+    /// saying what to do rather than trapping anonymously.
     public init() {
         preconditionFailure(
             "FlightPubSubModule takes its configuration in init(configuration:adapter:), so it "

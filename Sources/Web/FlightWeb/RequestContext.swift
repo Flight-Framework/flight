@@ -4,13 +4,12 @@ import ServiceContextModule
 
 /// Everything a middleware or handler needs about one in-flight request (§2).
 ///
-/// Design delta, recorded in README: the doc's sketch has no container
-/// reference, but a `Scope` is only usable through
-/// `Container.resolve(_:in:)` — so the context carries the container
-/// privately and exposes `resolve(_:qualifier:)`, which is what makes
-/// request-scoped components reachable from handlers at all. The stored property
-/// is not public; handlers still cannot reach registration APIs or anything
-/// beyond scoped resolution ergonomics.
+/// A value, copied per middleware layer: there is no container behind it.
+/// What a handler needs from the application — the encoders/decoders and the
+/// error mapper — rides on ``web`` (a ``WebRuntime``), stamped by dispatch
+/// from what `FlightWebModule` was composed with. Anything a handler
+/// constructs per request is built by its route's factory closure, not
+/// resolved here.
 public struct RequestContext: Sendable {
     public let request: Request
     public var pathParameters: [String: String]

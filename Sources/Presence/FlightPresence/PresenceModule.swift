@@ -97,10 +97,6 @@ public struct FlightPresenceModule: FlightModule {
         self.gossipBus = gossipBus
     }
 
-    /// This module takes what it provides, so it cannot be built from its
-    /// type — every supported path checks this and throws first.
-    public static var isTypeConstructible: Bool { false }
-
     public init() {
         preconditionFailure(
             "FlightPresenceModule takes its buses and configuration in "

@@ -46,7 +46,8 @@ public enum BootstrapError: Error, CustomStringConvertible {
     case duplicateRegistration(String)
 
     /// A module named only by its type takes what it provides as initializer
-    /// parameters — see ``FlightModule/isTypeConstructible``.
+    /// parameters, so it cannot be built from its type — the composition root
+    /// must construct it.
     case moduleRequiresConstruction(module: String)
 
     public var description: String {

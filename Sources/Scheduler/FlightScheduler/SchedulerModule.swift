@@ -37,9 +37,8 @@ public struct FlightSchedulerModule: FlightModule {
     /// Reported by Actuator; owned here.
     public let status = SchedulerStatus()
 
-    /// Nothing to build it from a type alone would be *wrong* — a scheduler
-    /// with no jobs is a legal application — so `init()` stays usable and
-    /// this module keeps `isTypeConstructible` true.
+    /// A scheduler with no jobs is a legal application, so `init()` stays
+    /// usable — it composes an empty scheduler.
     public init() {
         self.init(jobs: [], coordinator: nil)
     }

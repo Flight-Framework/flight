@@ -74,9 +74,6 @@ public struct FlightSecurityModule: FlightModule {
             + MiddlewareRegistration.lane(.authenticated, [authentication, require])
     }
 
-    /// This module takes the validator, so it cannot be built from its type.
-    public static var isTypeConstructible: Bool { false }
-
     public init() {
         preconditionFailure(
             "FlightSecurityModule takes a token validator in init(validator:), so it cannot be "
@@ -125,10 +122,6 @@ public final class FlightOIDCModule: FlightModule {
         self.validator = validator
         self.tokenValidator = validator
     }
-
-    /// This module takes its configuration, so it cannot be built from its
-    /// type — every supported path checks this and throws first.
-    public static var isTypeConstructible: Bool { false }
 
     public init() {
         preconditionFailure(

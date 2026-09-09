@@ -53,32 +53,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
 
         let access = registrationAccess(for: declaration)
 
-        // 1. Resolving initializer — identical shape to @Component's.
-        var initLines: [String] = []
-        for property in properties {
-            switch property.kind {
-            case .inject(let qualifier):
-                if let qualifier {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self, qualifier: \(qualifier))"
-                    )
-                } else {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self)"
-                    )
-                }
-            case .configValue(let key, let defaultValue):
-                if let defaultValue {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.metatypeBase).self) ?? (\(defaultValue))"
-                    )
-                } else {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.metatypeBase).self)"
-                    )
-                }
-            }
-        }
         // A route's own `pipelines:` replaces the controller's rather than
         // adding to it — the only rule that can express both "public
         // controller, one authenticated route" and "authenticated
@@ -180,25 +154,6 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         lines.append("    }")
         lines.append("}")
         return lines.joined(separator: "\n")
-    }
-
-    /// The registration that calls one route's factory. The qualifier embeds
-    /// the runtime-qualified controller name so two controllers may declare
-    /// colliding patterns without tripping Core's duplicate-registration
-    /// precondition — the Router reports the conflict as a proper startup
-    /// error naming both sources instead.
-    private static func routeRegistrationLines(
-        for route: ScannedRoute, path: String, index: Int
-    ) -> [String] {
-        [
-            "container.register(FlightWeb.RouteRegistration.self, qualifier: \"\(route.kind.httpMethod) \(path) @\" + String(reflecting: Self.self) + \".\(route.methodName)\", scope: .singleton) { c in",
-            // Resolved once, here, and handed to every request — the shape
-            // that has always been. §2.1a replaces this closure, and only
-            // this closure.
-            "    let controller = try c.resolve(Self.self)",
-            "    return Self.\(factoryName(for: route, index: index)) { _ in controller }",
-            "}",
-        ]
     }
 
     // MARK: - ExtensionMacro
