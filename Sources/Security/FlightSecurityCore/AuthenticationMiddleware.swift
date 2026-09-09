@@ -77,7 +77,7 @@ public struct Authentication: Sendable {
 /// this the right someone".
 ///
 /// Not installed by ``FlightSecurityModule`` — an application adds it to its
-/// own `container.pipeline { }` (after ``Authentication`` — it needs the
+/// own lane (after ``Authentication`` — it needs the
 /// principal *this* request's authentication decided, not some other
 /// request's) for the routes it wants protected. For selective protection,
 /// use the handler-level guards (`context.requirePrincipal()` /

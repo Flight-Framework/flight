@@ -37,7 +37,7 @@ public struct RouteRegistration: Sendable {
     /// for startup logs, conflict diagnostics, and introspection.
     public let source: String
     /// Which middleware lanes wrap this route, in order — the names of
-    /// `container.pipeline("name") { }` declarations, concatenated. The
+    /// `MiddlewareRegistration.lane("name", [...])` declarations, concatenated. The
     /// default is the unnamed default lane, so every route behaves exactly
     /// as before lanes existed unless it says otherwise. Referencing a lane
     /// nobody declared fails when dispatch is built — bootstrap, not the
@@ -83,23 +83,24 @@ public struct RouteRegistration: Sendable {
 
 /// A named middleware layer plus its position in the chain, normalized to
 /// one canonical shape regardless of whether it came from `@Middleware` +
-/// `container.pipeline { }` or a deprecated `registerMiddleware` closure.
+/// `MiddlewareRegistration.lane(_:_:)` or a deprecated `registerMiddleware` closure.
 /// Registered through the same pipeline as everything else; collected and
 /// sorted when dispatch is built.
 public struct MiddlewareRegistration: Sendable {
-    /// `pipeline`-declared layers always run outermost, ahead of every
+    /// `pipeline`-generation layers always run outermost, ahead of every
     /// `registerMiddleware` closure, regardless of what numeric `order` the
     /// closures used — this is what lets a migration move one closure at a
-    /// time into `pipeline { }` without renumbering everything else already
-    /// there. Within a generation, entries sort by `(order, sequence)`.
+    /// time into a `.lane(_:_:)` declaration without renumbering everything
+    /// else already there. Within a generation, entries sort by
+    /// `(order, sequence)`.
     enum Generation: Int, Sendable, Comparable {
         case pipeline = 0
         case legacyClosure = 1
         static func < (lhs: Generation, rhs: Generation) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
-    /// The lane every route runs through unless it names others — and the
-    /// one `container.pipeline { }` (no name) feeds. Spelled
+    /// The lane every route runs through unless it names others — the one
+    /// `MiddlewareRegistration.lane(.default, [...])` feeds. Spelled
     /// ``PipelineLane/default`` at a declaration site; kept here because
     /// this is where the chain-assembly code reaches for it.
     public static let defaultLane = PipelineLane.default
@@ -110,8 +111,8 @@ public struct MiddlewareRegistration: Sendable {
     public let order: Int
     let generation: Generation
     /// A placeholder recording that a lane was declared, carrying no
-    /// behavior. `pipeline(_:_:)` registers one per named lane so that a
-    /// lane with no middleware in it still *exists* — the empty
+    /// behavior. `MiddlewareRegistration.lane(_:_:)` puts one first per lane
+    /// so that a lane with no middleware in it still *exists* — the empty
     /// static-asset lane is the motivating case, and the undeclared-lane
     /// error already promised it was legal. Filtered out of
     /// `collectMiddleware(lane:)`, so it costs a request nothing.
@@ -132,10 +133,9 @@ public struct MiddlewareRegistration: Sendable {
     }
 
     /// Wraps a `Middleware` value directly, for testing a chain — with
-    /// `compose(_:around:)` — without a container. A real application
-    /// registers through `container.pipeline { }` instead, which resolves
-    /// the type through dependency injection; this is the same normalized
-    /// shape, just built from a value already in hand.
+    /// `compose(_:around:)` — in isolation. A real application declares its
+    /// middleware through `MiddlewareRegistration.lane(_:_:)` instead; this is
+    /// the same normalized shape, just built from a single value in hand.
     public init(_ middleware: any Middleware, name: String? = nil) {
         self.init(
             name: name ?? String(reflecting: type(of: middleware)),
@@ -146,7 +146,7 @@ public struct MiddlewareRegistration: Sendable {
     }
 }
 
-/// The order `container.pipeline { }` declares — outermost first, one entry
+/// The order a lane declares — outermost first, one entry
 /// per `@Middleware` type.
 @resultBuilder
 public enum MiddlewarePipelineBuilder {
@@ -157,12 +157,12 @@ public enum MiddlewarePipelineBuilder {
 
 extension MiddlewareRegistration {
     /// One lane's worth of middleware, as values — the value-level spelling of
-    /// `container.pipeline(name) { ... }`.
+    /// what `container.pipeline(name) { ... }` used to declare.
     ///
     /// A module that owns its middleware has the *instances*, so there is
-    /// nothing to resolve: the container form exists because a registration
+    /// nothing to resolve: the container form existed because a registration
     /// could only name a type and resolve it later. The lane marker comes
-    /// first for the same reason it does there — a lane with no middleware is
+    /// first for the same reason it did there — a lane with no middleware is
     /// still a declared lane, and a route naming it must validate.
     public static func lane(
         _ name: PipelineLane, _ middleware: [any Middleware]

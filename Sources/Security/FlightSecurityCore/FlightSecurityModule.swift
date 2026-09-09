@@ -6,9 +6,9 @@ import ServiceLifecycle
 /// Authentication wiring, independent of how tokens are validated.
 ///
 /// Registers:
-/// - ``Authentication`` in its own `pipeline { }` call, ahead of whatever the
-///   application declares in its own — see `Container.pipeline(_:)` for why
-///   calling it more than once composes rather than conflicts;
+/// - ``Authentication`` in its own lane, ahead of whatever the application
+///   declares in its own — lanes compose across `MiddlewareRegistration.lane`
+///   declarations rather than conflict;
 /// - the two canonical security lanes, `PipelineLane.authentication` and
 ///   `PipelineLane.authenticated`, filled with what their documentation says
 ///   they contain.

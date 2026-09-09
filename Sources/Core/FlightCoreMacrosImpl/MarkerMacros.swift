@@ -31,7 +31,7 @@ public struct ConfigValueMacro: PeerMacro {
 }
 
 /// Shared validation: must be a stored property (let or var — both are
-/// assignable from the generated `init(_flight:)`) with an explicit type
+/// assignable from the generated initializer) with an explicit type
 /// annotation, since injection resolves by static type.
 private func validateInjectedProperty(
     _ node: AttributeSyntax,

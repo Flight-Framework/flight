@@ -113,14 +113,15 @@ extension String {
     }
 }
 
-/// The generator's always-available list, checked against what the container
-/// actually answers for.
+/// The generator's always-available list, checked against what resolves
+/// without registration.
 ///
 /// Same failure shape as the attribute list above, one layer over: the
 /// generator warns about any `@Inject` type it cannot see a registration
-/// for, and two types need no registration at all. A demand for one of those
-/// is correct code, so a warning on it is noise on every build — and a
-/// warning that is noise on every build is one nobody reads when it is real.
+/// for, and `Configuration` needs none — bootstrap always provides it. A
+/// demand for it is correct code, so a warning on it is noise on every build
+/// — and a warning that is noise on every build is one nobody reads when it
+/// is real.
 ///
 /// Reading the list from source rather than restating it is again the point.
 @Suite("Always-available types")
@@ -161,14 +162,6 @@ struct AlwaysAvailableTests {
             }
         }
         return names
-    }
-
-    @Test("the container is on the list, because it resolves to itself")
-    func containerIsAlwaysAvailable() throws {
-        let names = try alwaysAvailableNames()
-        // Both spellings: a property may be declared as either.
-        #expect(names.contains("Container"))
-        #expect(names.contains("FlightCore.Container"))
     }
 
     @Test("configuration is on the list, because bootstrap registers it")

@@ -87,8 +87,8 @@ public struct SettingsMacro: MemberMacro, ExtensionMacro {
         for requested in protocols {
             // Matched by suffix, not exact text: real compilation and the
             // `assertMacroExpansion` test harness spell these differently
-            // qualified (`FlightCore._FlightRegistrable` vs
-            // `_FlightRegistrable`), and both are the same protocol.
+            // qualified (`Swift.CustomStringConvertible` vs
+            // `CustomStringConvertible`), and both are the same protocol.
             let name = requested.trimmedDescription
             switch true {
             case name.hasSuffix("CustomStringConvertible"):
@@ -375,7 +375,7 @@ public struct SettingsMacro: MemberMacro, ExtensionMacro {
         if declaration.is(StructDeclSyntax.self) { return true }
         // Anything else — an enum, an actor, a protocol — returned false with
         // no diagnostic at all, so the author's first sign of trouble was an
-        // opaque `_FlightRegistrable` conformance error from the extension
+        // opaque `CustomStringConvertible` conformance error from the extension
         // role, pointing at a line they did not write.
         let kind: String
         switch declaration.kind {

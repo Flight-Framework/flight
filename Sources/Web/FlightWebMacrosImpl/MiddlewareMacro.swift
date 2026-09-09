@@ -3,15 +3,11 @@ import FlightMacroSupport
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// `@Middleware`. Expands like Flight Core's `@Component` — resolving
-/// `init(_flight:)`, registration thunk, `_FlightRegistrable` conformance —
-/// with two differences: the registration is always `.singleton` (a
-/// middleware type is resolved once, when a `container.pipeline { }` first
-/// assembles the chain — a `.scoped` instance resolved there would be
-/// permanently pinned to whichever request triggered that first
-/// resolution), and the generated extension also declares conformance to
-/// `FlightWeb.Middleware`, so the type's own `handle(_:next:)` is all it
-/// needs to write.
+/// `@Middleware`. Expands like Flight Core's `@Component` — a parameterized
+/// initializer taking the type's `@Inject`/`@ConfigValue` dependencies, built
+/// once by the composition root — with one addition: the generated extension
+/// also declares conformance to `FlightWeb.Middleware`, so the type's own
+/// `handle(_:next:)` is all it needs to write.
 ///
 /// Self-contained rather than sharing Flight Core's `RegistrationMacro`
 /// (the shared expansion behind `@Component`/`@Service`/`@Repository`):
@@ -239,7 +235,7 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
                 }
                 context.diagnoseError(
                     "middleware.uninitialized",
-                    "Stored property '\(pattern.identifier.text)' of a @Middleware type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
+                    "Stored property '\(pattern.identifier.text)' of a @Middleware type needs a default value — the generated initializer assigns only @Inject/@ConfigValue properties.",
                     at: variable
                 )
                 valid = false

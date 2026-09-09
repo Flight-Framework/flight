@@ -92,10 +92,10 @@ extension RegistrationMacro {
     // MARK: - Validation
 
     /// Final class or struct only. Non-final classes would need a `required`
-    /// resolving init to make `Self(_flight:)` legal in a static context —
-    /// deliberately unsupported in v1 rather than silently generating
-    /// subclass-hostile code. Actors are deferred: container-managed actors
-    /// are a Flight-wide design question, not
+    /// initializer to make the generated `Self(...)` legal in a static
+    /// context — deliberately unsupported in v1 rather than silently
+    /// generating subclass-hostile code. Actors are deferred: actor-based
+    /// components are a Flight-wide design question, not
     /// a macro detail to improvise.
     private static func validateAttachmentTarget(
         _ declaration: some DeclGroupSyntax,
@@ -158,7 +158,7 @@ extension RegistrationMacro {
         return valid
     }
 
-    /// M-3 : the generated `init(_flight:)` assigns only
+    /// M-3 : the generated initializer assigns only
     /// injected properties, so any other stored property must carry a default
     /// value (or be an implicitly-nil optional `var`). Without this check the
     /// failure is a "return from initializer without initializing all stored
@@ -193,7 +193,7 @@ extension RegistrationMacro {
                 }
                 context.diagnoseError(
                     "component.uninitialized",
-                    "Stored property '\(pattern.identifier.text)' of a \(displayName) type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
+                    "Stored property '\(pattern.identifier.text)' of a \(displayName) type needs a default value — the generated initializer assigns only @Inject/@ConfigValue properties.",
                     at: variable
                 )
                 valid = false
@@ -213,7 +213,7 @@ extension RegistrationMacro {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
             guard let kind = injectionKind(of: variable, in: context) else { continue }
             // A type-level property was collected like any other, and the
-            // generated `init(_flight:)` then assigned to a static member —
+            // generated initializer then assigned to a static member —
             // a compile error inside an expansion the author cannot see,
             // instead of a diagnostic naming the problem.
             if variable.modifiers.contains(where: {
@@ -330,9 +330,9 @@ extension RegistrationMacro {
         return (scope, qualifier)
     }
 
-    /// `_flightRegister` must be callable from the generated cross-module
-    /// `_registerAll`, and must satisfy the public `_FlightRegistrable`
-    /// requirement — so it mirrors the type's own access level.
+    /// The generated initializer must be callable from the generated
+    /// cross-module composition root — so it mirrors the type's own access
+    /// level.
     private static func registrationAccess(for declaration: some DeclGroupSyntax) -> String {
         let modifiers: DeclModifierListSyntax
         if let classDecl = declaration.as(ClassDeclSyntax.self) {

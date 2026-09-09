@@ -66,7 +66,7 @@ public enum DispatchBuilder {
         public let lane: PipelineLane
         public let route: String
         public var description: String {
-            "Route \(route) runs through pipeline lane '\(lane)', but no container.pipeline(\"\(lane)\") { } declared it. Declare the lane (an empty block is legal), or remove it from the route's pipelines."
+            "Route \(route) runs through pipeline lane '\(lane)', but nothing declared it. Declare it with MiddlewareRegistration.lane(\"\(lane)\", [...]) in a module (an empty lane list is legal), or remove it from the route's pipelines."
         }
     }
 
@@ -87,9 +87,8 @@ public enum DispatchBuilder {
     /// Every registry it needs is a list of contributions, and a contribution
     /// is a value a module holds (COMPOSITION-MIGRATION.md D15). Lanes are
     /// derived from the middleware rather than passed separately: a lane *is*
-    /// the set of middleware naming it, and `pipeline("x") { }` with an empty
-    /// block contributes a lane marker so an empty lane still counts as
-    /// declared.
+    /// the set of middleware naming it, and `MiddlewareRegistration.lane("x", [])`
+    /// contributes a lane marker so an empty lane still counts as declared.
     public static func build(
         routes: [RouteRegistration],
         middleware: [MiddlewareRegistration],
@@ -103,7 +102,7 @@ public enum DispatchBuilder {
         // with no middleware is legal); anything else must be declared.
         //
         // A lane is declared by anything naming it, including the marker
-        // `pipeline("x") { }` leaves for an empty block — so declaring and
+        // `.lane("x", [])` leaves for an empty lane — so declaring and
         // populating are separate passes. Order within a lane is
         // `(generation, order, position)`, the same ordering
         // `collectMiddleware(lane:)` applies.
@@ -128,7 +127,7 @@ public enum DispatchBuilder {
         }
         // `.public` means "explicitly no lanes", so the framework declares it
         // empty rather than asking every application to write
-        // `container.pipeline("public") { }` for a block that does nothing.
+        // `MiddlewareRegistration.lane("public", [])` for a lane that does nothing.
         if chainsByLane[.public] == nil {
             chainsByLane[.public] = []
         }

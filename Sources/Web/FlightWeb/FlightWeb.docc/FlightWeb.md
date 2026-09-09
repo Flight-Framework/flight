@@ -87,10 +87,7 @@ Order is declared in one place, outermost first, and the chain is composed
 once at startup rather than per request:
 
 ```swift
-container.pipeline {
-    RequestTiming.self
-    Authentication.self
-}
+MiddlewareRegistration.lane(.default, [RequestTiming(), Authentication()])
 ```
 
 A ``PipelineLane`` names an alternative stack that routes opt into with

@@ -52,18 +52,14 @@ public typealias Next = @Sendable (RequestContext) async throws -> Response
 /// resolvable with `@Inject`, constructible and testable on its own, its
 /// dependencies and settings arriving through its initializer the same way
 /// any other component's do. It does **not** enroll the type in any
-/// pipeline: a `@Middleware` type that appears in no `container.pipeline { }`
-/// simply never runs, which is a one-line fix rather than the wrong answer
-/// shipping silently.
+/// pipeline: a `@Middleware` type that appears in no lane simply never runs,
+/// which is a one-line fix rather than the wrong answer shipping silently.
 ///
 /// Order is declared once, in one place, top to bottom — outermost first —
 /// rather than as a number attached to each type in isolation:
 ///
 /// ```swift
-/// container.pipeline {
-///     RequestTiming.self
-///     Authentication.self
-/// }
+/// MiddlewareRegistration.lane(.default, [RequestTiming(), Authentication()])
 /// ```
 ///
 /// A type conforms directly rather than being adapted from a closure:
@@ -138,7 +134,7 @@ public typealias ClosureNext = @Sendable (inout RequestContext) async -> Respons
 /// it to `MiddlewareRegistration.lane(_:_:)` instead.
 @available(
     *, deprecated,
-    message: "Conform a type to Middleware and list it in a container.pipeline { } instead."
+    message: "Conform a type to Middleware and hand it to MiddlewareRegistration.lane(_:_:) instead."
 )
 public typealias ClosureMiddleware = @Sendable (inout RequestContext, ClosureNext) async -> Response
 
@@ -158,7 +154,7 @@ public enum MiddlewareResult: Sendable {
 /// Adapts a request-only step into a full closure-based middleware layer.
 @available(
     *, deprecated,
-    message: "Conform a type to Middleware and list it in a container.pipeline { } instead."
+    message: "Conform a type to Middleware and hand it to MiddlewareRegistration.lane(_:_:) instead."
 )
 public func middleware(
     from step: @escaping @Sendable (inout RequestContext) async -> MiddlewareResult

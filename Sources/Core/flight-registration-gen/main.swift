@@ -7,16 +7,18 @@
 //
 // Mechanism note: symbol graphs are
 // not available to build tool plugins, so this tool scans *source text* with
-// SwiftParser. It emits one flat `flightRegisterAll(_:)` for the whole graph
-// visible from the target, which preserves the aggregation contract ("one
-// generated function registers everything") with fewer moving parts than
-// per-target functions calling each other — dependency targets' generated
-// outputs are not visible across plugin work directories anyway.
+// SwiftParser. It emits the composition root for the whole graph visible from
+// the target — `flightComposeModules` (wires the modules by type), the
+// `FlightGraph` (builds every scanned component once, in dependency order),
+// `flightRoutes` / `flightScheduledJobs` (project registrations off it), and
+// `flightComponentDescriptors` (the scanned manifest). One generated file per
+// target covers the whole visible graph rather than per-target functions
+// calling each other — dependency targets' generated outputs are not visible
+// across plugin work directories anyway.
 //
-// Besides the per-component thunk calls, flightRegisterAll also carries
-// synthesized *existential bridges*: for every `@Inject var x: (any P)`
-// demand whose protocol has exactly one scanned conformer, a registration of
-// the existential key routing to that conformer (see the synthesis section
+// Building the graph also resolves synthesized *existential bridges*: for
+// every `@Inject var x: (any P)` demand whose protocol has exactly one scanned
+// conformer, the graph wires that conformer in (see the synthesis section
 // below for the exact rules and escape hatches).
 //
 // Diagnostics are printed to stderr in `path:line:col: severity: message`
@@ -53,8 +55,8 @@ struct ScannedComponent {
     let typeName: String
     /// The registrable attribute's name — `Service`, `Repository`,
     /// `Controller`, … — which is what decides the stereotype. Kept because
-    /// the generator delegates registration to the macro's `_flightRegister`
-    /// thunk and so never had to know it, while a static component list does.
+    /// the container-era generator delegated registration to the macro's thunk
+    /// and so never had to know it; emitting a static component list does.
     let attributeName: String
     let isPublic: Bool
     /// Source text of the registrable attribute's `scope:` argument. Defaults
@@ -94,9 +96,9 @@ struct ScannedComponent {
     /// As `injectPropertyNames`, for the acknowledged edges.
     let acknowledgedPropertyNames: [String]
     /// Carries a `flight:module-registered` marker: the type is registrable
-    /// (it has the macro, and therefore a `_flightRegister` thunk) but its
-    /// *existence in an application* is a runtime question its own module
-    /// answers — so `flightRegisterAll` must not register it.
+    /// (it has the macro) but its *existence in an application* is a runtime
+    /// question its own module answers — so the composition root must not
+    /// build it.
     ///
     /// Without this the scan registers every annotated type in every app that
     /// merely links the package. `Authentication` is the worked example: it
@@ -174,19 +176,19 @@ struct SilentRouteDiagnostics: RouteDiagnostics {
     func warning(_ id: String, _ message: String, at node: some SyntaxProtocol) {}
 }
 
-/// One `container.pipeline(_:_:)` declaration.
+/// One `MiddlewareRegistration.lane(_:_:)` declaration.
 ///
-/// Lanes are the other half of what dispatch reads out of the container
-/// (COMPOSITION-MIGRATION.md §2.9): `collectMiddleware(lane:)` and
-/// `declaredMiddlewareLanes()` are container-as-data exactly the way
-/// `collectRoutes()` is, so the manifest has to carry them too.
+/// Lanes are the other half of what dispatch reads out of the composed
+/// application (COMPOSITION-MIGRATION.md §2.9): the middleware chain and its
+/// declared lanes are values the composition root gathers, exactly the way
+/// routes are, so the manifest has to carry them too.
 struct ScannedPipelineLane {
-    /// Normalized lane name: `"default"` for the unnamed form, the literal's
-    /// content for `pipeline("admin")`, the member's name for
-    /// `pipeline(.authenticated)`. nil when the argument is neither — a
-    /// computed lane, which the manifest records but cannot name.
+    /// Normalized lane name: the literal's content for `.lane("admin", ...)`,
+    /// the member's name for `.lane(.authenticated, ...)` or
+    /// `.lane(.default, ...)`. nil when the argument is neither — a computed
+    /// lane, which the manifest records but cannot name.
     let lane: String?
-    /// The lane argument's source text, verbatim; nil for the unnamed form.
+    /// The lane argument's source text, verbatim.
     let laneText: String?
     /// Middleware type names in declared order — outermost first, which is
     /// the order the block is written in.
@@ -195,9 +197,9 @@ struct ScannedPipelineLane {
     ///
     /// Nearly always a `FlightModule`, and that is the point: the call runs
     /// only if the application includes that module, so a lane the scan sees
-    /// is not necessarily a lane the container gets. The same conditional
-    /// -inclusion fact `flight:module-registered` exists to record for
-    /// components.
+    /// is not necessarily a lane the composed application gets. The same
+    /// conditional-inclusion fact `flight:module-registered` exists to record
+    /// for components.
     let declaredIn: String?
     let module: String
     let file: String
@@ -289,7 +291,7 @@ extension ScannedMount.Kind {
     }
 }
 
-/// Finds `container.pipeline { }` calls and `FlightModule` declarations.
+/// Finds `MiddlewareRegistration.lane(_:_:)` calls and `FlightModule` declarations.
 ///
 /// A second pass rather than work folded into `ComponentVisitor`: that one
 /// returns `.skipChildren` at every type declaration, deliberately — nested
@@ -537,52 +539,55 @@ final class ModuleVisitor: SyntaxVisitor {
             return .visitChildren
         }
         // Mounts and hand-registered routes: the three imperative doors, plus
-        // the raw one. Recognized by method name, like `pipeline` above — a
-        // build tool matches source text, and these are the framework's own
-        // spellings.
+        // the raw one. Recognized by method name, like the lane declaration
+        // below — a build tool matches source text, and these are the
+        // framework's own spellings.
         if let kind = ScannedMount.Kind(callee: callee.declName.baseName.text) {
             collectMount(kind, node)
             return .visitChildren
         }
 
-        guard callee.declName.baseName.text == "pipeline",
-              // The lane block is a trailing closure in every form; a
-              // `pipeline` call without one is somebody else's method.
-              let block = node.trailingClosure
+        // A lane declaration: `MiddlewareRegistration.lane(name, [A(), B()])`.
+        // Matched by method name and shape — a name, then an array of
+        // middleware instances — like the framework spellings above. (The
+        // container-era `container.pipeline(name) { A.self }` this replaced
+        // took a trailing closure of `.self` metatypes.)
+        guard callee.declName.baseName.text == "lane",
+              node.trailingClosure == nil,
+              node.arguments.count == 2,
+              let laneArgument = node.arguments.first, laneArgument.label == nil,
+              let listArgument = node.arguments.last, listArgument.label == nil,
+              let list = listArgument.expression.as(ArrayExprSyntax.self)
         else { return .visitChildren }
 
-        // The lane: absent (default), a string literal, or `.name`.
-        var lane: String? = "default"
-        var laneText: String? = nil
-        if let argument = node.arguments.first, argument.label == nil {
-            laneText = argument.expression.trimmedDescription
-            if let literal = argument.expression.as(StringLiteralExprSyntax.self) {
-                lane = literal.segments.compactMap {
-                    $0.as(StringSegmentSyntax.self)?.content.text
-                }.joined()
-                // An interpolated lane name is not statically knowable.
-                if literal.segments.count != literal.segments.compactMap({
-                    $0.as(StringSegmentSyntax.self)
-                }).count {
-                    lane = nil
-                }
-            } else if let member = argument.expression.as(MemberAccessExprSyntax.self),
-                      member.base == nil {
-                lane = member.declName.baseName.text
-            } else {
+        // The lane name: the literal's content for `.lane("admin", ...)`, the
+        // member's name for `.lane(.authenticated, ...)` / `.lane(.default, ...)`.
+        // nil when the argument is neither — a computed lane, which the
+        // manifest records but cannot name.
+        let laneText: String? = laneArgument.expression.trimmedDescription
+        var lane: String? = nil
+        if let literal = laneArgument.expression.as(StringLiteralExprSyntax.self) {
+            lane = literal.segments.compactMap {
+                $0.as(StringSegmentSyntax.self)?.content.text
+            }.joined()
+            // An interpolated lane name is not statically knowable.
+            if literal.segments.count != literal.segments.compactMap({
+                $0.as(StringSegmentSyntax.self)
+            }).count {
                 lane = nil
             }
+        } else if let member = laneArgument.expression.as(MemberAccessExprSyntax.self),
+                  member.base == nil {
+            lane = member.declName.baseName.text
         }
 
-        // `X.self` per statement, in order.
+        // Middleware type names in declared order — outermost first, the order
+        // the array is written in. Each element is an instance `A()`, so the
+        // type is the called expression.
         var middleware: [String] = []
-        for statement in block.statements {
-            guard let expression = statement.item.as(ExprSyntax.self),
-                  let member = expression.as(MemberAccessExprSyntax.self),
-                  member.declName.baseName.tokenKind == .keyword(.self),
-                  let base = member.base
-            else { continue }
-            middleware.append(base.trimmedDescription)
+        for element in list.elements {
+            guard let call = element.expression.as(FunctionCallExprSyntax.self) else { continue }
+            middleware.append(call.calledExpression.trimmedDescription)
         }
 
         lanes.append(
@@ -605,17 +610,18 @@ final class ModuleVisitor: SyntaxVisitor {
 /// types are a deliberate v1 non-goal (registration by qualified nested name
 /// is easy to add; supporting it silently before deciding it's wanted is not).
 final class ComponentVisitor: SyntaxVisitor {
-    /// Attribute names that mark a type as `_FlightRegistrable`. This is the
-    /// Flight Web's "one registration pipeline, different entry kinds"
-    /// extension point: `@Controller` expands to the same `_flightRegister`
-    /// thunk as `@Component`, so the generator's only job is knowing the
-    /// *name* — it never references another package's types, keeping the
-    /// "Core imports nothing above it" boundary intact at the code level.
-    /// Every attribute that makes a type registrable.
+    /// Attribute names that mark a type as a scanned component. This is Flight
+    /// Web's "one pipeline, different entry kinds" extension point:
+    /// `@Controller` expands to the same parameterized init as `@Component`,
+    /// so the generator's only job is knowing the *name* — it never references
+    /// another package's types, keeping the "Core imports nothing above it"
+    /// boundary intact at the code level.
+    /// Every attribute that makes a type a scanned component.
     ///
-    /// A new one must be added here as well as given a macro, or the macro
-    /// generates a `_flightRegister` thunk that nothing ever calls and the
-    /// type is silently never registered. That is exactly what happened to
+    /// A new one must be added here as well as given a macro, or the generator
+    /// never scans the type and it is silently left out of the composition —
+    /// its macro-generated init and factories compile, but nothing calls them.
+    /// That is exactly what happened to
     /// `@Scheduler`: it shipped in 0.2.0 with a working macro, a working
     /// runtime, and no entry here, so a scheduled job never ran. There is a
     /// test below pinning this list against the macros the framework
@@ -929,7 +935,7 @@ var components: [ScannedComponent] = []
 ///
 /// The generated file is a separate file, so it inherits nothing. It has
 /// always emitted the modules that *declare components*, which is enough for
-/// `flightRegisterAll` — every type it names is one of those. `FlightGraph`
+/// the component list — every type it names is one of those. `FlightGraph`
 /// is not: its root parameters are typed by whatever an `@Inject` said, and
 /// those types come from wherever the application imports them —
 /// `PostgresDataSource` from FlightDataPostgres, which declares no scanned
@@ -962,7 +968,7 @@ for module in manifest.modules {
                 // A module body declaring lanes, or carrying the
                 // dependency edges lane order is derived from, has no
                 // registrable attribute to match on.
-                || source.contains(".pipeline")
+                || source.contains(".lane")
                 || source.contains("FlightModule")
                 || source.contains("registerRoute")
                 || source.contains("registerChannelSocket")
@@ -986,7 +992,7 @@ for module in manifest.modules {
         routes.append(contentsOf: visitor.routes)
         extensionConformances.append(contentsOf: visitor.extensionConformances)
 
-        if source.contains(".pipeline") || source.contains("FlightModule") {
+        if source.contains(".lane") || source.contains("FlightModule") {
             let moduleScan = ModuleVisitor(module: module.name, file: file, tree: tree)
             moduleScan.walk(tree)
             lanes.append(contentsOf: moduleScan.lanes)
@@ -1039,8 +1045,8 @@ if !extensionConformances.isEmpty {
 // module's configure(_:) plus a marker comment silencing the warning below.
 // The scanner sees both sides of the seam — the demand in @Inject type
 // text, the supply in inheritance clauses and extensions — so when a demanded
-// protocol has exactly one scanned conformer, the bridge is generated into
-// flightRegisterAll instead.
+// protocol has exactly one scanned conformer, the graph wires that conformer
+// in instead.
 //
 // Demand-driven on purpose: binding only what some @Inject actually asks
 // for means marker conformances (Sendable, Codable, a superclass) never
@@ -1189,9 +1195,6 @@ let knownTypeNames = Set(components.map(\.typeName))
 // tuned out.
 let alwaysAvailable: Set<String> = [
     "Configuration", "FlightCore.Configuration", "FlightConfig.Configuration",
-    // The container resolves to itself, which is how a gateway — a channel
-    // or a scheduled job that must open its own scope — gets one.
-    "Container", "FlightCore.Container",
 ]
 
 for component in components {
@@ -1316,7 +1319,7 @@ for component in components
 where component.module != manifest.targetModuleName && !component.isPublic {
     emit(
         "error",
-        "@Component type '\(component.typeName)' in module \(component.module) must be public to be registered from \(manifest.targetModuleName)'s generated flightRegisterAll.",
+        "@Component type '\(component.typeName)' in module \(component.module) must be public to be built from \(manifest.targetModuleName)'s generated composition root.",
         file: component.file, line: component.line
     )
 }
@@ -1354,9 +1357,10 @@ func diagnoseUndeclaredLanes() {
                 "warning",
                 """
                 Route \(route.httpMethod) \(route.path) runs through pipeline lane \
-                '\(lane)', which no `container.pipeline("\(lane)") { }` declares. \
-                Declare the lane (an empty block is legal), or remove it from the \
-                route's pipelines — otherwise this fails when dispatch is built.
+                '\(lane)', which nothing declares. Declare it with \
+                `MiddlewareRegistration.lane("\(lane)", [...])` in a module (an empty \
+                lane list is legal), or remove it from the route's pipelines — \
+                otherwise this fails when dispatch is built.
                 """,
                 file: route.file, line: route.line
             )
@@ -1639,8 +1643,8 @@ let graphNodes = graphRegistrable.filter { component in
 }
 
 /// Which graph property holds each component the graph builds, by base name.
-/// `flightRegisterAll` projects a registration onto it instead of
-/// constructing a second copy.
+/// `flightRoutes` and `flightScheduledJobs` project a registration onto it
+/// instead of constructing a second copy.
 let graphBindings: [String: String] = Dictionary(
     graphNodes.map { component in
         let name = baseName(component.typeName)
@@ -1697,26 +1701,25 @@ var emittedScheduledJobValues = false
 /// components in the shape Actuator's dashboard renders.
 var emittedComponentDescriptors = false
 
-// MARK: - FlightGraph (§2.1, emitted unused)
+// MARK: - FlightGraph (§2.1)
 //
-// The composition function, in the shape it will eventually replace
-// `flightRegisterAll` with: every scanned component built once, in dependency
-// order, by plain initializer calls. Nothing calls it yet — it is emitted so
-// the shape can be read, compiled and diffed against the registration path
-// before anything depends on it.
+// The composition: every scanned component built once, in dependency order,
+// by plain initializer calls. `flightComposeModules` builds the modules;
+// `FlightGraph` builds the components inside them, and `flightRoutes` /
+// `flightScheduledJobs` project registrations off it.
 //
 // What it can build is the application's own graph. A dependency it cannot
-// construct — a framework component registered imperatively by a module
-// (§2.11a), a type marked `flight:hand-registered`, anything the scan never
-// saw — becomes an initializer parameter instead. That is §2.6's escape
-// hatch: externally supplied values arrive through the same typed parameters
-// everything else uses, visible at one root rather than scattered across N
-// `configure(_:)` bodies.
+// construct — a framework component a module provides as a value, a type
+// marked `flight:hand-registered`, anything the scan never saw — becomes an
+// initializer parameter instead. That is §2.6's escape hatch: externally
+// supplied values arrive through the same typed parameters everything else
+// uses, visible at one root rather than scattered across N `configure(_:)`
+// bodies.
 @MainActor
 func emitFlightGraph(into out: inout String) {
-    // Module-registered types are excluded for the same reason
-    // `flightRegisterAll` excludes them: whether they exist in an application
-    // is a runtime question their own module answers.
+    // Module-registered types are excluded for the same reason the component
+    // list excludes them: whether they exist in an application is a runtime
+    // question their own module answers.
     guard !graphRegistrable.isEmpty else { return }
     let registrable = graphRegistrable
     let nodes = graphNodes
@@ -1890,15 +1893,9 @@ func emitFlightGraph(into out: inout String) {
     // Route registrations with a per-request controller (§2.1a).
     //
     // The whole route lives in the factory `@Controller` generated; all this
-    // supplies is *how the controller is obtained*. That closure is the
-    // difference between the two wiring mechanisms: `_flightRegister` passes
-    // one returning an instance the container resolved once, and this passes
-    // one that constructs from the graph on every request.
-    //
-    // Emitted but not called, like the graph above. Calling it as well as
-    // `flightRegisterAll` would register each route twice and fail the freeze
-    // on a duplicate; the flip is one deletion in the macro, and it is the
-    // last step because it is the one that changes behaviour.
+    // supplies is *how the controller is obtained* — a closure that constructs
+    // the controller from the graph on every request, so a controller's
+    // per-request state stays per request.
     guard !routes.isEmpty else { return }
     let componentsByName = Dictionary(
         registrable.map { (baseName($0.typeName), $0) }, uniquingKeysWith: { a, _ in a })
@@ -2375,14 +2372,14 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
     out += "    ]\n"
 
     // Lanes, in declaration order. Order is the whole content of a lane
-    // declaration — `pipeline` composes across calls, so a framework module
+    // declaration — `.lane(_:_:)` composes across calls, so a framework module
     // contributing `Authentication` and an application appending its own
     // concatenate by registration sequence, and flattening that here would
     // lose the only thing the declaration carries.
     out += "\n"
-    out += "    /// One `container.pipeline(_:_:)` declaration, in the order\n"
-    out += "    /// the scan met it. Calls compose: two declarations naming\n"
-    out += "    /// one lane concatenate rather than conflict.\n"
+    out += "    /// One `MiddlewareRegistration.lane(_:_:)` declaration, in the\n"
+    out += "    /// order the scan met it. Calls compose: two declarations\n"
+    out += "    /// naming one lane concatenate rather than conflict.\n"
     out += "    public struct Lane: Sendable {\n"
     out += "        /// nil when the lane argument is not a literal or a\n"
     out += "        /// canonical member — a computed name, unknowable here.\n"
@@ -2529,8 +2526,8 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
     out += "        /// `@Inject` types, in declaration order — the edges a\n"
     out += "        /// composition function orders construction by.\n"
     out += "        public let dependencies: [String]\n"
-    out += "        /// Registered by its own module rather than by\n"
-    out += "        /// `flightRegisterAll`, because whether it exists in an\n"
+    out += "        /// Provided by its own module rather than built by the\n"
+    out += "        /// composition root, because whether it exists in an\n"
     out += "        /// application is a runtime question.\n"
     out += "        public let isModuleRegistered: Bool\n"
     out += "        public let module: String\n"

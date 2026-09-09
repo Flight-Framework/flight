@@ -93,11 +93,10 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
     /// The whole registration lives here — path, kind, lanes, body mode, body
     /// decoding, return encoding, upgrade shaping — parameterised by *how* the
     /// controller is obtained and by nothing else. That parameter is the seam
-    /// COMPOSITION-MIGRATION.md §2.1a needs: today `_flightRegister` passes a
-    /// closure returning the instance the container resolved once, which is
-    /// exactly the behaviour there has always been. A generated composition
-    /// root passes one that constructs per request from a `FlightGraph`, and
-    /// nothing else has to move — in particular the handler thunk stays in
+    /// COMPOSITION-MIGRATION.md §2.1a needs: `flightRoutes` passes a closure
+    /// that constructs the controller per request from a `FlightGraph`, so a
+    /// per-request controller stays per request and nothing else has to move —
+    /// in particular the handler thunk stays in
     /// the macro, where the route scanner already lives, rather than being
     /// reimplemented in the generator and drifting from it.
     ///
@@ -383,7 +382,7 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
                 }
                 context.diagnoseError(
                     "controller.uninitialized",
-                    "Stored property '\(pattern.identifier.text)' of a @Controller type needs a default value — the generated init(_flight:) assigns only @Inject/@ConfigValue properties.",
+                    "Stored property '\(pattern.identifier.text)' of a @Controller type needs a default value — the generated initializer assigns only @Inject/@ConfigValue properties.",
                     at: variable
                 )
                 valid = false
@@ -469,8 +468,9 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         return nil
     }
 
-    /// `_flightRegister` mirrors the type's own access level so the generated
-    /// cross-module `flightRegisterAll` can call it (Flight Core P-1).
+    /// The generated initializer and route factories mirror the type's own
+    /// access level so the generated cross-module composition root can build
+    /// and register it (Flight Core P-1).
     private static func registrationAccess(for declaration: some DeclGroupSyntax) -> String {
         let modifiers: DeclModifierListSyntax
         if let classDecl = declaration.as(ClassDeclSyntax.self) {

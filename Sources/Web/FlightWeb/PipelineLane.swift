@@ -1,4 +1,4 @@
-/// The name of a middleware lane — what `container.pipeline("name") { }`
+/// The name of a middleware lane — what `MiddlewareRegistration.lane("name", [...])`
 /// declares and what a controller or route names in `pipelines:`.
 ///
 /// This is a named type rather than a bare `String` for one reason that is
@@ -27,9 +27,9 @@ public struct PipelineLane: Hashable, Sendable, ExpressibleByStringLiteral,
 
     // MARK: - Canonical lanes
 
-    /// The lane every route runs through unless it names others — and the
-    /// one `container.pipeline { }` (no name) feeds. Spellable so a route
-    /// can *combine* it with extras: `pipelines: [.default, "admin"]` means
+    /// The lane every route runs through unless it names others — the one
+    /// `MiddlewareRegistration.lane(.default, [...])` feeds. Spellable so a
+    /// route can *combine* it with extras: `pipelines: [.default, "admin"]` means
     /// "everything the app normally does, then the admin stack".
     public static let `default` = PipelineLane("default")
 
@@ -55,7 +55,7 @@ public struct PipelineLane: Hashable, Sendable, ExpressibleByStringLiteral,
     /// greppable.
     ///
     /// The framework declares it as an empty lane, so it needs no
-    /// `container.pipeline("public") { }` of its own.
+    /// `MiddlewareRegistration.lane("public", [])` of its own.
     public static let `public` = PipelineLane("public")
 
     /// The lanes whose absence is worth a warning — the ones that carry

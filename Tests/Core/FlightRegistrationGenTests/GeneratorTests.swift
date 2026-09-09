@@ -135,7 +135,7 @@ struct GeneratorTests {
         ])
         #expect(result.exitCode == 0)
         #expect(result.generated.contains("UserService"))
-        #expect(result.generated.contains("flightRegisterAll"))
+        #expect(result.generated.contains(#"typeName: "UserService", stereotype: "service", scope: ".singleton", qualifier: nil"#))
     }
 
     @Test("the generated body is exactly this — indentation included")
@@ -580,7 +580,7 @@ struct GeneratorTests {
 
     @Test("a module-registered component is left out of the graph")
     func moduleRegisteredIsExcluded() throws {
-        // Same reason flightRegisterAll leaves it out: whether it exists in
+        // Same reason the composition root leaves it out: whether it exists in
         // an application is a runtime question its own module answers.
         let result = try generate([
             "Sources.swift": """
@@ -1347,10 +1347,8 @@ struct GeneratorTests {
         let result = try generate([
             "AppModule.swift": """
             import FlightWeb
-            final class AppModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline("audit") { AuditLog.self }
-            }
+            struct AppModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane("audit", [AuditLog()])
             }
             @Controller("/admin", pipelines: ["audit"])
             struct AdminController {
@@ -1391,10 +1389,8 @@ struct GeneratorTests {
         let result = try generate([
             "AppModule.swift": """
             import FlightWeb
-            final class AppModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline(PipelineLane(computedName)) { AuditLog.self }
-            }
+            struct AppModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane(PipelineLane(computedName), [AuditLog()])
             }
             @Controller("/admin", pipelines: ["audit"])
             struct AdminController {
@@ -1542,16 +1538,9 @@ struct GeneratorTests {
         let result = try generate([
             "AppModule.swift": """
             import FlightWeb
-            final class AppModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline {
-            RequestTiming.self
-            Authentication.self
-            }
-            container.pipeline("admin") {
-            RequireAdmin.self
-            }
-            }
+            struct AppModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane(.default, [RequestTiming(), Authentication()])
+            + MiddlewareRegistration.lane("admin", [RequireAdmin()])
             }
             """
         ])
@@ -1569,13 +1558,8 @@ struct GeneratorTests {
         let result = try generate([
             "SecurityModule.swift": """
             import FlightWeb
-            final class SecurityModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline(.authenticated) {
-            Authentication.self
-            RequireAuthentication.self
-            }
-            }
+            struct SecurityModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane(.authenticated, [Authentication(), RequireAuthentication()])
             }
             """
         ])
@@ -1592,10 +1576,8 @@ struct GeneratorTests {
         let result = try generate([
             "AssetsModule.swift": """
             import FlightWeb
-            final class AssetsModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline("assets") {}
-            }
+            struct AssetsModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane("assets", [])
             }
             """
         ])
@@ -1611,18 +1593,14 @@ struct GeneratorTests {
         let result = try generate([
             "A.swift": """
             import FlightWeb
-            final class FrameworkModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline { Authentication.self }
-            }
+            struct FrameworkModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane(.default, [Authentication()])
             }
             """,
             "B.swift": """
             import FlightWeb
-            final class AppModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline { RequestLogging.self }
-            }
+            struct AppModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane(.default, [RequestLogging()])
             }
             """,
         ])
@@ -1675,19 +1653,15 @@ struct GeneratorTests {
         let result = try generate([
             "A_AppModule.swift": """
             import FlightWeb
-            final class AppModule: FlightModule {
+            struct AppModule: FlightModule {
             static var dependencies: [any FlightModule.Type] { [SecurityModule.self] }
-            func configure(_ container: Container) throws {
-            container.pipeline { RequestLogging.self }
-            }
+            let middleware = MiddlewareRegistration.lane(.default, [RequestLogging()])
             }
             """,
             "B_SecurityModule.swift": """
             import FlightWeb
-            final class SecurityModule: FlightModule {
-            func configure(_ container: Container) throws {
-            container.pipeline { Authentication.self }
-            }
+            struct SecurityModule: FlightModule {
+            let middleware = MiddlewareRegistration.lane(.default, [Authentication()])
             }
             """,
         ])
@@ -1923,7 +1897,7 @@ struct GeneratorTests {
 
     @Test("a module-registered component is listed, and flagged")
     func moduleRegisteredComponentIsFlagged() throws {
-        // It is not in flightRegisterAll — that is what the marker means —
+        // It is not built by the composition root — that is what the marker means —
         // but it is still part of the graph, and a composition function has
         // to know it exists to order anything that depends on it.
         let result = try generate([
