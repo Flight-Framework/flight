@@ -35,6 +35,40 @@ correct rather than something misconfigured.
 
 ---
 
+## D26 — Actuator lists what the build scanned, not what the container holds
+
+**Chosen.** The generator emits `flightComponentDescriptors()`, the composer
+passes it to `ActuatorModule(components:)`, and `ActuatorController` holds that
+list instead of a `Container`. Module health — genuinely runtime state — still
+comes from the tracker, through a `@Sendable () -> [ModuleStatus]` closure.
+
+**Why.** `container.allRegistrations()` was the dashboard's source, and it was
+the last thing in Actuator holding a container. What the build scanned is the
+better answer under composition: it is what the graph constructs, and it exists
+before the process does. §2.9 said Actuator's introspection would be rebuilt on
+the static manifest; this is that.
+
+**What changed in the output, and it is worth knowing.**
+- Routes are no longer listed *as components*. The container held a
+  `RouteRegistration` per route and `allRegistrations()` could not tell it from
+  a service, so the demo's dashboard counted eight components where the build
+  scanned seven. Routes are reported as routes.
+- Anything registered through the imperative escape hatch is invisible to the
+  list, because no scan sees it. That is the deliberate trade.
+- A framework module's own components are invisible for the same reason, so
+  `ActuatorModule` declares its controller in `ownComponents`. A module knows
+  what it provides; it says so rather than relying on the dashboard to notice a
+  registration.
+
+**Cost.** `ComponentDescriptor`'s memberwise initializer becomes public,
+because generated code in the application's module constructs it.
+
+**Not deleted:** `ActuatorSnapshot(container:environment:)`, a documented
+convenience for anyone building their own surface. Only tests use it now. It is
+not what keeps `Container` alive — see below.
+
+---
+
 ## D24 — A route terminal's own roots are not graph properties
 
 **Chosen.** `FlightGraph` stores only what a *component* needs. A dependency

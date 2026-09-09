@@ -25,7 +25,19 @@ import Foundation
 /// `@GetRoute` sits beside); nothing outside this package touches it
 /// directly.
 struct ActuatorController {
-    let container: Container
+    /// Every component, as the *build* scanned them — passed in by the
+    /// composition root rather than read from `container.allRegistrations()`.
+    ///
+    /// A better answer than the container's, and available before the process
+    /// starts: what the build found is what the graph constructs. It does not
+    /// carry anything registered through the imperative escape hatch, which is
+    /// the deliberate trade — see COMPOSITION-MIGRATION.md §2.9.
+    let components: [ComponentDescriptor]
+
+    /// Module health is genuinely runtime state, so it still comes from the
+    /// thing that tracks it.
+    let health: @Sendable () -> [ModuleStatus]
+
     let environment: FlightEnvironment
     let format: ActuatorFormat
 
@@ -75,7 +87,7 @@ struct ActuatorController {
         // snapshot also copies the entire component registration table, and this
         // path used every bit of it to compute three integers — on the one
         // route an orchestrator polls every few seconds.
-        let modules = container.moduleStatuses()
+        let modules = health()
         let failed = modules.filter(\.health.isFailed).count
         let notStarted = modules.filter(\.health.isNotStarted).count
         let up =
@@ -103,7 +115,8 @@ struct ActuatorController {
     }
 
     func dashboard(_ context: RequestContext) async throws -> Response {
-        let snapshot = ActuatorSnapshot(container: container, environment: environment)
+        let snapshot = ActuatorSnapshot(
+            environment: environment, modules: health(), components: components)
         switch format {
         case .ssr:
             return .html(renderActuatorHTML(snapshot))

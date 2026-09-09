@@ -73,4 +73,21 @@ public struct ComponentDescriptor: Sendable, Equatable {
     public let qualifier: String?
     /// The component's layer — how Actuator groups the dashboard.
     public let stereotype: Stereotype
+
+    /// Public because the *generated* component list constructs these: the
+    /// build knows what it scanned, and Actuator renders that rather than
+    /// asking the container what it holds.
+    public init(
+        typeName: String,
+        scope: Lifetime,
+        sourceModule: String,
+        qualifier: String?,
+        stereotype: Stereotype
+    ) {
+        self.typeName = typeName
+        self.scope = scope
+        self.sourceModule = sourceModule
+        self.qualifier = qualifier
+        self.stereotype = stereotype
+    }
 }

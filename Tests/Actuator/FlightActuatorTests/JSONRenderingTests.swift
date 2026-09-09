@@ -32,7 +32,9 @@ struct JSONRenderingTests {
     /// The container plus the actuator's declared routes — a module's routes
     /// are values now, so a client that serves them has to be given them.
     private func jsonClient(environment: FlightEnvironment = .staging) throws -> TestClient {
-        let actuator = ActuatorModule(environment: environment, exposure: .full)
+        let actuator = ActuatorModule(
+            environment: environment, exposure: .full,
+            components: SampleAppModule.components)
         let container = try TestContainer.build(
             configuration: Configuration(values: ["actuator.format": "json"])
         ) {

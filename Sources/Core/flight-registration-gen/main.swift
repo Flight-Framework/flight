@@ -1823,6 +1823,10 @@ var emittedRouteValues = false
 /// True when this target emitted `flightScheduledJobs(_:)`.
 var emittedScheduledJobValues = false
 
+/// True when this target emitted `flightComponentDescriptors()` — its scanned
+/// components in the shape Actuator's dashboard renders.
+var emittedComponentDescriptors = false
+
 // MARK: - FlightGraph (§2.1, emitted unused)
 //
 // The composition function, in the shape it will eventually replace
@@ -2294,6 +2298,9 @@ func emitComposer(into out: inout String) {
                 needed.insert("FlightGraph")
                 expressions.append("flightScheduledJobs(flightGraph)")
             }
+            if emittedComponentDescriptors, providedTypeKey(element) == "ComponentDescriptor" {
+                expressions.append("flightComponentDescriptors()")
+            }
             let sources = contributors(to: type, for: consumer)
             for source in sources { needed.insert(moduleKey(source.module)) }
             expressions += sources.map(\.expression)
@@ -2708,6 +2715,39 @@ if !routes.isEmpty || !lanes.isEmpty || !moduleGraph.isEmpty || !mounts.isEmpty
         out += "dependencies: [\(dependencies)], "
         out += "isModuleRegistered: \(component.isModuleRegistered), "
         out += "module: \"\(escaped(component.module))\"),\n"
+    }
+    out += "    ]\n"
+    out += "}\n"
+}
+
+// Actuator's component list, at file scope — it is not part of the manifest
+// enum, and nesting it there made the composer's call fail to resolve.
+if !components.isEmpty {
+    emittedComponentDescriptors = true
+    out += "\n"
+    out += "/// Every scanned component, as Actuator's dashboard renders them.\n"
+    out += "///\n"
+    out += "/// Actuator lives in its own module and cannot see this target's\n"
+    out += "/// manifest, so the descriptors are *passed* to `ActuatorModule` by\n"
+    out += "/// the composition root — the same way routes and scheduled jobs\n"
+    out += "/// are. What the build scanned is a better answer than what the\n"
+    out += "/// container happens to hold, and it exists before the process does.\n"
+    out += "func flightComponentDescriptors() -> [FlightCore.ComponentDescriptor] {\n"
+    out += "    [\n"
+    for component in components.sorted(by: {
+        ($0.module, $0.typeName) < ($1.module, $1.typeName)
+    }) {
+        let qualified =
+            component.module == manifest.targetModuleName
+            ? component.typeName
+            : "\(component.module).\(component.typeName)"
+        let qualifier = component.qualifierText.map { "\"\(escaped($0))\"" } ?? "nil"
+        out += "        FlightCore.ComponentDescriptor("
+        out += "typeName: \"\(escaped(qualified))\", "
+        out += "scope: .singleton, "
+        out += "sourceModule: \"\(escaped(component.module))\", "
+        out += "qualifier: \(qualifier), "
+        out += "stereotype: .\(stereotype(forAttribute: component.attributeName))),\n"
     }
     out += "    ]\n"
     out += "}\n"

@@ -64,7 +64,9 @@ struct GatingTests {
 
     @Test("an explicit exposure opts a non-development environment in")
     func explicitExposureOptsIn() async throws {
-        let actuator = ActuatorModule(environment: .staging, exposure: .full)
+        let actuator = ActuatorModule(
+            environment: .staging, exposure: .full,
+            components: SampleAppModule.components)
         let container = try TestContainer.build { actuator }
         let client = try TestClient(container: container, routes: actuator.routes)
         #expect(await client.get("/actuator").status == .ok)

@@ -74,9 +74,18 @@ public struct ActuatorModule: FlightModule {
         self.init(processEnvironment: ProcessInfo.processInfo.environment)
     }
 
+    /// The shape a composition root uses: the scanned components come from
+    /// the generated `flightComponentDescriptors()`.
+    public init(components: [ComponentDescriptor]) {
+        self.init(
+            processEnvironment: ProcessInfo.processInfo.environment,
+            components: components)
+    }
+
     /// The same path with the process environment injected — how a test asks
     /// "what would an unset `FLIGHT_ENV` do" without mutating the real one.
-    public init(processEnvironment: [String: String]) {
+    public init(processEnvironment: [String: String], components: [ComponentDescriptor] = []) {
+        self.components = components
         self.environment = .current(from: processEnvironment)
         self.exposureOverride = nil
         // An unset FLIGHT_ENV resolves to `dev`, which is in the dashboard
@@ -94,7 +103,8 @@ public struct ActuatorModule: FlightModule {
     /// Explicit-environment initializer — the test seam (`TestContainer.build`
     /// honors ready-made instances), and an escape hatch for embedders that
     /// resolve the environment some other way.
-    public init(environment: FlightEnvironment) {
+    public init(environment: FlightEnvironment, components: [ComponentDescriptor] = []) {
+        self.components = components
         self.environment = environment
         self.exposureOverride = nil
         // Naming the environment in code is a declaration, the same as
@@ -109,7 +119,12 @@ public struct ActuatorModule: FlightModule {
     /// Explicit exposure, bypassing both the environment allowlist and
     /// `FLIGHT_ACTUATOR_EXPOSURE` — the seam tests use instead of mutating
     /// the real process environment.
-    public init(environment: FlightEnvironment, exposure: ActuatorExposure) {
+    public init(
+        environment: FlightEnvironment,
+        exposure: ActuatorExposure,
+        components: [ComponentDescriptor] = []
+    ) {
+        self.components = components
         self.environment = environment
         self.exposureOverride = exposure
         self.isEnvironmentDeclared = true
@@ -143,6 +158,20 @@ public struct ActuatorModule: FlightModule {
     /// Each handler resolves the controller from the request's context: a
     /// lock-free singleton lookup, not reconstruction.
     public let routes: [RouteRegistration]
+
+    /// Every component the build scanned, handed over by the composition
+    /// root. Empty is legal — an application with no components has nothing
+    /// for the dashboard to list.
+    public let components: [ComponentDescriptor]
+
+    /// Actuator's own controller, which no application's build scans because
+    /// this module registers it. A module knows what it provides, so it says
+    /// so rather than relying on the dashboard to notice a registration.
+    static let ownComponents: [ComponentDescriptor] = [
+        ComponentDescriptor(
+            typeName: "FlightActuator.ActuatorController", scope: .singleton,
+            sourceModule: "ActuatorModule", qualifier: nil, stereotype: .controller)
+    ]
 
     /// Stored rather than computed, because the composition root reads what a
     /// module *holds*: a computed property is excluded from that scan, which
@@ -212,6 +241,7 @@ public struct ActuatorModule: FlightModule {
         // self-registration needed for the controller to hold a reference
         // to it.
         let box = controller
+        let components = self.components + Self.ownComponents
         container.register(ActuatorController.self, scope: .singleton, stereotype: .controller) { [environment] c in
             // getIfPresent, not get(_:default:) — the latter is non-throwing
             // and fatalErrors on a malformed *present* value; getIfPresent
@@ -221,8 +251,13 @@ public struct ActuatorModule: FlightModule {
             // relies on (getIfPresent's doc comment).
             let format = try c.resolve(Configuration.self)
                 .getIfPresent("actuator.format", as: ActuatorFormat.self) ?? .ssr
+            // Health is runtime state, so it is read through the thing that
+            // tracks it; the component list is the build's answer, passed in.
             let controller = ActuatorController(
-                container: c, environment: environment, format: format)
+                components: components,
+                health: { [weak c] in c?.moduleStatuses() ?? [] },
+                environment: environment,
+                format: format)
             // The routes serve from here rather than resolving per request.
             box.set(controller)
             return controller

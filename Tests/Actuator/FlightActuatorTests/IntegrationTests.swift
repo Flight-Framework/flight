@@ -22,7 +22,7 @@ struct IntegrationTests {
 
     @Test("assemble → dispatch → dashboard, end to end")
     func endToEnd() async throws {
-        let actuator = ActuatorModule()
+        let actuator = ActuatorModule(components: SampleAppModule.components)
         let app = try Flight.assemble(
             configuration: Configuration(values: ["actuator.format": "json"]),
             modules: [actuator, SampleAppModule()]
@@ -46,12 +46,16 @@ struct IntegrationTests {
         #expect(moduleNames.contains("SampleAppModule"))
         #expect(wire.modules.allSatisfy { $0.health == "running" })
 
-        // Every component the sample module registered is attributed to it.
-        // Six hand-registered, plus SampleController and the
-        // RouteRegistration its one route registers — routes are components
-        // too, which is what makes `collectRoutes()` a container query.
+        // Every component the *build* scanned for that module. Six ordinary
+        // ones plus SampleController.
+        //
+        // It used to be eight: the container also held the `RouteRegistration`
+        // the controller's route registers, and the dashboard listed it as a
+        // component because `allRegistrations()` could not tell the two apart.
+        // The scanned list carries components, and routes are reported as
+        // routes — which is the distinction §2.9 wanted.
         let sampleComponents = wire.components.filter { $0.sourceModule == "SampleAppModule" }
-        #expect(sampleComponents.count == 8)
+        #expect(sampleComponents.count == 7)
     }
 
     @Test("actuator registers no service — it is request-response only")
@@ -67,7 +71,9 @@ struct IntegrationTests {
     func reportsGateEnvironment() async throws {
         // Module constructed with an explicit environment; the page must
         // report that same value even though FLIGHT_ENV says "dev".
-        let actuator = ActuatorModule(environment: .staging, exposure: .full)
+        let actuator = ActuatorModule(
+            environment: .staging, exposure: .full,
+            components: SampleAppModule.components)
         let container = try TestContainer.build { actuator }
         let client = try TestClient(container: container, routes: actuator.routes)
         let body = await client.get("/actuator").bodyText

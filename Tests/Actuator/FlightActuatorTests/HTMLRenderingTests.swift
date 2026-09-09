@@ -21,7 +21,9 @@ struct HTMLRenderingTests {
 
     @Test("page lists environment, components, and layer sections")
     func pageContents() async throws {
-        let actuator = ActuatorModule(environment: .staging, exposure: .full)
+        let actuator = ActuatorModule(
+            environment: .staging, exposure: .full,
+            components: SampleAppModule.components)
         let container = try TestContainer.build {
             actuator
             SampleAppModule()
@@ -52,7 +54,8 @@ struct HTMLRenderingTests {
 
     @Test("all dynamic strings are HTML-escaped")
     func escapesHostileContent() async throws {
-        let actuator = ActuatorModule(environment: .dev)
+        let actuator = ActuatorModule(
+            environment: .dev, components: HostileQualifierModule.components)
         let container = try TestContainer.build {
             actuator
             HostileQualifierModule()

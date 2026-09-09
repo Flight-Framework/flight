@@ -9,6 +9,35 @@ import ServiceLifecycle
 /// A module registering one component of each stereotype the dashboard needs
 /// to distinguish, plus a qualified duplicate-type pair.
 struct SampleAppModule: FlightModule {
+    /// What the build would have scanned for this module, in the shape the
+    /// generated `flightComponentDescriptors()` produces. Written out here
+    /// because these fixtures register by hand and no plugin runs over them —
+    /// the dashboard lists what the *build* found, not what the container
+    /// happens to hold.
+    static let components: [ComponentDescriptor] = [
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleService", scope: .singleton,
+            sourceModule: "SampleAppModule", qualifier: nil, stereotype: .service),
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleRepository", scope: .singleton,
+            sourceModule: "SampleAppModule", qualifier: nil, stereotype: .repository),
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleQualified", scope: .singleton,
+            sourceModule: "SampleAppModule", qualifier: "primary", stereotype: .component),
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleQualified", scope: .singleton,
+            sourceModule: "SampleAppModule", qualifier: "secondary", stereotype: .component),
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleMiddleware", scope: .singleton,
+            sourceModule: "SampleAppModule", qualifier: nil, stereotype: .middleware),
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleSettings", scope: .singleton,
+            sourceModule: "SampleAppModule", qualifier: nil, stereotype: .settings),
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleController", scope: .singleton,
+            sourceModule: "SampleAppModule", qualifier: nil, stereotype: .controller),
+    ]
+
     func configure(_ container: Container) throws {
         container.register(SampleService.self, scope: .singleton, stereotype: .service) { _ in
             SampleService()
@@ -53,6 +82,13 @@ struct SampleController {
 /// escaping tests feed the renderer through this.
 struct HostileQualifierModule: FlightModule {
     static let hostileQualifier = #"<script>alert("pwned")</script>"#
+
+    static let components: [ComponentDescriptor] = [
+        ComponentDescriptor(
+            typeName: "FlightActuatorTests.SampleQualified", scope: .singleton,
+            sourceModule: "HostileQualifierModule", qualifier: hostileQualifier,
+            stereotype: .component)
+    ]
 
     func configure(_ container: Container) throws {
         container.register(
