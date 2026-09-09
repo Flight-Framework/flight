@@ -13,6 +13,41 @@ import Logging
 /// upgrade request, which is where per-connection identity (the principal,
 ///) enters. Constructed for you by `Container.registerChannelSocket`, or
 /// directly from a `@WebSocketRoute` method via `init(context:principal:)`.
+/// The channels stack a socket route needs, as one injectable value.
+///
+/// A declared route **injects** this rather than resolving three components
+/// out of every upgrade request:
+///
+///     @Controller
+///     struct SocketController {
+///         @Inject var sockets: ChannelSockets
+///
+///         @WebSocketRoute("/socket")
+///         func socket(_ context: RequestContext) async throws -> ChannelSocketHandler {
+///             sockets.handler(principal: try await verify(context))
+///         }
+///     }
+///
+/// `FlightChannelsModule` builds it and provides it, so these are the same
+/// instances the composition root wired — not a lookup of them.
+public struct ChannelSockets: Sendable {
+    let router: ChannelRouter
+    let pubsub: any PubSub
+    let configuration: ChannelsConfiguration
+
+    public init(router: ChannelRouter, pubsub: any PubSub, configuration: ChannelsConfiguration) {
+        self.router = router
+        self.pubsub = pubsub
+        self.configuration = configuration
+    }
+
+    /// A handler for one connection.
+    public func handler(principal: (any ChannelPrincipal)? = nil) -> ChannelSocketHandler {
+        ChannelSocketHandler(
+            router: router, pubsub: pubsub, configuration: configuration, principal: principal)
+    }
+}
+
 public struct ChannelSocketHandler: WebSocketUpgradeHandler {
     private let router: ChannelRouter
     private let pubsub: any PubSub
@@ -31,20 +66,16 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
         self.principal = principal
     }
 
-    /// Resolves the channels components from the request's context — the
-    /// convenience for a hand-written `@WebSocketRoute` method:
+    /// The imperative escape hatch: one lookup of ``ChannelSockets``, for a
+    /// route registered by hand rather than declared.
     ///
-    ///     @WebSocketRoute("/socket")
-    ///     func socket(_ context: RequestContext) throws -> any WebSocketUpgradeHandler {
-    ///         try ChannelSocketHandler(context: context, principal: myPrincipal(context))
-    ///     }
+    /// In the same category as `container.registerRoute` — a route the build
+    /// cannot see is a route whose dependencies the build cannot supply, so it
+    /// looks them up. It used to be three lookups, of values the composition
+    /// root has known since start-up; a declared route injects
+    /// ``ChannelSockets`` and does none.
     public init(context: RequestContext, principal: (any ChannelPrincipal)? = nil) throws {
-        self.init(
-            router: try context.resolve(ChannelRouter.self),
-            pubsub: try context.resolve((any PubSub).self),
-            configuration: try context.resolve(ChannelsConfiguration.self),
-            principal: principal
-        )
+        self = try context.resolve(ChannelSockets.self).handler(principal: principal)
     }
 
     public func handle(upgraded connection: WebSocketConnection, context: RequestContext) async throws {

@@ -1077,6 +1077,38 @@ struct GeneratorTests {
                 "let consumerModule = ConsumerModule(environment: envModule.environment)"))
     }
 
+    @Test("dependencies are passed in declaration order, not injected-then-acknowledged")
+    func graphPassesDependenciesInDeclarationOrder() throws {
+        // The generated initializer takes its parameters in declaration order.
+        // Emitting the injected ones first mislabels every call where a
+        // `flight:hand-registered` property is declared before an injected
+        // one — which reads as "argument 'validator' must precede argument
+        // 'sockets'". Caught by the demo's SocketController, not by these.
+        let result = try generate([
+            "Main.swift": """
+            import FlightWeb
+            @Service struct Sockets { init() {} }
+            @Controller
+            struct SocketController {
+            // flight:hand-registered
+            @Inject var validator: any TokenValidator
+            @Inject var sockets: Sockets
+            @GetRoute("/s")
+            func show(_ context: RequestContext) -> String { "x" }
+            }
+            @main struct Main {
+            static func main() async {
+            await Flight.run(configuration: .load(), modules: [AppModule.self])
+            }
+            }
+            """
+        ])
+        #expect(result.exitCode == 0)
+        #expect(
+            result.generated.contains(
+                "SocketController(validator: graph.tokenValidator, sockets: graph.sockets)"))
+    }
+
     @Test("a module is never built out of its own property")
     func composerExcludesSelfAsProvider() throws {
         // ActuatorModule's real shape: a stored `environment` and an

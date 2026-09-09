@@ -53,6 +53,10 @@ public struct FlightChannelsModule: FlightModule {
     /// than bootstrap and much earlier than the first join.
     public let router: ChannelRouter
 
+    /// What a socket route needs, as one injectable value — so a declared
+    /// route injects it instead of resolving three components per upgrade.
+    public let sockets: ChannelSockets
+
     /// - Parameters:
     ///   - bus: The application's PubSub, from `FlightPubSubModule.bus`.
     ///   - configuration: For `flight.channels.*`.
@@ -67,7 +71,10 @@ public struct FlightChannelsModule: FlightModule {
     ) throws {
         self.settings = try ChannelsConfiguration(configuration: configuration)
         self.broadcaster = ChannelBroadcaster(pubsub: bus)
-        self.router = try ChannelRouter(registrations: channels)
+        let router = try ChannelRouter(registrations: channels)
+        self.router = router
+        self.sockets = ChannelSockets(
+            router: router, pubsub: bus, configuration: self.settings)
     }
 
     /// This module takes what it provides, so it cannot be built from its
@@ -92,33 +99,26 @@ public struct FlightChannelsModule: FlightModule {
         container.register(ChannelsConfiguration.self, scope: .singleton) { _ in settings }
         container.register(ChannelRouter.self, scope: .singleton) { _ in router }
         container.register(ChannelBroadcaster.self, scope: .singleton) { _ in broadcaster }
+        let sockets = self.sockets
+        container.register(ChannelSockets.self, scope: .singleton) { _ in sockets }
     }
-}
 
-extension RouteRegistration {
-    /// The channels WebSocket endpoint, as a route value — the value-level
-    /// spelling of `container.registerChannelSocket(_:)`, for a module that
-    /// declares its routes rather than registering them.
+    /// This module's socket endpoint, as a route value.
     ///
-    ///     struct AppModule: FlightModule {
-    ///         let routes = [RouteRegistration.channelSocket("/socket")]
-    ///     }
-    ///
-    /// `authenticate` runs during the initial HTTP upgrade request, before
-    /// the WebSocket exists — exactly where connection identity is
-    /// established. Return the connection's principal (nil admits an
-    /// anonymous socket); throw to refuse the upgrade outright.
-    public static func channelSocket(
+    /// Nothing is looked up: the handler is built from what this module
+    /// already holds. `container.registerChannelSocket` is the same mount
+    /// through the imperative path, and pays one lookup per upgrade for it.
+    public func socketRoute(
         _ path: String = "/socket",
         source: String = "FlightChannels",
         authenticate: (@Sendable (RequestContext) async throws -> (any ChannelPrincipal)?)? = nil
     ) -> RouteRegistration {
-        RouteRegistration(
+        let sockets = self.sockets
+        return RouteRegistration(
             method: "GET", path: path, kind: .upgrade(.webSocket), source: source
         ) { context in
             let principal = try await authenticate?(context)
-            let handler = try ChannelSocketHandler(context: context, principal: principal)
-            return .upgrade(handler: handler, context: context)
+            return .upgrade(handler: sockets.handler(principal: principal), context: context)
         }
     }
 }

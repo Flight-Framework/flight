@@ -35,6 +35,47 @@ correct rather than something misconfigured.
 
 ---
 
+## D22 — A socket route injects the channels stack; the crash was a stale build
+
+**Chosen.** `ChannelSockets` bundles the router, the bus and the channels
+configuration as one injectable value. `FlightChannelsModule` builds it,
+provides it, and offers `socketRoute(_:)` built from it. A declared route
+injects it; `ChannelSocketHandler(context:)` survives as the imperative escape
+hatch with one lookup instead of three.
+
+**The crash, and what it actually was.** Adding `let sockets` to
+`FlightChannelsModule` segfaulted the channels client suite — SIGSEGV, frame 0
+a garbage address, frame 1 inside `TestContainer`'s module block. It reproduced
+with the stored property alone, nested or top-level, with and without the
+registration. It was **a stale incremental build**: changing a public struct's
+stored properties changes its layout, SwiftPM did not rebuild a dependent test
+target, and the test binary jumped through a pointer computed from the old
+layout. `rm -rf .build` and it passes.
+
+This cost a full revert of a correct design, and the lesson is worth stating
+plainly: **a SIGSEGV after changing stored properties in a library target is a
+stale build until proven otherwise.** Clean-build before concluding anything
+about the code. Nothing in Flight can guard against it; only the habit can.
+
+**What it exposed on the way.** Injecting `ChannelSockets` makes it a root of
+the component graph, so the build refused the composition by name:
+`AppModule`, `FlightChannelsModule`, `FlightGraph` and friends formed a cycle.
+The rule this makes concrete — **a module that provides a graph root cannot
+also take the graph** — is the same one that split `DemoAuthModule` out, and it
+split the demo's channels into `DemoChannelsModule`. The cycle diagnostic from
+D14 earned its keep here: it named the problem instead of producing code that
+failed to compile for an unrelated-looking reason.
+
+**And a real generator bug.** The graph emitted a component's dependencies as
+injected-then-acknowledged, while the generated initializer takes them in
+*declaration* order — so a `flight:hand-registered` property declared before an
+injected one produced `SocketController(sockets:validator:)` against
+`init(validator:sockets:)`. Invisible until a controller had both in that
+order. `ScannedComponent.dependencyOrder` records declaration order; there is a
+regression test.
+
+---
+
 ## D20 — Web takes the route table; the registries stop being container scans
 
 **Chosen.** `FlightWebModule(configuration:routes:middleware:assetMounts:coders:)`.

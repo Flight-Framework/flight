@@ -81,6 +81,16 @@ struct ScannedComponent {
     /// scanner, P-2) and the missing-registration warning should not fire.
     /// Still participates in cycle detection.
     let acknowledgedTypeNames: [String]
+    /// Every dependency, injected and acknowledged alike, in **declaration
+    /// order** with its property name.
+    ///
+    /// The generated initializer takes its parameters in declaration order, so
+    /// emitting `inject` then `acknowledged` mislabels the call whenever a
+    /// `flight:hand-registered` property is declared before an injected one —
+    /// `UserController(sockets:validator:)` against an
+    /// `init(validator:sockets:)`. Caught by the demo's `SocketController`.
+    let dependencyOrder: [(type: String, label: String)]
+
     /// As `injectPropertyNames`, for the acknowledged edges.
     let acknowledgedPropertyNames: [String]
     /// Carries a `flight:module-registered` marker: the type is registrable
@@ -738,6 +748,7 @@ final class ComponentVisitor: SyntaxVisitor {
         var injectNames: [String] = []
         var acknowledged: [String] = []
         var acknowledgedNames: [String] = []
+        var dependencyOrder: [(type: String, label: String)] = []
         var configValues: [ScannedConfigValue] = []
         for member in members.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
@@ -751,6 +762,7 @@ final class ComponentVisitor: SyntaxVisitor {
                 // through its last token's trailing trivia, so the marker is
                 // found whether it sits on the line above the property or as
                 // a same-line trailing comment.
+                dependencyOrder.append((type: type, label: propertyName))
                 if member.description.contains("flight:hand-registered") {
                     acknowledged.append(type)
                     acknowledgedNames.append(propertyName)
@@ -817,6 +829,7 @@ final class ComponentVisitor: SyntaxVisitor {
                 injectTypeNames: inject,
                 injectPropertyNames: injectNames,
                 acknowledgedTypeNames: acknowledged,
+                dependencyOrder: dependencyOrder,
                 acknowledgedPropertyNames: acknowledgedNames,
             isModuleRegistered: leadingTrivia.contains("flight:module-registered"),
                 configValues: configValues,
@@ -1955,9 +1968,7 @@ func emitFlightGraph(into out: inout String) {
         // uses. Zipped rather than indexed: the two arrays are built together
         // and stay positional, and a mismatch would silently mislabel an
         // argument rather than fail.
-        let edges =
-            Array(zip(node.injectTypeNames, node.injectPropertyNames))
-            + Array(zip(node.acknowledgedTypeNames, node.acknowledgedPropertyNames))
+        let edges = node.dependencyOrder
         for (dependency, label) in edges {
             if let source = provider(of: dependency) {
                 arguments.append("\(label): \(binding(source))")
@@ -2048,9 +2059,7 @@ func emitFlightGraph(into out: inout String) {
         if !controller.configValues.isEmpty {
             arguments.append("_flightConfiguration: graph.configuration")
         }
-        let edges =
-            Array(zip(controller.injectTypeNames, controller.injectPropertyNames))
-            + Array(zip(controller.acknowledgedTypeNames, controller.acknowledgedPropertyNames))
+        let edges = controller.dependencyOrder
         for (dependency, label) in edges {
             if let source = provider(of: dependency) {
                 arguments.append("\(label): graph.\(binding(source))")
