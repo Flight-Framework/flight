@@ -76,18 +76,15 @@ struct PubSubSettingsTests {
 
     @Test("the configured policy reaches LocalPubSub through the module")
     func settingsReachTheComponent() throws {
-        let container = Container()
         let configuration = Configuration(values: [
             PubSubSettings.bufferingKey: "oldest:8",
             PubSubSettings.nodeIDKey: "api-3",
         ])
-        container.register(Configuration.self, scope: .singleton) { _ in configuration }
-        try FlightPubSubModule(configuration: configuration).configure(container)
-        try container.freeze()
-        // Resolvable at all is the assertion that matters: the factory reads
-        // and validates the settings at freeze(), so a malformed value here
-        // would have failed the freeze above.
-        _ = try container.resolve(LocalPubSub.self)
-        _ = try container.resolve((any PubSub).self)
+        // Building the module reads and validates the settings; a malformed
+        // value would throw here. The local core and the bus both exist as
+        // values the module holds — no container to resolve them from.
+        let module = try FlightPubSubModule(configuration: configuration)
+        #expect(module.bus is LocalPubSub)
+        _ = module.local
     }
 }

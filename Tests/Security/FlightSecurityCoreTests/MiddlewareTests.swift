@@ -98,19 +98,6 @@ struct MiddlewareTests {
         }
     }
 
-    @Test("a missing TokenValidator dependency fails at construction, not at request time")
-    func missingValidator() throws {
-        // Not a per-request 500 any more: @Inject makes the validator a
-        // hard constructor dependency, so an application missing this wiring
-        // finds out at freeze() — before its first real request — rather
-        // than from whichever request happens to be first to authenticate.
-        // That is the improvement migrating this type to @Middleware bought
-        // for free.
-        #expect(throws: (any Error).self) {
-            _ = try Authentication(_flight: TestContainer.empty())
-        }
-    }
-
     @Test("requireAuthentication rejects anonymous requests with a Bearer challenge")
     func requireAuthenticationAnonymous() async throws {
         let context = try makeContext()

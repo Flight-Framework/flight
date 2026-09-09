@@ -16,13 +16,9 @@ struct ComposedModuleTests {
     @Test("a module can take configuration in its initializer")
     func takesItsInputs() throws {
         let configuration = Configuration(values: ["greeting.text": "hello"])
-        let app = try Flight.assemble(
-            configuration: configuration,
-            modules: [try GreetingModule(configuration: configuration)])
-
         // The component the module built, reachable as a property: no
         // registration, no lookup by type, two field loads.
-        let module = try #require(try app.container.resolve(GreetingModule.self))
+        let module = try GreetingModule(configuration: configuration)
         #expect(module.greeter.text == "hello")
     }
 
@@ -60,22 +56,6 @@ struct GreetingModule: FlightModule {
         self.greeter = Salutation(text: try configuration.get("greeting.text", as: String.self))
     }
 
-    /// Still required by `FlightModule`, and unreachable through the instance
-    /// overload — the protocol keeps it while the type-based path exists.
-    init() {
-        self.greeter = Salutation(text: "")
-    }
-
-    func configure(_ container: Container) throws {
-        // Projection, not construction: what the module already holds, made
-        // reachable to anything still resolving by type.
-        let module = self
-        container.register(GreetingModule.self, scope: .singleton) { _ in module }
-        container.register(Salutation.self, scope: .singleton) { _ in module.greeter }
-    }
 }
 
-struct TrailingModule: FlightModule {
-    init() {}
-    func configure(_ container: Container) throws {}
-}
+struct TrailingModule: FlightModule {}

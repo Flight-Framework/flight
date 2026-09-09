@@ -23,8 +23,7 @@ import HTTPTypes
 ///
 /// ```swift
 /// let store = try DiskUploadStore(directory: uploadsDirectory)
-/// container.pipeline("uploads") { RequestLogging.self }
-/// container.uploads(at: "/uploads", store: store, pipelines: ["uploads"]) { options in
+/// let routes = RouteRegistration.uploads(at: "/uploads", store: store) { options in
 ///     options.maxSize = 2 << 30
 ///     options.ttl = .seconds(24 * 3600)
 /// }
@@ -52,56 +51,55 @@ public struct UploadMountOptions: Sendable {
     public init() {}
 }
 
-extension Container {
-    /// Mounts the tus 1.0 endpoints at `prefix`.
+
+extension RouteRegistration {
+    /// The tus 1.0 endpoints at `prefix`, as five ordinary route values.
     ///
     /// Real routes, not a fallback like the asset mount: tus is a finite,
-    /// known route set, so registering it as five ordinary routes means it
+    /// known route set, so mounting it as five ordinary routes means it
     /// appears in the route table, in startup logs, and in actuator
     /// introspection like everything else — and it composes with pipeline
-    /// lanes the same way. The `PATCH` route registers as streaming-bodied,
-    /// making it the framework's own first consumer of that capability.
-    public func uploads(
+    /// lanes the same way. The `PATCH` and `POST` routes are streaming-bodied,
+    /// making them the framework's own first consumers of that capability.
+    ///
+    /// A module returns these from wherever it declares its routes; the
+    /// composition root hands them to `FlightWebModule(routes:)` with every
+    /// other route.
+    ///
+    ///     let store = try DiskUploadStore(directory: uploadsDirectory)
+    ///     let routes = RouteRegistration.uploads(at: "/uploads", store: store) { o in
+    ///         o.maxSize = 2 << 30
+    ///     }
+    public static func uploads(
         at prefix: String,
         store: any UploadStore,
         pipelines: [PipelineLane] = [.default],
         _ configure: (inout UploadMountOptions) -> Void = { _ in }
-    ) {
+    ) -> [RouteRegistration] {
         var options = UploadMountOptions()
         configure(&options)
         let base = prefix.hasSuffix("/") && prefix != "/" ? String(prefix.dropLast()) : prefix
         let mount = TusMount(prefix: base, store: store, options: options)
         let source = "uploads@\(base)"
-
-        // flight:hand-registered — the five routes of one `uploads(at:)`
-        // mount, derived from a prefix only the caller knows. The mount is
-        // what the static route manifest records; these are its expansion,
-        // and their paths are interpolated by construction.
-        registerRoute(.options, base, source: source, pipelines: pipelines) { _ in
-            mount.capabilities()
-        }
-        // flight:hand-registered — same mount.
-        registerRoute(
-            .post, base, source: source, pipelines: pipelines,
-            bodyMode: .streaming(maxBytes: options.maxChunkBytes)
-        ) { context in
-            await mount.stamped(context) { try await mount.create(context) }
-        }
-        // flight:hand-registered — same mount.
-        registerRoute(.head, "\(base)/:id", source: source, pipelines: pipelines) { context in
-            await mount.stamped(context) { try await mount.probe(context) }
-        }
-        // flight:hand-registered — same mount.
-        registerRoute(
-            .patch, "\(base)/:id", source: source, pipelines: pipelines,
-            bodyMode: .streaming(maxBytes: options.maxChunkBytes)
-        ) { context in
-            await mount.stamped(context) { try await mount.append(context) }
-        }
-        // flight:hand-registered — same mount.
-        registerRoute(.delete, "\(base)/:id", source: source, pipelines: pipelines) { context in
-            await mount.stamped(context) { try await mount.cancel(context) }
-        }
+        return [
+            RouteRegistration(
+                method: .options, path: base, source: source, pipelines: pipelines
+            ) { _ in mount.capabilities() },
+            RouteRegistration(
+                method: .post, path: base, source: source, pipelines: pipelines,
+                bodyMode: .streaming(maxBytes: options.maxChunkBytes)
+            ) { context in await mount.stamped(context) { try await mount.create(context) } },
+            RouteRegistration(
+                method: .head, path: "\(base)/:id", source: source, pipelines: pipelines
+            ) { context in await mount.stamped(context) { try await mount.probe(context) } },
+            RouteRegistration(
+                method: .patch, path: "\(base)/:id", source: source, pipelines: pipelines,
+                bodyMode: .streaming(maxBytes: options.maxChunkBytes)
+            ) { context in await mount.stamped(context) { try await mount.append(context) } },
+            RouteRegistration(
+                method: .delete, path: "\(base)/:id", source: source, pipelines: pipelines
+            ) { context in await mount.stamped(context) { try await mount.cancel(context) } },
+        ]
     }
 }
 

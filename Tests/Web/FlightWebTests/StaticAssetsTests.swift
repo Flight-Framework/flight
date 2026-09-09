@@ -28,37 +28,24 @@ struct HeavyDefaultMarker: Sendable {
     }
 }
 
-private struct SiteModule: FlightModule {
-    let root: String
-    let mountOptions: @Sendable (inout AssetMountOptions) -> Void
-
-    // TestContainer instantiates declared modules via init() when it must;
-    // this one is always passed ready-made, so the requirement is vestigial.
-    init() {
-        self.root = "/nonexistent"
-        self.mountOptions = { _ in }
-    }
-
-    init(root: String, mountOptions: @escaping @Sendable (inout AssetMountOptions) -> Void) {
-        self.root = root
-        self.mountOptions = mountOptions
-    }
-
-    func configure(_ container: Container) throws {
-        try AssetsLaneMarker._flightRegister(container)
-        try HeavyDefaultMarker._flightRegister(container)
-        container.pipeline { HeavyDefaultMarker.self }
-        container.pipeline("assets") { AssetsLaneMarker.self }
-        container.registerRoute(.get, "/api/users", source: "SiteModule") { _ in
+/// The routes and lanes the old `SiteModule` fixture declared, now as the
+/// plain values a composition root would hand `FlightWebModule`.
+private func siteRoutes() -> [RouteRegistration] {
+    [
+        RouteRegistration(method: .get, path: "/api/users", source: "SiteModule") { _ in
             .text("users")
-        }
+        },
         // A route whose path a file also plausibly answers — the route must
         // win, because routing runs first.
-        container.registerRoute(.get, "/style.css", source: "SiteModule") { _ in
+        RouteRegistration(method: .get, path: "/style.css", source: "SiteModule") { _ in
             .text("route wins")
-        }
-        container.assets(at: "/", root: root, pipelines: ["assets"], mountOptions)
-    }
+        },
+    ]
+}
+
+private func siteMiddleware() -> [MiddlewareRegistration] {
+    MiddlewareRegistration.lane(.default, [HeavyDefaultMarker()])
+        + MiddlewareRegistration.lane("assets", [AssetsLaneMarker()])
 }
 
 @Suite("static asset mounts", .serialized)
@@ -84,10 +71,11 @@ struct StaticAssetsTests {
         try Data("SECRET=1".utf8).write(to: site.appendingPathComponent(".env"))
         defer { try? FileManager.default.removeItem(at: site) }
 
-        let container = try TestContainer.build {
-            SiteModule(root: site.path, mountOptions: configure)
-        }
-        return try await body(try TestClient(container: container), site)
+        let mount = AssetMountRegistration.mount(
+            at: "/", root: site.path, pipelines: ["assets"], configure)
+        let client = try TestClient(
+            routes: siteRoutes(), middleware: siteMiddleware(), assetMounts: [mount])
+        return try await body(client, site)
     }
 
     @Test("serves a file with its content type and the matching cache rule")
@@ -280,14 +268,11 @@ struct StaticAssetsTests {
 
     @Test("an undeclared mount lane fails at build like a route's would")
     func mountLaneValidated() throws {
-        struct BadModule: FlightModule {
-            func configure(_ container: Container) throws {
-                container.assets(at: "/", root: "/tmp", pipelines: ["ghost"])
-            }
-        }
-        let container = try TestContainer.build { BadModule() }
+        // A mount naming a lane no middleware declared: the same value a
+        // module would produce, validated the same way at dispatch build.
+        let mount = AssetMountRegistration.mount(at: "/", root: "/tmp", pipelines: ["ghost"])
         do {
-            _ = try TestClient(container: container)
+            _ = try TestClient(assetMounts: [mount])
             Issue.record("expected the undeclared lane to be refused")
         } catch let error as DispatchBuilder.UndeclaredLaneError {
             #expect(error.lane == "ghost")

@@ -123,34 +123,22 @@ public struct AssetMountRegistration: Sendable {
     /// Present exactly when `options.etag == .contentHash` — constructed
     /// with the mount, so "declared but never initialized" cannot happen.
     let hashCache: ContentHashCache?
-}
 
-extension Container {
-    /// Mounts a directory of static files at `prefix`, served with full
-    /// conditional-request and range semantics, as a fallback after routing:
-    /// a real route always wins, and requests under the prefix that match
-    /// no route and no file are the mount's misses (shell fallback, then
-    /// 404). Mounts are consulted in registration order.
+    /// The value a module declares to mount a directory of static files at
+    /// `prefix`, served as a routing fallback (a real route always wins).
+    /// The composition root hands these to `FlightWebModule(assetMounts:)`,
+    /// the same way it hands over routes.
     ///
-    /// `pipelines` defaults to the default lane, same as every route —
-    /// consistent, not clever. The intended production shape is a dedicated
-    /// lean lane, declared where the mount is:
-    ///
-    /// ```swift
-    /// container.pipeline("assets") { RequestLogging.self }
-    /// container.assets(at: "/", root: "web/build", pipelines: ["assets"]) { options in
-    ///     options.spaFallback = "index.html"
-    ///     options.exclude = ["/api", "/actuator"]
-    ///     options.cache("no-cache", matching: "index.html")
-    ///     options.cache("public, max-age=31536000, immutable", matching: "_app/immutable/**")
-    /// }
-    /// ```
-    public func assets(
+    ///     let assets = AssetMountRegistration.mount(at: "/", root: "web/build") { o in
+    ///         o.spaFallback = "index.html"
+    ///         o.exclude = ["/api", "/actuator"]
+    ///     }
+    public static func mount(
         at prefix: String = "/",
         root: String,
         pipelines: [PipelineLane] = [.default],
         _ configure: (inout AssetMountOptions) -> Void = { _ in }
-    ) {
+    ) -> AssetMountRegistration {
         var options = AssetMountOptions()
         configure(&options)
         let hashCache: ContentHashCache?
@@ -159,20 +147,12 @@ extension Container {
         } else {
             hashCache = nil
         }
-        let registration = AssetMountRegistration(
+        return AssetMountRegistration(
             prefix: prefix.hasSuffix("/") && prefix != "/" ? String(prefix.dropLast()) : prefix,
             root: root, pipelines: pipelines, options: options, hashCache: hashCache)
-        register(
-            AssetMountRegistration.self, qualifier: "assets.\(registration.prefix)",
-            scope: .singleton
-        ) { _ in registration }
-    }
-
-    /// All mounts, in registration order (post-freeze).
-    public func collectAssetMounts() throws -> [AssetMountRegistration] {
-        try collectRegistrations(of: AssetMountRegistration.self)
     }
 }
+
 
 // MARK: - Serving
 

@@ -47,10 +47,6 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
         // Duplicate method names cannot happen, but duplicate *job* names can
         // if someone hand-registers the same qualifier. The qualifier embeds
         // the fully-qualified type so two schedulers may share a method name.
-        var lines: [String] = []
-        for job in jobs {
-            lines.append(contentsOf: registrationLines(for: job))
-        }
         var jobValueLines: [String] = []
         for job in jobs {
             jobValueLines.append(contentsOf: valueLines(for: job))
@@ -65,33 +61,11 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
         // resolving initializer, @Inject in a scheduler would not compile
         // — which the compiled doc snippet caught.
         let properties = Injection.scan(declaration.memberBlock.members)
-        let initLines = Injection.initializerLines(for: properties)
-        let initBody =
-            initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
-        let resolvingInit: DeclSyntax = """
-            internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
-            """
 
-        // The component first, then its jobs: a job's factory resolves the
-        // component, so the registration order has to allow that mid-freeze.
-        let thunkLines =
-            [
-                "container.register(Self.self, scope: .singleton) { c in",
-                "    try Self(_flight: c)",
-                "}",
-            ] + lines
-        let thunk: DeclSyntax = """
-            \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
-            \(raw: thunkLines.map { "    " + $0 }.joined(separator: "\n"))
-            }
-            """
-        // The same jobs as values, built from a component the caller supplies.
-        //
-        // The registration form above resolves the component from a container
-        // when the job fires; this one closes over whatever `make` returns —
-        // which the generated composition root fills with the component the
-        // graph already built. The two are the same shape the route factories
-        // and `_flightRegister` are: one wiring mechanism each.
+        // The jobs as values, built from a component the caller supplies —
+        // the composition root fills `make` with the component the graph
+        // built. This is the whole of what @Scheduler emits for wiring; the
+        // container-era resolving init and registration thunk are gone.
         let jobValues: DeclSyntax = """
             \(raw: access)static func _flightScheduledJobs(
                 _ make: @escaping @Sendable () -> Self
@@ -118,7 +92,7 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
                     node: $0.node)
             },
             access: access, declaration: declaration)
-        return [resolvingInit, parameterInit, thunk, jobValues].compactMap { $0 }
+        return [parameterInit, jobValues].compactMap { $0 }
     }
 
     /// One `ScheduledJobRegistration` literal, closing over `make()`.
@@ -159,48 +133,6 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
         }
     }
 
-    private static func registrationLines(for job: ScannedJob) -> [String] {
-        var call = "component.\(job.methodName)()"
-        if job.isAsync { call = "await \(call)" }
-        if job.isThrows { call = "try \(call)" }
-
-        let trigger: String
-        switch job.schedule {
-        case .cron(let text, let timeZone):
-            // Force-try is safe here and nowhere else: the expression was
-            // parsed by this same parser at compile time, so a throw is
-            // impossible unless the macro and the runtime disagree — which
-            // sharing one parser rules out.
-            trigger =
-                "FlightScheduler.JobTrigger.cron("
-                + "try! FlightScheduler.CronExpression(\"\(text)\"), "
-                + "timeZone: try FlightScheduler._flightTimeZone("
-                + "\(timeZone), job: String(reflecting: Self.self) + \".\(job.methodName)\"))"
-        case .interval(let every, let initialDelay):
-            let delay = initialDelay ?? ".seconds(0)"
-            trigger =
-                "FlightScheduler.JobTrigger.interval(\(every), initialDelay: \(delay))"
-        }
-
-        var lines: [String] = []
-        lines.append(
-            "container.register(FlightScheduler.ScheduledJobRegistration.self, "
-                + "qualifier: String(reflecting: Self.self) + \".\(job.methodName)\", "
-                + "scope: .singleton) { c in")
-        lines.append("    let component = try c.resolve(Self.self)")
-        lines.append("    return FlightScheduler.ScheduledJobRegistration(")
-        lines.append(
-            "        name: String(reflecting: Self.self) + \".\(job.methodName)\",")
-        lines.append("        trigger: \(trigger),")
-        lines.append("        scope: \(job.scopeText),")
-        lines.append("        overlap: \(job.overlapText)")
-        lines.append("    ) {")
-        lines.append("        \(call)")
-        lines.append("    }")
-        lines.append("}")
-        return lines
-    }
-
     public static func expansion(
         of node: AttributeSyntax,
         attachedTo declaration: some DeclGroupSyntax,
@@ -208,10 +140,7 @@ public struct SchedulerMacro: MemberMacro, ExtensionMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [ExtensionDeclSyntax] {
-        guard !protocols.isEmpty else { return [] }
-        let ext: DeclSyntax = """
-            extension \(type.trimmed): FlightCore._FlightRegistrable {}
-            """
-        return ext.as(ExtensionDeclSyntax.self).map { [$0] } ?? []
+        // No conformance to emit: the container marker protocol is gone.
+        []
     }
 }

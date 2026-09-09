@@ -97,14 +97,12 @@ struct WireChannel: Channel {
     }
 }
 
-struct E2EModule: FlightModule {
+struct E2EModule {
     let channels: [ChannelRegistration] = [
         ChannelRegistration("wire:*") { channel in
             WireChannel(broadcaster: channel.broadcaster)
         }
     ]
-
-    func configure(_ container: Container) throws {}
 }
 
 /// Boots a real `FlightTransport` on an ephemeral port with the channels
@@ -117,13 +115,7 @@ func withRunningChannelServer(
     let app = E2EModule()
     let channels = try FlightChannelsModule(
         bus: pubsub.bus, configuration: configuration, channels: app.channels)
-    let container = try TestContainer.build(configuration: configuration) {
-        pubsub
-        app
-        channels
-    }
-    let dispatch = try TestClient(
-        container: container, routes: [channels.socketRoute("/socket")]).dispatch
+    let dispatch = try TestClient(routes: [channels.socketRoute("/socket")]).dispatch
 
     let (ports, portContinuation) = AsyncStream<Int>.makeStream()
     let transport = FlightTransport(

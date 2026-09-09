@@ -22,8 +22,7 @@ import Foundation
 /// macro registers one job per `@Scheduled` method into the same container
 /// every other component goes through.
 @attached(
-    member, names: named(init), named(_flightRegister), named(_flightScheduledJobs))
-@attached(extension, conformances: _FlightRegistrable)
+    member, names: named(init), named(_flightScheduledJobs))
 public macro Scheduler() =
     #externalMacro(module: "FlightSchedulerMacrosImpl", type: "SchedulerMacro")
 

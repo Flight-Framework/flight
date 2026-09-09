@@ -59,9 +59,8 @@ struct RouterTests {
 
     @Test("an invalid pattern declared by a module fails composition")
     func invalidPatternFailsBootstrap() throws {
-        struct BadPatternModule: FlightModule {
+        struct BadPatternModule {
             let channels = [ChannelRegistration("bad*pattern") { _ in CatchAllChannel() }]
-            func configure(_ container: Container) throws {}
         }
         // Earlier than it used to be: this was a freeze() failure, because the
         // router was built from whatever the container had collected. The
@@ -80,11 +79,12 @@ struct RouterTests {
     @Test("module wiring: router, broadcaster, configuration are resolvable components")
     func moduleBeans() throws {
         let harness = try Harness()
-        let router = try harness.container.resolve(ChannelRouter.self)
+        // The components the module holds — read directly, not resolved.
+        let router = harness.channels.router
         #expect(router.match("room:1") != nil)
         #expect(router.match("lobby")?.topicPattern == "lobby")
-        _ = try harness.container.resolve(ChannelBroadcaster.self)
-        let configuration = try harness.container.resolve(ChannelsConfiguration.self)
+        _ = harness.channels.broadcaster
+        let configuration = harness.channels.settings
         #expect(configuration.heartbeatTimeout == .seconds(5))
         #expect(configuration.heartbeatCheckInterval == .milliseconds(50))
     }

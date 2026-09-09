@@ -35,21 +35,14 @@ struct ModuleTests {
     @Test("FlightOIDCModule supplies the validator and owns JWKS maintenance")
     func oidcModuleSuppliesValidator() throws {
         let oidc = try FlightOIDCModule(configuration: minimalConfig)
-        let container = try TestContainer.build(configuration: minimalConfig) {
-            oidc
-            // Pulled in transitively by OIDC's `dependencies`, and it takes
-            // the validator OIDC provides — which is what the composition
-            // root wires by type.
-            FlightSecurityModule(validator: oidc.tokenValidator)
-        }
 
-        let validator = try container.resolve((any TokenValidator).self)
-        #expect(validator is OIDCTokenValidator)
+        // The validator is a value the OIDC module holds; the composition root
+        // wires it into FlightSecurityModule by type.
+        #expect(oidc.tokenValidator is OIDCTokenValidator)
         #expect(oidc.service != nil, "OIDC owns the JWKS maintenance service")
 
-        // Listing FlightOIDCModule pulls FlightSecurityModule in
-        // transitively — and the security module is built from the validator
-        // OIDC provides, which is the edge the composition root wires by type.
+        // And the security module built from that validator declares its
+        // middleware.
         #expect(
             FlightSecurityModule(validator: oidc.tokenValidator).middleware
                 .contains { $0.name.contains("Authentication") }
@@ -74,33 +67,16 @@ struct ModuleTests {
     func customValidatorNeedsNoOrdering() throws {
         let stub = StubValidator(principalsByToken: ["t": testPrincipal()])
 
-        // Listed *after* the security module, which under the old
-        // scan-and-probe seam would have lost to the OIDC default. Choosing
-        // modules has no such ordering dependence. Note also that no
-        // security.oidc.* configuration is present: nothing demands it when
-        // FlightOIDCModule isn't listed.
+        // You hand the validator to the module directly, so there is no
+        // registration race to lose and no ordering dependence — and no
+        // security.oidc.* configuration is demanded when FlightOIDCModule is
+        // not composed. "No validator" is not a state the module can reach:
+        // the initializer requires one.
         let security = FlightSecurityModule(validator: stub)
-        let container = try TestContainer.build {
-            security
-            CustomValidatorModule(validator: stub)
-        }
-
-        #expect(try container.resolve((any TokenValidator).self) is StubValidator)
         #expect(
             security.middleware.contains { $0.name.contains("Authentication") },
             "middleware still declared"
         )
-    }
-
-    @Test("security module without any validator cannot be built at all")
-    func noValidatorFailsAtStartup() {
-        // It used to fail at freeze, when `Authentication`'s `@Inject` found
-        // no validator registered. The middleware is a value holding its
-        // validator now, so "no validator" is not a state the module can reach
-        // — the type-based path refuses it, naming the fix.
-        #expect(throws: (any Error).self) {
-            try Flight.instantiateModules([FlightSecurityModule.self])
-        }
     }
 
     @Test("configuration keys map onto OIDCSecurityConfiguration with documented defaults")

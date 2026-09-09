@@ -37,9 +37,8 @@ public struct FlightSchedulerModule: FlightModule {
     /// Reported by Actuator; owned here.
     public let status = SchedulerStatus()
 
-    /// Nothing to build it from a type alone would be *wrong* — a scheduler
-    /// with no jobs is a legal application — so `init()` stays usable and
-    /// this module keeps `isTypeConstructible` true.
+    /// A scheduler with no jobs is a legal application, so `init()` stays
+    /// usable — it composes an empty scheduler.
     public init() {
         self.init(jobs: [], coordinator: nil)
     }
@@ -47,11 +46,6 @@ public struct FlightSchedulerModule: FlightModule {
     public init(jobs: [ScheduledJobRegistration] = [], coordinator: (any JobCoordinator)? = nil) {
         self.jobs = jobs
         self.coordinator = coordinator
-    }
-
-    public func configure(_ container: Container) throws {
-        let status = self.status
-        container.register(SchedulerStatus.self, scope: .singleton) { _ in status }
     }
 
     /// Built from what this module holds. It used to be built from a stashed

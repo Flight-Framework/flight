@@ -1666,136 +1666,6 @@ for module in targetImports.sorted()
 where module != "FlightCore" && !dependencyModules.contains(module) {
     out += "import \(module)\n"
 }
-out += """
-
-    /// Registers every @Component visible from \(manifest.targetModuleName)
-    /// (its own sources plus all Flight-based dependency modules). Call this
-    /// from a FlightModule's configure(_:) or directly before freeze().
-
-    """
-// The graph is built by the composition root and handed in, so the parameter
-// exists exactly when there is a graph to hand.
-if graphRegistrable.isEmpty {
-    out += "public func flightRegisterAll(_ container: FlightCore.Container) throws {\n"
-} else {
-    out += """
-        /// - Parameter graph: Every component, already constructed — the
-        ///   composition root builds it and passes it here. It used to be built
-        ///   from the container at `freeze()`, so an application's components
-        ///   were constructed by a factory rather than at the one place that
-        ///   knows how the application is assembled.
-        ///
-        /// Internal rather than public: `FlightGraph` is internal — an
-        /// application's components are internal by default and a public type
-        /// cannot expose them — and the composition root is in this module
-        /// too, so nothing needs either to be public.
-        func flightRegisterAll(
-            _ container: FlightCore.Container, graph: FlightGraph
-        ) throws {
-
-        """
-}
-// The graph first: every projected registration below resolves it, and an
-// application with components but no routes needs it just as much as one
-// with routes. Registration is deferred either way — nothing is constructed
-// until freeze.
-// Gated on the same condition the graph is *emitted* under, not on whether
-// it has nodes. An application whose only component is a controller has an
-// empty graph — and route terminals still resolve it, because that is where
-// they reach root inputs and it is how they are written either way. Gating
-// on `graphNodes` left that application emitting terminals that resolved a
-// type nothing registered, which the skeleton template caught and a richer
-// one could not.
-if !graphRegistrable.isEmpty {
-    out += "    // Projected, not built: route terminals resolve it to reach root\n"
-    out += "    // inputs, and they see the instance the composition root made.\n"
-    out += "    container.register(FlightGraph.self, scope: .singleton) { _ in graph }\n"
-}
-if autoRegistered.isEmpty {
-    out += "\n    // No @Component types found in scope.\n"
-} else {
-    out += "\n"
-    for component in autoRegistered {
-        let qualified =
-            component.module == manifest.targetModuleName
-            ? component.typeName
-            : "\(component.module).\(component.typeName)"
-        // A component the graph builds is *projected* here rather than
-        // constructed: one construction, in one place, with the container as
-        // a view onto it. `context.resolve`, the existential bridges and
-        // Actuator's introspection all keep working, and they see the same
-        // instance a route terminal does.
-        let kind = stereotype(forAttribute: component.attributeName)
-        if let binding = graphBindings[baseName(component.typeName)] {
-            let qualifierArgument = component.qualifierText.map { ", qualifier: \($0)" } ?? ""
-            let stereotypeArgument = kind == "component" ? "" : ", stereotype: .\(kind)"
-            out +=
-                "    container.register(\(qualified).self\(qualifierArgument), scope: .singleton\(stereotypeArgument)) { _ in\n"
-            out += "        graph.\(binding)\n"
-            out += "    }\n"
-        } else {
-            // Its own thunk still constructs it. `@Settings` validates after
-            // construction and `@Scheduler` registers its jobs, neither of
-            // which a projection carries.
-            //
-            // A controller is here for a different reason: dispatch builds
-            // one per request from the graph, so this registration serves
-            // only introspection — Actuator groups the dashboard by
-            // stereotype, and a controller absent from the container would
-            // be absent from it. Its routes come from
-            // `flightRoutes(_:)`, hence `includingRoutes: false`.
-            let routesClause = kind == "controller" ? ", includingRoutes: false" : ""
-            out += "    try \(qualified)._flightRegister(container\(routesClause))\n"
-        }
-    }
-}
-if !moduleRegistered.isEmpty {
-    // Named, not silent: "why is my @Middleware not registered" should be
-    // answerable by reading this file.
-    out += "\n"
-    out += "    // Marked `flight:module-registered` — their own module registers them,\n"
-    out += "    // because whether they exist in an application is a runtime question:\n"
-    for component in moduleRegistered {
-        out += "    //   \(component.module).\(component.typeName)\n"
-    }
-}
-if !bridges.isEmpty {
-    // Emitted line by line rather than as a multiline literal: a multiline
-    // literal strips indentation relative to its CLOSING delimiter, so a
-    // formatter that re-indents the block silently changes the emitted text.
-    // These carry their indentation explicitly and cannot drift.
-    out += "\n"
-    out += "    // Existential bridges (demand-driven): each `@Inject var _: (any P)`\n"
-    out += "    // with exactly one scanned conformer resolves through that conformer,\n"
-    out += "    // mirroring its scope. A `// flight:hand-registered` marker on the\n"
-    out += "    // demanding property suppresses the bridge.\n"
-    for bridge in bridges {
-        let component = bridge.component
-        let concrete =
-            component.module == manifest.targetModuleName
-            ? component.typeName
-            : "\(component.module).\(component.typeName)"
-        let qualifierArgument = component.qualifierText.map { ", qualifier: \($0)" } ?? ""
-        // One lifetime, so one spelling. This used to branch: a scoped
-        // conformer resolved through `resolveInActiveScope`, because by the
-        // time the bridge factory ran the ambient scope was already bound and
-        // the explicit form kept the captive-dependency error precise. Both
-        // the lifetime and the scope went with §2.2.
-        let resolveCall = "try c.resolve(\(concrete).self\(qualifierArgument))"
-        out +=
-            "    container.register((any \(bridge.protocolName)).self) { c in\n"
-        out += "        \(resolveCall)\n"
-        out += "    }\n"
-    }
-}
-if !routes.isEmpty {
-    out += "\n"
-    out += "    // Routes last: their controllers are constructed per\n"
-    out += "    // request from the graph, which needs every component\n"
-    out += "    // registered first.\n"
-    out += ""
-}
-out += "}\n"
 
 /// What `FlightGraph`'s initializer takes, published by `emitFlightGraph` for
 /// the composer to wire.
@@ -1954,10 +1824,9 @@ func emitFlightGraph(into out: inout String) {
     out += "/// Every component this module declares, constructed once, in\n"
     out += "/// dependency order, without a container.\n"
     out += "///\n"
-    out += "/// The shape registration is becoming (COMPOSITION-MIGRATION.md\n"
-    out += "/// §2.1). Route controllers are built from it per request; every\n"
-    out += "/// other component is still registered, so both mechanisms are\n"
-    out += "/// live and compiled together.\n"
+    out += "/// The whole of how components are wired now: the composition root\n"
+    out += "/// builds this, route controllers are built from it per request,\n"
+    out += "/// and other modules take what they need as values from it.\n"
     out += "///\n"
     out += "/// Internal, not public: an application's components are internal by\n"
     out += "/// default, and a public struct cannot expose them. The composition\n"
@@ -2017,41 +1886,6 @@ func emitFlightGraph(into out: inout String) {
 
     out += "}\n"
 
-    // A named way to build it from a container, so the graph is
-    // *constructible* and not merely compilable. Its root parameters are
-    // exactly the things a module registers, and they resolve at freeze like
-    // anything else.
-    //
-    // Emitted as a function rather than a registration, deliberately: every
-    // component is built eagerly at freeze, so registering the graph would
-    // make a missing root parameter fail the boot of an application that
-    // works today — for a value nothing calls yet. A function is inert until
-    // something calls it, and gives step 6 a single place to change.
-    out += "\n"
-    out += "/// Builds ``FlightGraph`` from a frozen container.\n"
-    out += "///\n"
-    out += "/// The bridge between the two wiring mechanisms while both exist:\n"
-    out += "/// the graph's root parameters are the components modules register,\n"
-    out += "/// so they resolve exactly as they always have.\n"
-    out += "func makeFlightGraph(_ container: FlightCore.Container) throws -> FlightGraph {\n"
-    var resolved: [String] = []
-    if needsConfiguration {
-        resolved.append("configuration: container.resolve(FlightCore.Configuration.self)")
-    }
-    for dependency in supplied {
-        let metatype =
-            dependency.hasPrefix("(") || !dependency.contains(" ")
-            ? dependency : "(\(dependency))"
-        resolved.append("\(suppliedBinding(dependency)): container.resolve(\(metatype).self)")
-    }
-    if resolved.isEmpty {
-        out += "    try FlightGraph()\n"
-    } else {
-        out += "    try FlightGraph(\n"
-        out += resolved.map { "        \($0)" }.joined(separator: ",\n") + "\n"
-        out += "    )\n"
-    }
-    out += "}\n"
 
     // Route registrations with a per-request controller (§2.1a).
     //
@@ -2247,9 +2081,10 @@ func emitComposer(into out: inout String) {
     out += "/// Pass to `Flight.run(configuration:modules:composedBy:)`. The\n"
     out += "/// `modules:` list stays the declaration of *which* subsystems the\n"
     out += "/// application includes; this is how they are built.\n"
-    out += "func flightComposeModules(_ configuration: FlightCore.Configuration) throws\n"
-    out += "    -> [any FlightCore.FlightModule]\n"
-    out += "{\n"
+    out += "func flightComposeModules(\n"
+    out += "    _ configuration: FlightCore.Configuration,\n"
+    out += "    _ flightHealth: FlightCore.ModuleHealthRegistry\n"
+    out += ") throws -> [any FlightCore.FlightModule] {\n"
     /// The argument for one parameter, or nil when nothing can supply it.
     ///
     /// An optional parameter with no provider is *omittable* rather than
@@ -2259,6 +2094,11 @@ func emitComposer(into out: inout String) {
         label: String, type: String, for consumer: String, needing needed: inout Set<String>
     ) -> String?? {
         if baseName(type) == "Configuration" { return "\(label): configuration" }
+        // The shared health registry the composition root owns — Actuator
+        // takes it, and `Flight.run` writes module state into the same one.
+        if providedTypeKey(type) == "ModuleHealthRegistry" {
+            return "\(label): flightHealth"
+        }
         // The graph is a value the composition root builds, not a module, so
         // it is not in `includedModules` — but a module can take it, and the
         // application's own module does.

@@ -108,19 +108,32 @@ enum WireSideEffect {
     static func reset() { count.withLock { $0 = 0 } }
 }
 
-struct WireModule: FlightModule {
+enum WireModule {
     /// The uploads mount's store, when a test wants one over the wire.
     /// Set before the server boots; nil leaves the mount unregistered.
     static let uploadStore = Mutex<DiskUploadStore?>(nil)
+}
 
-    func configure(_ container: Container) throws {
-        try WireController._flightRegister(container)
-        if let store = Self.uploadStore.withLock({ $0 }) {
-            container.uploads(at: "/uploads", store: store) { options in
-                options.maxSize = 64 << 20
-            }
+/// The fixture app's routes as values — what a composition root hands the web
+/// module, and what the transport dispatches. `WireController` takes no
+/// dependencies, so a bare init per request.
+func wireRoutes() -> [RouteRegistration] {
+    var routes: [RouteRegistration] = [
+        WireController._flightRoute_hello_0 { _ in WireController() },
+        WireController._flightRoute_echo_1 { _ in WireController() },
+        WireController._flightRoute_sse_2 { _ in WireController() },
+        WireController._flightRoute_counted_3 { _ in WireController() },
+        WireController._flightRoute_alphabet_4 { _ in WireController() },
+        WireController._flightRoute_uploadStream_5 { _ in WireController() },
+        WireController._flightRoute_uploadImpatient_6 { _ in WireController() },
+        WireController._flightRoute_socket_7 { _ in WireController() },
+    ]
+    if let store = WireModule.uploadStore.withLock({ $0 }) {
+        routes += RouteRegistration.uploads(at: "/uploads", store: store) { options in
+            options.maxSize = 64 << 20
         }
     }
+    return routes
 }
 
 // MARK: - Server harness
@@ -133,8 +146,7 @@ func withRunningServer(
     tls: FlightTransportConfiguration.TLS? = nil,
     _ body: @escaping @Sendable (_ port: Int) async throws -> Void
 ) async throws {
-    let container = try TestContainer.build { WireModule() }
-    let dispatch = try TestClient(container: container).dispatch
+    let dispatch = try TestClient(routes: wireRoutes()).dispatch
 
     let (portStream, portContinuation) = AsyncStream<Int>.makeStream()
     let configuration = FlightTransportConfiguration(

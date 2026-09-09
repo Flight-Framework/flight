@@ -5,33 +5,11 @@ import ServiceLifecycle
 /// lifecycle group. If a future starter seems to need more, extend this
 /// deliberately — never via a side channel.
 public protocol FlightModule {
-    /// Bootstrap instantiates modules itself, from the types listed in
-    /// `Flight.bootstrap(modules:)`, so conformances must be constructible
-    /// without arguments. Configuration
-    /// reaches modules through the container (bootstrap registers
-    /// `Configuration` before any module configures), not through init.
-    init()
-
-    /// False when this module takes what it provides as initializer
-    /// parameters, so `init()` cannot build a usable one.
-    ///
-    /// `init()` is still a protocol requirement while the type-based entry
-    /// points exist, which leaves a module that *needs* arguments with only
-    /// bad options for its `init()`: return something misconfigured, or trap.
-    /// This is the third option — say so, so the DAG walk can refuse before
-    /// calling it and name the fix. `FlightPubSubModule` is the first such
-    /// module (COMPOSITION-MIGRATION.md D11); the rest follow as they convert,
-    /// and the flag disappears with `init()` itself at the end of §9.
-    static var isTypeConstructible: Bool { get }
-
-    /// Modules that must have already run `configure(_:)` before this one.
-    /// Forms a DAG resolved once at bootstrap — deterministic and checkable,
-    /// not "hope registration order happens to work."
+    /// Modules that must be *included* when this one is — the composition root
+    /// pulls in prerequisites so naming one module names its stack. Not an
+    /// ordering constraint: construction order comes from the value flow the
+    /// generator resolves at build time.
     static var dependencies: [any FlightModule.Type] { get }
-
-    /// Pure registration. No I/O, no long-running work. Runs during the
-    /// container's registration phase, strictly serial across the module DAG.
-    func configure(_ container: Container) throws
 
     /// Present only if this module owns a long-running component. Handed to
     /// the app-wide ServiceLifecycle `ServiceGroup` at bootstrap.
@@ -102,7 +80,6 @@ public enum ServiceCompletionPolicy: Sendable, Equatable {
 
 extension FlightModule {
     public static var dependencies: [any FlightModule.Type] { [] }
-    public static var isTypeConstructible: Bool { true }
     public var service: (any Service)? { nil }
     public var serviceCompletion: ServiceCompletionPolicy { .failsApp }
     public var serviceShutdownPhase: ServiceShutdownPhase { .standard }
@@ -151,58 +128,4 @@ extension ModuleHealth: Equatable {
 public struct ModuleStatus: Sendable {
     public let moduleName: String
     public let health: ModuleHealth
-}
-
-// MARK: - Module DAG resolution
-
-public enum ModuleGraphError: Error, CustomStringConvertible, Sendable {
-    case cycle([String])
-    public var description: String {
-        switch self {
-        case .cycle(let names):
-            return "FlightModule dependency cycle: \(names.joined(separator: " → "))"
-        }
-    }
-}
-
-/// Deterministic topological order over the module DAG.
-///
-/// Properties, all load-bearing:
-/// - Dependencies always precede dependents.
-/// - Order is stable: modules are visited in the order given, and each
-/// module's dependencies in their declared order — same input, same output,
-/// every run. It is deterministic and checkable.
-/// - Transitive dependencies are auto-included: listing `WebModule` pulls in
-/// everything `WebModule.dependencies` declares, recursively. A module you
-/// depend on but forgot to list is a wiring bug this removes by design.
-/// - Cycles are an error naming the full chain.
-func _flightResolveModuleOrder(_ modules: [any FlightModule.Type]) throws
-    -> [any FlightModule.Type]
-{
-    var ordered: [any FlightModule.Type] = []
-    var finished: Set<ObjectIdentifier> = []
-    var inProgress: Set<ObjectIdentifier> = []
-    var stack: [String] = []
-
-    func visit(_ module: any FlightModule.Type) throws {
-        let id = ObjectIdentifier(module)
-        if finished.contains(id) { return }
-        if inProgress.contains(id) {
-            throw ModuleGraphError.cycle(stack + [module.moduleName])
-        }
-        inProgress.insert(id)
-        stack.append(module.moduleName)
-        for dependency in module.dependencies {
-            try visit(dependency)
-        }
-        stack.removeLast()
-        inProgress.remove(id)
-        finished.insert(id)
-        ordered.append(module)
-    }
-
-    for module in modules {
-        try visit(module)
-    }
-    return ordered
 }

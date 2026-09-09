@@ -7,13 +7,12 @@ import Testing
 
 @testable import FlightSecurityCore
 
-/// Registers an OIDC validator wired to an in-memory JWKS (real validation
+/// Builds an OIDC validator wired to an in-memory JWKS (real validation
 /// path, no network) — standing in for Flight Security OIDC configuring the
-/// generic validator. State travels on the instance (TestContainer
-/// substitutes provided instances by type), so parallel tests never share
-/// key material.
-private struct InMemoryOIDCModule: FlightModule {
-    /// What `FlightSecurityModule` takes, so the type match finds it.
+/// generic validator. A plain value holder: the validator it builds is handed
+/// to `FlightSecurityModule(validator:)`.
+private struct InMemoryOIDCModule {
+    /// What `FlightSecurityModule` takes.
     let tokenValidator: any TokenValidator
 
     init(configuration: Configuration, source: InMemoryJWKSSource, clock: TestClock) throws {
@@ -23,63 +22,54 @@ private struct InMemoryOIDCModule: FlightModule {
             now: clock.nowProvider
         )
     }
-
-    static var isTypeConstructible: Bool { false }
-
-    init() {
-        preconditionFailure("InMemoryOIDCModule must be built with a source and clock")
-    }
-
-    func configure(_ container: Container) throws {
-        let validator = tokenValidator
-        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
-    }
 }
 
-/// Application routes exercising the authenticate-then-enforce patterns.
-private final class RoutesModule: FlightModule {
-    init() {}
-
-    func configure(_ container: Container) throws {
-        container.registerRoute(.get, "/public", source: "RoutesModule") { _ in
+/// Application routes exercising the authenticate-then-enforce patterns, as
+/// the values a composition root hands `FlightWebModule`.
+private func appRoutes() -> [RouteRegistration] {
+    [
+        RouteRegistration(method: .get, path: "/public", source: "RoutesModule") { _ in
             .text("public")
-        }
-        container.registerRoute(.get, "/whoami", source: "RoutesModule") { context in
+        },
+        RouteRegistration(method: .get, path: "/whoami", source: "RoutesModule") { context in
             let principal = try context.requirePrincipal()
             return .text(principal.subject)
-        }
-        container.registerRoute(.post, "/admin/users", source: "RoutesModule") { context in
+        },
+        RouteRegistration(method: .post, path: "/admin/users", source: "RoutesModule") { context in
             // The design manual authorization check, verbatim shape.
             guard context.principal?.hasRole("admin") == true else {
                 throw SecurityError.forbidden
             }
             return .text("created")
-        }
+        },
         // The canonical security lanes, named exactly as `Docs/web.md` and
-        // `PipelineLane`'s own documentation spell them. Nothing here
-        // declares them, deliberately: the point of a canonical lane is that
-        // an application names it and it works.
-        container.registerRoute(
-            .get, "/lane/dashboard", source: "RoutesModule", pipelines: [.authenticated]
+        // `PipelineLane`'s own documentation spell them. Nothing here declares
+        // them, deliberately: the point of a canonical lane is that an
+        // application names it and it works — the security middleware declares
+        // them.
+        RouteRegistration(
+            method: .get, path: "/lane/dashboard", source: "RoutesModule",
+            pipelines: [.authenticated]
         ) { context in
             .text(try context.requirePrincipal().subject)
-        }
-        container.registerRoute(
-            .get, "/lane/profile", source: "RoutesModule", pipelines: [.authentication]
+        },
+        RouteRegistration(
+            method: .get, path: "/lane/profile", source: "RoutesModule",
+            pipelines: [.authentication]
         ) { context in
             .text(context.principal?.subject ?? "anonymous")
-        }
-        container.registerRoute(.get, "/documents", source: "RoutesModule") { context in
-            //: handler binds the task-local; a "service" reads the
-            // ambient principal without it being threaded through.
+        },
+        RouteRegistration(method: .get, path: "/documents", source: "RoutesModule") { context in
+            // The handler binds the task-local; a "service" reads the ambient
+            // principal without it being threaded through.
             try await context.withPrincipal {
                 guard let principal = Principal.current else {
                     throw SecurityError.unauthenticated
                 }
                 return .text("documents of \(principal.subject)")
             }
-        }
-    }
+        },
+    ]
 }
 
 @Suite("End to end through Flight Web's real pipeline")
@@ -96,14 +86,10 @@ struct EndToEndTests {
         let oidc = try InMemoryOIDCModule(
             configuration: configuration, source: source, clock: clock)
         let security = FlightSecurityModule(validator: oidc.tokenValidator)
-        let container = try TestContainer.build(configuration: configuration) {
-            oidc
-            security
-            RoutesModule()
-        }
-        // The security middleware is a value the composition root hands to
-        // FlightWebModule, so a client that must run it is handed it too.
-        return try TestClient(container: container, middleware: security.middleware)
+        // The routes and the security middleware are values the composition
+        // root hands FlightWebModule; a client that must run them is handed
+        // them too.
+        return try TestClient(routes: appRoutes(), middleware: security.middleware)
     }
 
     private func bearer(_ token: String) -> HTTPFields {

@@ -49,7 +49,7 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
     private let configuration: Configuration
 
     /// Built in `configure`, read by `service`.
-    private var dispatch: Dispatch?
+    private let dispatch: Dispatch
 
     /// - Parameter coders: An application's own encoders/decoders, when it
     ///   has them. Nil means "read `web.*`" — the ordinary case.
@@ -68,17 +68,24 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
         coders: WebCoders? = nil,
         errorMapper: ErrorMapper? = nil
     ) throws {
+        let resolvedCoders = try coders ?? WebCoders(configuration: configuration)
+        let resolvedMapper = errorMapper ?? .none
         self.configuration = configuration
-        self.coders = try coders ?? WebCoders(configuration: configuration)
-        self.errorMapper = errorMapper ?? .none
+        self.coders = resolvedCoders
+        self.errorMapper = resolvedMapper
         self.routes = routes
         self.middleware = middleware
         self.assetMounts = assetMounts
+        // Dispatch — and route-table validation — is built here, from values.
+        // A conflicting or malformed route, or one naming an undeclared lane,
+        // fails composition rather than at the service's first breath.
+        self.dispatch = try DispatchBuilder.build(
+            routes: routes,
+            middleware: middleware,
+            assetMounts: assetMounts,
+            web: WebRuntime(coders: resolvedCoders, errorMapper: resolvedMapper),
+            logger: Logger(label: "flight.web"))
     }
-
-    /// This module takes what it provides, so it cannot be built from its
-    /// type — every supported path checks this and throws first.
-    public static var isTypeConstructible: Bool { false }
 
     public init() {
         preconditionFailure(
@@ -89,42 +96,8 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
                 + "yourself and use the entry point taking module instances.")
     }
 
-    public func configure(_ container: Container) throws {
-        let coders = self.coders
-        let errorMapper = self.errorMapper
-        container.register(WebCoders.self, scope: .singleton) { _ in coders }
-        container.register(ErrorMapper.self, scope: .singleton) { _ in errorMapper }
-
-        // Route-table validation happens here now — a conflicting or malformed
-        // route, or one naming an undeclared lane, fails during module
-        // configuration rather than at the service's first breath. Earlier,
-        // and at the point that assembled the table.
-        let dispatch = try DispatchBuilder.build(
-            routes: routes,
-            middleware: middleware,
-            assetMounts: assetMounts,
-            web: WebRuntime(coders: coders, errorMapper: errorMapper),
-            logger: Logger(label: "flight.web"))
-        self.dispatch = dispatch
-        container.register(Dispatch.self, scope: .singleton) { _ in dispatch }
-
-        // Registered for *introspection*, not for dispatch — the table above
-        // is already built. Actuator's dashboard lists routes through the same
-        // `allRegistrations()` it lists everything else through, and a route
-        // that only existed as a value would have vanished from it.
-        for route in routes {
-            container.register(
-                RouteRegistration.self,
-                qualifier: "\(route.method.rawValue) \(route.path) @\(route.source)",
-                scope: .singleton
-            ) { _ in route }
-        }
-    }
-
     public var service: (any Service)? {
-        dispatch.map {
-            WebHostService<Transport>(dispatch: $0, configuration: configuration)
-        }
+        WebHostService<Transport>(dispatch: dispatch, configuration: configuration)
     }
 
     /// The transport is what brings work in, so it is the first thing to

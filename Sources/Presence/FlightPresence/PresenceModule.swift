@@ -97,10 +97,6 @@ public struct FlightPresenceModule: FlightModule {
         self.gossipBus = gossipBus
     }
 
-    /// This module takes what it provides, so it cannot be built from its
-    /// type — every supported path checks this and throws first.
-    public static var isTypeConstructible: Bool { false }
-
     public init() {
         preconditionFailure(
             "FlightPresenceModule takes its buses and configuration in "
@@ -111,14 +107,6 @@ public struct FlightPresenceModule: FlightModule {
     }
 
     /// Projects what this module already holds.
-    public func configure(_ container: Container) throws {
-        let settings = self.settings
-        let tracker = self.tracker
-        container.register(PresenceConfiguration.self, scope: .singleton) { _ in settings }
-        container.register(PresenceTracker.self, scope: .singleton) { _ in tracker }
-        container.register((any Presence).self, scope: .singleton) { _ in tracker }
-    }
-
     /// Built from what this module holds. It used to be built from the
     /// stashed `Container` and resolve at `run()`, because the service is
     /// constructed pre-freeze and the components did not exist yet — they do

@@ -140,31 +140,6 @@ struct SchedulerServiceTests {
         #expect(stopped.withLock { $0 }, "shutdown must still stop the scheduler")
     }
 
-    @Test("a coordinator that fails to build is a startup failure, not single-process mode")
-    func brokenCoordinatorIsNotSilentDegradation() throws {
-        // The comment above resolveCoordinator said a non-.notRegistered
-        // failure "is a real wiring bug and should not be swallowed" while
-        // every path returned LocalJobCoordinator, so a misconfigured
-        // distributed coordinator quietly degraded a cluster to running
-        // every once-job on every node — the exact outcome a coordinator
-        // exists to prevent.
-        // The failure moved earlier, which is the better outcome. `.scoped`
-        // used to serve here: registering the coordinator scoped made
-        // `resolve` throw `scopeRequired`, proving the guard did not swallow
-        // it. With one lifetime, a coordinator whose factory fails cannot
-        // reach resolution at all — every component is built at `freeze()`,
-        // so a misconfigured one fails startup, naming itself, before a
-        // single job runs.
-        struct Misconfigured: Error {}
-        let container = Container()
-        container.register((any JobCoordinator).self) { _ -> any JobCoordinator in
-            throw Misconfigured()
-        }
-        #expect(throws: (any Error).self) {
-            try container.freeze()
-        }
-    }
-
     @Test("no coordinator supplied means single-process mode")
     func modeWithoutCoordinator() {
         // The coordinator is an argument now: whether a deployment has

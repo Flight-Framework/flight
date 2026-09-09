@@ -256,7 +256,7 @@ struct SocketHandlerBroadcastTests {
         let alice = try await harness.wire()
         _ = try await alice.join("room:42")
 
-        let pubsub = try harness.container.resolve((any PubSub).self)
+        let pubsub = harness.bus
         await pubsub.publish(
             Message(
                 topic: "room:42",

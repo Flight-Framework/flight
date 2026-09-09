@@ -5,9 +5,10 @@ import ServiceLifecycle
 /// Exposed so tests (and embedders like a CLI harness) can run the assembly
 /// steps without entering a never-returning `ServiceGroup.run()`.
 public struct AssembledApplication: Sendable {
-    public let container: Container
     public let services: [AssembledService]
     public let moduleOrder: [String]
+    /// Per-module health. Actuator reads it.
+    public let health: ModuleHealthRegistry
 }
 
 /// One module's service, health-wrapped, with the module's declared
@@ -45,7 +46,8 @@ public enum BootstrapError: Error, CustomStringConvertible {
     case duplicateRegistration(String)
 
     /// A module named only by its type takes what it provides as initializer
-    /// parameters — see ``FlightModule/isTypeConstructible``.
+    /// parameters, so it cannot be built from its type — the composition root
+    /// must construct it.
     case moduleRequiresConstruction(module: String)
 
     public var description: String {
@@ -85,72 +87,32 @@ public enum BootstrapError: Error, CustomStringConvertible {
 /// Internal: `Flight.assemble` is the public spelling. This was public with
 /// no caller anywhere outside FlightCore, duplicating that surface under a
 /// name nothing was meant to type.
+/// Assembly from modules the composition root already built, in dependency
+/// order. No container: a module holds what it provides and is constructed by
+/// the composer, so assembly only seeds health, collects services, and orders
+/// them by shutdown phase. Configuration is fully resolved before this runs —
+/// enforced by the signature.
 func _flightAssemble(
     configuration: Configuration,
-    modules: [any FlightModule.Type]
+    moduleInstances instances: [any FlightModule],
+    health: ModuleHealthRegistry = ModuleHealthRegistry()
 ) throws -> AssembledApplication {
-    // Step 5, and the reason this overload exists: a module named only as a
-    // type has to be instantiated here, so it must be constructible with no
-    // arguments. The instance overload below is for a caller that already
-    // built them — which is what a generated composition root does, and what
-    // lets a module take what it needs as initializer parameters
-    // (COMPOSITION-MIGRATION.md D11).
-    let ordered = try _flightResolveModuleOrder(modules)
-    return try _flightAssemble(
-        configuration: configuration,
-        moduleInstances: Flight.instantiateModules(ordered))
-}
-
-/// The same assembly from modules already built and already ordered.
-///
-/// Ordered, because resolving the DAG is what the type-based overload uses
-/// the types *for*: given instances, there is nothing left to sort by. A
-/// caller supplying these has the order already — a generated composition
-/// root gets it from the same `dependencies` walk, at build time — and
-/// supplying them out of order is the one mistake this signature cannot
-/// catch. That is the trade: the DAG moves to the build, and with it the
-/// requirement that a module be constructible with no arguments.
-func _flightAssemble(
-    configuration: Configuration,
-    moduleInstances instances: [any FlightModule]
-) throws -> AssembledApplication {
-    let container = Container()  // step 4
-
     let names = instances.map { type(of: $0).moduleName }
-    container.beginHealthTracking(moduleNames: names)
-
-    // Configuration is itself a component: modules read config values by resolving
-    // it (directly or via @ConfigValue-generated code) during configure.
-    container.register(Configuration.self, scope: .singleton) { _ in configuration }
+    health.beginTracking(moduleNames: names)
 
     var services:
         [(
             moduleName: String, service: any Service, completion: ServiceCompletionPolicy,
             phase: ServiceShutdownPhase
         )] = []
-    for (name, module) in zip(names, instances) {  // step 6
-        container.currentSourceModule = name
-        do {
-            try module.configure(container)
-        } catch {
-            container.currentSourceModule = "<direct>"
-            container.setHealth(name, .failed(error))
-            throw BootstrapError.moduleConfigurationFailed(module: name, underlying: error)
-        }
-        // : registration-only modules are "running" the moment they're
-        // configured; service-owning modules stay .running unless their
-        // Service later terminates with an error (see HealthTrackingService).
-        container.setHealth(name, .running)
-        if let service = module.service {  // step 8 (collected here)
+    for (name, module) in zip(names, instances) {
+        // A module with no long-running service is "running" the moment it is
+        // part of the assembly; a service-owning one stays running unless its
+        // Service later throws (see HealthTrackingService).
+        health.set(name, .running)
+        if let service = module.service {
             services.append((name, service, module.serviceCompletion, module.serviceShutdownPhase))
         }
-    }
-    container.currentSourceModule = "<direct>"
-
-    do {
-        try container.freeze()  // step 7
-    } catch {
-        throw BootstrapError.singletonConstructionFailed(underlying: error)
     }
 
     // Sorted by phase, stably, so the DAG's order still decides within a
@@ -173,15 +135,15 @@ func _flightAssemble(
                 moduleName: entry.element.moduleName,
                 service: HealthTrackingService(
                     moduleName: entry.element.moduleName, inner: entry.element.service,
-                    container: container),
+                    health: health),
                 completion: entry.element.completion,
                 shutdownPhase: entry.element.phase
             )
         }
     return AssembledApplication(
-        container: container,
         services: wrapped,
-        moduleOrder: names
+        moduleOrder: names,
+        health: health
     )
 }
 
@@ -192,27 +154,18 @@ func _flightAssemble(
 /// Returns only when the ServiceGroup finishes (shutdown or failure). Apps
 /// with no long-running services return immediately after assembly — a valid
 /// shape for one-shot CLI-style Flight apps.
-func _flightBootstrap(
-    configuration: Configuration,
-    modules: [any FlightModule.Type],
-    logger: Logger = Logger(label: "flight.bootstrap")
-) async throws {
-    try await _flightBootstrap(
-        configuration: configuration,
-        assembled: _flightAssemble(configuration: configuration, modules: modules),
-        logger: logger)
-}
-
-/// The same bootstrap from modules a caller already built, in dependency
-/// order — what a generated composer supplies.
+/// Bootstrap from modules a caller already built, in dependency order — what
+/// a generated composer supplies.
 func _flightBootstrap(
     configuration: Configuration,
     moduleInstances instances: [any FlightModule],
+    health: ModuleHealthRegistry = ModuleHealthRegistry(),
     logger: Logger = Logger(label: "flight.bootstrap")
 ) async throws {
     try await _flightBootstrap(
         configuration: configuration,
-        assembled: _flightAssemble(configuration: configuration, moduleInstances: instances),
+        assembled: _flightAssemble(
+            configuration: configuration, moduleInstances: instances, health: health),
         logger: logger)
 }
 
@@ -225,7 +178,6 @@ private func _flightBootstrap(
         "flight assembled",
         metadata: [
             "modules": .array(app.moduleOrder.map { .string($0) }),
-            "components": .stringConvertible(app.container.allRegistrations().count),
             "services": .stringConvertible(app.services.count),
         ])
 
@@ -259,13 +211,13 @@ private func _flightBootstrap(
 struct HealthTrackingService: Service {
     let moduleName: String
     let inner: any Service
-    let container: Container
+    let health: ModuleHealthRegistry
 
     func run() async throws {
         do {
             try await inner.run()
         } catch {
-            container.setHealth(moduleName, .failed(error))
+            health.set(moduleName, .failed(error))
             throw error
         }
     }

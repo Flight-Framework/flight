@@ -34,7 +34,7 @@ struct BootstrapIntegrationTests {
         let app = Task {
             try await Flight.bootstrap(
                 configuration: configuration,
-                modules: [web, ComponentsOnlyModule()] as [any FlightModule]
+                modules: [web] as [any FlightModule]
             )
         }
         defer { app.cancel() }
@@ -54,48 +54,35 @@ struct BootstrapIntegrationTests {
     }
 
     @Test func conflictingRoutesFailStartupLoudly() throws {
-        // Two routes that collide. Dispatch is assembled when the web module
-        // is configured, so this fails *there* rather than at the service's
-        // first breath — earlier, and with the same message.
+        // Two routes that collide. The web module builds its dispatch in
+        // `init` now, so a route-table conflict fails *there* — at composition,
+        // before assemble or the service's first breath — with the same
+        // message it always gave.
         let configuration = Configuration()
-        let web = try FlightWebModule<InMemoryTransport>(
-            configuration: configuration,
-            routes: [
-                RouteRegistration(method: "GET", path: "/dup/:a", source: "A.first") { _ in
-                    .noContent
-                },
-                RouteRegistration(method: "GET", path: "/dup/:b", source: "B.second") { _ in
-                    .noContent
-                },
-            ])
         #expect(throws: (any Error).self) {
-            _ = try Flight.assemble(configuration: configuration, modules: [web])
+            _ = try FlightWebModule<InMemoryTransport>(
+                configuration: configuration,
+                routes: [
+                    RouteRegistration(method: "GET", path: "/dup/:a", source: "A.first") { _ in
+                        .noContent
+                    },
+                    RouteRegistration(method: "GET", path: "/dup/:b", source: "B.second") { _ in
+                        .noContent
+                    },
+                ])
         }
         #expect(!InMemoryTransportHub.isRunning)
     }
 
-    /// Components without their routes — `includingRoutes: false`, exactly
-    /// what the generated `flightRegisterAll` passes now that routes are
-    /// values the web module is composed with. Registering both would be a
-    /// duplicate, which is the check working.
-    private struct ComponentsOnlyModule: FlightModule {
-        func configure(_ container: Container) throws {
-            try UserService._flightRegister(container)
-            try RequestTracer._flightRegister(container)
-            try UserController._flightRegister(container, includingRoutes: false)
-            try EchoSocketController._flightRegister(container, includingRoutes: false)
-        }
-    }
-
     @Test func handRegisteredRoutesRideTheSamePipeline() async throws {
-        struct HandRoutedModule: FlightModule {
-            func configure(_ container: Container) throws {
-                container.registerRoute(.get, "/manual/:x", source: "HandRoutedModule") { context in
-                    .text("manual \(context.pathParam("x") ?? "?")")
-                }
-            }
+        // A route built by hand rather than by the @Controller macro is the
+        // same RouteRegistration value and rides the same dispatch.
+        let manual = RouteRegistration(
+            method: "GET", path: "/manual/:x", source: "HandRoutedModule"
+        ) { context in
+            .text("manual \(context.pathParam("x") ?? "?")")
         }
-        let client = try TestClient(container: TestContainer.build { HandRoutedModule() })
+        let client = try TestClient(routes: [manual])
         let response = await client.get("/manual/7")
         #expect(response.bodyText == "manual 7")
     }

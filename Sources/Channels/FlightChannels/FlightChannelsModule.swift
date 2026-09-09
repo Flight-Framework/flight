@@ -79,10 +79,6 @@ public struct FlightChannelsModule: FlightModule {
             router: router, pubsub: bus, configuration: settings, broadcaster: broadcaster)
     }
 
-    /// This module takes what it provides, so it cannot be built from its
-    /// type — every supported path checks this and throws first.
-    public static var isTypeConstructible: Bool { false }
-
     public init() {
         preconditionFailure(
             "FlightChannelsModule takes its bus, configuration and channels in "
@@ -94,17 +90,6 @@ public struct FlightChannelsModule: FlightModule {
 
     /// Projects what this module already holds. Nothing is built here, and in
     /// particular the router is not: it exists before any container does.
-    public func configure(_ container: Container) throws {
-        let settings = self.settings
-        let broadcaster = self.broadcaster
-        let router = self.router
-        container.register(ChannelsConfiguration.self, scope: .singleton) { _ in settings }
-        container.register(ChannelRouter.self, scope: .singleton) { _ in router }
-        container.register(ChannelBroadcaster.self, scope: .singleton) { _ in broadcaster }
-        let sockets = self.sockets
-        container.register(ChannelSockets.self, scope: .singleton) { _ in sockets }
-    }
-
     /// This module's socket endpoint, as a route value.
     ///
     /// Nothing is looked up: the handler is built from what this module

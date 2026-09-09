@@ -63,6 +63,11 @@ public struct ActuatorModule: FlightModule {
 
     private let controller = ControllerBox()
 
+    /// Where module health comes from — the shared registry the composition
+    /// root threads in. Read at request time, so it reflects state as of the
+    /// request, exactly as reading the container did.
+    let health: ModuleHealthRegistry
+
     let environment: FlightEnvironment
 
     /// Bootstrap path: the environment comes from `FLIGHT_ENV`, read via
@@ -74,18 +79,33 @@ public struct ActuatorModule: FlightModule {
         self.init(processEnvironment: ProcessInfo.processInfo.environment)
     }
 
-    /// The shape a composition root uses: the scanned components come from
-    /// the generated `flightComponentDescriptors()`.
-    public init(components: [ComponentDescriptor]) {
+    /// The shape the composition root uses: FLIGHT_ENV for the environment,
+    /// `actuator.format` from configuration, scanned components from the
+    /// generated `flightComponentDescriptors()`, health from the shared
+    /// registry. Throws on a malformed `actuator.format`.
+    public init(
+        configuration: Configuration,
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry()
+    ) throws {
         self.init(
             processEnvironment: ProcessInfo.processInfo.environment,
-            components: components)
+            components: components, health: health)
+        try installController(
+            format: configuration.getIfPresent("actuator.format", as: ActuatorFormat.self) ?? .ssr)
     }
 
     /// The same path with the process environment injected — how a test asks
     /// "what would an unset `FLIGHT_ENV` do" without mutating the real one.
-    public init(processEnvironment: [String: String], components: [ComponentDescriptor] = []) {
+    /// Uses the default `.ssr` format; the composer init above reads
+    /// `actuator.format`.
+    public init(
+        processEnvironment: [String: String],
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry()
+    ) {
         self.components = components
+        self.health = health
         self.environment = .current(from: processEnvironment)
         self.exposureOverride = nil
         // An unset FLIGHT_ENV resolves to `dev`, which is in the dashboard
@@ -98,13 +118,19 @@ public struct ActuatorModule: FlightModule {
             exposure: try? ActuatorExposure.resolve(
                 environment: environment, isEnvironmentDeclared: isEnvironmentDeclared),
             controller: controller)
+        installController(format: .ssr)
     }
 
     /// Explicit-environment initializer — the test seam (`TestContainer.build`
     /// honors ready-made instances), and an escape hatch for embedders that
     /// resolve the environment some other way.
-    public init(environment: FlightEnvironment, components: [ComponentDescriptor] = []) {
+    public init(
+        environment: FlightEnvironment,
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry()
+    ) {
         self.components = components
+        self.health = health
         self.environment = environment
         self.exposureOverride = nil
         // Naming the environment in code is a declaration, the same as
@@ -114,6 +140,7 @@ public struct ActuatorModule: FlightModule {
             exposure: try? ActuatorExposure.resolve(
                 environment: environment, isEnvironmentDeclared: true),
             controller: controller)
+        installController(format: .ssr)
     }
 
     /// Explicit exposure, bypassing both the environment allowlist and
@@ -122,13 +149,17 @@ public struct ActuatorModule: FlightModule {
     public init(
         environment: FlightEnvironment,
         exposure: ActuatorExposure,
-        components: [ComponentDescriptor] = []
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry(),
+        format: ActuatorFormat = .ssr
     ) {
         self.components = components
+        self.health = health
         self.environment = environment
         self.exposureOverride = exposure
         self.isEnvironmentDeclared = true
         self.routes = Self.makeRoutes(exposure: exposure, controller: controller)
+        installController(format: format)
     }
 
     private let exposureOverride: ActuatorExposure?
@@ -217,51 +248,20 @@ public struct ActuatorModule: FlightModule {
         return routes
     }
 
-    public func configure(_ container: Container) throws {
-        // Whether the actuator exists at all has to be decided here too, and
-        // registration-phase code cannot resolve `Configuration` — so the
-        // override arrives the same way `FLIGHT_ENV` does. This is also where
-        // a malformed exposure surfaces, failing bootstrap.
-        let exposure = try resolvedExposure.get()
-        guard exposure.publishesHealth else { return }
-
-        // The environment the gate ran against, for the dashboard to report.
-        container.register(
-            FlightEnvironment.self,
-            qualifier: Self.environmentQualifier,
-            scope: .singleton
-        ) { [environment] _ in environment }
-
-        // ActuatorController is a plain struct, not @Controller (see its
-        // file for why) — registered here by hand, exactly as the design
-        // doc's sketch shows. The factory runs once, at freeze()'s
-        // eager singleton construction, which is what gives `format` its
-        // "read once at bootstrap" semantics without @ConfigValue.
-        // `container` is the same instance being configured — no
-        // self-registration needed for the controller to hold a reference
-        // to it.
-        let box = controller
-        let components = self.components + Self.ownComponents
-        container.register(ActuatorController.self, scope: .singleton, stereotype: .controller) { [environment] c in
-            // getIfPresent, not get(_:default:) — the latter is non-throwing
-            // and fatalErrors on a malformed *present* value; getIfPresent
-            // throws instead, so a malformed value still fails module
-            // configuration loudly rather than trapping the process.
-            // The same distinction @ConfigValue's own `default:` expansion
-            // relies on (getIfPresent's doc comment).
-            let format = try c.resolve(Configuration.self)
-                .getIfPresent("actuator.format", as: ActuatorFormat.self) ?? .ssr
-            // Health is runtime state, so it is read through the thing that
-            // tracks it; the component list is the build's answer, passed in.
-            let controller = ActuatorController(
-                components: components,
-                health: { [weak c] in c?.moduleStatuses() ?? [] },
+    /// Builds the controller into the box the routes serve from, when the
+    /// exposure publishes anything. Called from `init` — there is no container
+    /// and no `configure`; the module holds what it needs.
+    ///
+    /// `format` is read once here (the "read at bootstrap" semantics the
+    /// freeze()-time factory used to give it). A malformed `actuator.format`
+    /// throws, failing composition.
+    private func installController(format: ActuatorFormat) {
+        guard let exposure = try? resolvedExposure.get(), exposure.publishesHealth else { return }
+        controller.set(
+            ActuatorController(
+                components: components + Self.ownComponents,
+                health: { [health] in health.statuses() },
                 environment: environment,
-                format: format)
-            // The routes serve from here rather than resolving per request.
-            box.set(controller)
-            return controller
-        }
-
+                format: format))
     }
 }

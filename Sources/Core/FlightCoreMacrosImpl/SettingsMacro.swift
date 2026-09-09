@@ -44,38 +44,29 @@ public struct SettingsMacro: MemberMacro, ExtensionMacro {
                 // silently replaced by the default — same rule as
                 // @ConfigValue, for the same reason.
                 initLines.append(
-                    "self.\(field.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(field.key), as: \(field.typeText).self) ?? (\(defaultValue))"
+                    "self.\(field.name) = try configuration.getIfPresent(\(field.key), as: \(field.typeText).self) ?? (\(defaultValue))"
                 )
             } else {
                 initLines.append(
-                    "self.\(field.name) = try container.resolve(FlightCore.Configuration.self).get(\(field.key), as: \(field.typeText).self)"
+                    "self.\(field.name) = try configuration.get(\(field.key), as: \(field.typeText).self)"
                 )
             }
         }
+        let hasValidate = declaresInstanceValidate(declaration)
+        // The composition root builds a settings type through this
+        // initializer, reading each field from the configuration it is handed
+        // (`_flightConfiguration` — the label the graph passes). Validation,
+        // which used to run in the registration factory at freeze, runs here:
+        // a bad value fails composition. The container-era init(_flight:) and
+        // registration thunk are gone.
+        if hasValidate { initLines.append("try validate()") }
         let initBody =
             initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
-        let resolvingInit: DeclSyntax = """
-            internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
+        let settingsInit: DeclSyntax = """
+            internal init(_flightConfiguration configuration: FlightCore.Configuration) throws {\(raw: initBody)}
             """
 
-        let hasValidate = declaresInstanceValidate(declaration)
-        // No manual leading spaces on the continuation lines: BasicFormat
-        // re-indents raw text relative to its enclosing braces, and a
-        // hand-added prefix here stacks on top of that rather than replacing
-        // it.
-        let constructAndValidate =
-            hasValidate
-            ? "let value = try Self(_flight: c)\ntry value.validate()\nreturn value"
-            : "try Self(_flight: c)"
-        let thunk: DeclSyntax = """
-            \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
-            container.register(Self.self, scope: .singleton, stereotype: .settings) { c in
-            \(raw: constructAndValidate)
-            }
-            }
-            """
-
-        var members = [resolvingInit, thunk]
+        var members = [settingsInit]
         if let redacted = redactingDescription(
             typeName: typeName(of: declaration), fields: fields, declaration: declaration)
         {
@@ -101,11 +92,6 @@ public struct SettingsMacro: MemberMacro, ExtensionMacro {
             // `_FlightRegistrable`), and both are the same protocol.
             let name = requested.trimmedDescription
             switch true {
-            case name.hasSuffix("_FlightRegistrable"):
-                extensions.append(
-                    """
-                    extension \(type.trimmed): FlightCore._FlightRegistrable {}
-                    """)
             case name.hasSuffix("CustomStringConvertible"):
                 // The compiler only lists this when it is not already
                 // satisfied elsewhere; `redactingDescription` (the member

@@ -6,10 +6,9 @@ import Foundation
 import HTTPTypes
 import Testing
 
-/// The real bootstrap path (Flight Core): `assemble` with
-/// `ActuatorModule.self` as a module *type* — instantiated via `init()`,
-/// health-tracked, source-module-stamped — then served through the full
-/// dispatch pipeline.
+/// The composed path: an `ActuatorModule` built the way the composition root
+/// builds it — explicit environment, components handed over, health from the
+/// shared registry — assembled and served through the full dispatch pipeline.
 ///
 /// Serialized because the default `ActuatorModule.init()` reads `FLIGHT_ENV`
 /// from the process environment, which these tests pin to a known value.
@@ -20,49 +19,43 @@ struct IntegrationTests {
         setenv("FLIGHT_ENV", "dev", 1)
     }
 
-    @Test("assemble → dispatch → dashboard, end to end")
+    @Test("compose → dispatch → dashboard, end to end")
     func endToEnd() async throws {
-        let actuator = ActuatorModule(components: SampleAppModule.components)
-        let app = try Flight.assemble(
-            configuration: Configuration(values: ["actuator.format": "json"]),
-            modules: [actuator, SampleAppModule()]
-        )
+        // The composition root threads one health registry into the actuator;
+        // here we report the assembled modules' health onto it directly.
+        let health = ModuleHealthRegistry()
+        health.reportHealth(.running, forModule: "ActuatorModule")
+        health.reportHealth(.running, forModule: "SampleAppModule")
 
-        // Bootstrap stamped Actuator's registrations with the module name.
-        let controller = try #require(app.container.allRegistrations().first {
-            $0.typeName == "FlightActuator.ActuatorController"
-        })
-        #expect(controller.sourceModule == "ActuatorModule")
+        let actuator = ActuatorModule(
+            environment: .dev, exposure: .full,
+            components: SampleAppModule.components, health: health, format: .json)
 
-        // Both modules configured → running (Flight Core).
-        let client = try TestClient(container: app.container, routes: actuator.routes)
+        let client = try TestClient(routes: actuator.routes)
         let response = await client.get("/actuator")
         #expect(response.status == .ok)
         let wire = try response.decodeJSON(SnapshotWire.self)
 
-        #expect(wire.environment == FlightEnvironment.current().rawValue)
+        #expect(wire.environment == "dev")
         let moduleNames = wire.modules.map(\.module)
         #expect(moduleNames.contains("ActuatorModule"))
         #expect(moduleNames.contains("SampleAppModule"))
         #expect(wire.modules.allSatisfy { $0.health == "running" })
 
-        // Every component the *build* scanned for that module. Six ordinary
-        // ones plus SampleController.
-        //
-        // It used to be eight: the container also held the `RouteRegistration`
-        // the controller's route registers, and the dashboard listed it as a
-        // component because `allRegistrations()` could not tell the two apart.
-        // The scanned list carries components, and routes are reported as
-        // routes — which is the distinction §2.9 wanted.
+        // Every component the *build* scanned for the app module. Six ordinary
+        // ones plus SampleController — routes are reported as routes, never
+        // folded in as components (the distinction §2.9 wanted).
         let sampleComponents = wire.components.filter { $0.sourceModule == "SampleAppModule" }
         #expect(sampleComponents.count == 7)
+        // Actuator's own controller is listed like everything else.
+        #expect(wire.components.contains { $0.type == "FlightActuator.ActuatorController" })
     }
 
     @Test("actuator registers no service — it is request-response only")
     func noLongRunningService() throws {
         let app = try Flight.assemble(
             configuration: Configuration(),
-            modules: [ActuatorModule.self]
+            modules: [ActuatorModule()]
         )
         #expect(app.services.isEmpty)
     }
@@ -74,8 +67,7 @@ struct IntegrationTests {
         let actuator = ActuatorModule(
             environment: .staging, exposure: .full,
             components: SampleAppModule.components)
-        let container = try TestContainer.build { actuator }
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let client = try TestClient(routes: actuator.routes)
         let body = await client.get("/actuator").bodyText
         #expect(body.contains("Environment: <strong>staging</strong>"))
     }
@@ -92,10 +84,10 @@ struct ProbeTests {
         // toward DOWN on the single endpoint, so used as a liveness probe it
         // restart-looped a slow-starting pod into the same slow start,
         // forever.
-        let actuator = ActuatorModule(environment: .dev)
-        let container = try TestContainer.build { actuator }
-        container.reportHealth(.notStarted, forModule: "Slow")
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let health = ModuleHealthRegistry()
+        let actuator = ActuatorModule(environment: .dev, health: health)
+        health.reportHealth(.notStarted, forModule: "Slow")
+        let client = try TestClient(routes: actuator.routes)
 
         #expect(await client.get("/actuator/health/live").status == .ok)
         #expect(await client.get("/actuator/health/ready").status == .serviceUnavailable)
@@ -105,10 +97,10 @@ struct ProbeTests {
     @Test("a failed module is neither alive nor ready")
     func failedIsDownForBoth() async throws {
         struct Boom: Error {}
-        let actuator = ActuatorModule(environment: .dev)
-        let container = try TestContainer.build { actuator }
-        container.reportHealth(.failed(Boom()), forModule: "Broken")
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let health = ModuleHealthRegistry()
+        let actuator = ActuatorModule(environment: .dev, health: health)
+        health.reportHealth(.failed(Boom()), forModule: "Broken")
+        let client = try TestClient(routes: actuator.routes)
 
         #expect(await client.get("/actuator/health/live").status == .serviceUnavailable)
         #expect(await client.get("/actuator/health/ready").status == .serviceUnavailable)
@@ -116,10 +108,10 @@ struct ProbeTests {
 
     @Test("a healthy app is up on every probe")
     func runningIsUpEverywhere() async throws {
-        let actuator = ActuatorModule(environment: .dev)
-        let container = try TestContainer.build { actuator }
-        container.reportHealth(.running, forModule: "Fine")
-        let client = try TestClient(container: container, routes: actuator.routes)
+        let health = ModuleHealthRegistry()
+        let actuator = ActuatorModule(environment: .dev, health: health)
+        health.reportHealth(.running, forModule: "Fine")
+        let client = try TestClient(routes: actuator.routes)
 
         for path in ["/actuator/health", "/actuator/health/live", "/actuator/health/ready"] {
             let response = await client.get(path)

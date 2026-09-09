@@ -143,11 +143,6 @@ struct ChannelsFixtureModule: FlightModule {
         ]
     }
 
-    func configure(_ container: Container) throws {
-        let events = self.events
-        container.register(ChannelEvents.self, scope: .singleton) { _ in events }
-    }
-
     /// The socket mounts, as route values built from a channels module — the
     /// value form of the old `registerChannelSocket` calls.
     func socketRoutes(_ channels: FlightChannelsModule) -> [RouteRegistration] {
@@ -173,8 +168,13 @@ private func principal(from context: RequestContext) -> BasicPrincipal? {
 // MARK: - Harness
 
 struct Harness {
-    let container: Container
     let client: TestClient
+    /// The channels module, so a test can read its router, broadcaster and
+    /// settings — the components it used to resolve out of the container.
+    let channels: FlightChannelsModule
+    /// The fixture's own probe, held rather than resolved.
+    let events: ChannelEvents
+    private let pubsub: FlightPubSubModule
 
     /// Short heartbeat windows by default so liveness tests run in
     /// milliseconds; generous enough that normal tests never trip them.
@@ -194,26 +194,20 @@ struct Harness {
         let fixture = ChannelsFixtureModule()
         let channels = try FlightChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: fixture.channels)
-        self.container = try TestContainer.build(configuration: configuration) {
-            pubsub
-            fixture
-            channels
-        }
-        self.client = try TestClient(
-            container: container, routes: fixture.socketRoutes(channels))
+        self.client = try TestClient(routes: fixture.socketRoutes(channels))
+        self.channels = channels
+        self.events = fixture.events
+        self.pubsub = pubsub
     }
 
     func wire(_ path: String = "/socket") async throws -> ChannelWireClient {
         ChannelWireClient(socket: try await client.webSocket(path))
     }
 
-    var events: ChannelEvents {
-        get throws { try container.resolve(ChannelEvents.self) }
-    }
+    /// What consumers publish and subscribe through.
+    var bus: any PubSub { pubsub.bus }
 
-    var localPubSub: LocalPubSub {
-        get throws { try container.resolve(LocalPubSub.self) }
-    }
+    var localPubSub: LocalPubSub { pubsub.local }
 }
 
 // MARK: - Envelope test helpers

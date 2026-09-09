@@ -15,10 +15,10 @@ import Synchronization
 /// the PubSub relay and the presence service running as tasks, the way a
 /// real deployment's ServiceGroup would run them.
 final class PresenceNode: Sendable {
-    let container: Container
     let client: TestClient
     let tracker: PresenceTracker
     let presence: any Presence
+    private let localPubSub: LocalPubSub
     private let serviceTask: Task<Void, Never>
     private let relayTask: Task<Void, Never>?
     private let adapter: InMemoryClusterAdapter?
@@ -37,12 +37,9 @@ final class PresenceNode: Sendable {
         monitor: (any PresenceMembershipMonitor)? = nil,
         configValues: [String: String] = PresenceNode.fastConfig
     ) throws {
-        let container = Container()
         var mutableValues = configValues
         mutableValues["flight.presence.node-name"] = name
-        let values = mutableValues
-        let nodeConfiguration = Configuration(values: values)
-        container.register(Configuration.self, scope: .singleton) { _ in nodeConfiguration }
+        let nodeConfiguration = Configuration(values: mutableValues)
 
         // One node, wired explicitly — which is now the only way it can be
         // written. The adapter and the membership monitor are *arguments*
@@ -56,29 +53,23 @@ final class PresenceNode: Sendable {
         // which is the ordering a composition root derives from the same
         // value flow — a channel closes over what it needs rather than
         // looking it up when a join creates it.
-        let presence = try FlightPresenceModule(
+        let presenceModule = try FlightPresenceModule(
             configuration: nodeConfiguration,
             localBus: pubsub.local,
             gossipBus: pubsub.bus,
             adapter: adapter,
             membershipMonitor: monitor)
-        let tracker = presence.presence
+        // Capture the presence value (Sendable), not the module, in the
+        // channel factory closure.
+        let presence = presenceModule.presence
         let channels = try FlightChannelsModule(
             bus: pubsub.bus,
             configuration: nodeConfiguration,
             channels: [
                 ChannelRegistration("room:*") { _ in
-                    PresenceRoomChannel(presence: tracker)
+                    PresenceRoomChannel(presence: presence)
                 }
             ])
-
-        var services: [any Service] = []
-        for module in [pubsub, presence, channels] as [any FlightModule] {
-            try module.configure(container)
-            if let service = module.service { services.append(service) }
-        }
-
-        try container.freeze()
 
         // Upgrade-time authentication (Channels): `?user=` names the
         // principal; absent means an anonymous (watch-only) socket. A route
@@ -86,30 +77,28 @@ final class PresenceNode: Sendable {
         let socket = channels.socketRoute("/socket") { context in
             context.request.queryParam("user").map { BasicPrincipal(subject: $0) }
         }
-        self.container = container
-        self.client = try TestClient(container: container, routes: [socket])
-        self.tracker = try container.resolve(PresenceTracker.self)
-        self.presence = try container.resolve((any Presence).self)
+        self.client = try TestClient(routes: [socket])
+        self.tracker = presenceModule.tracker
+        self.presence = presence
+        self.localPubSub = pubsub.local
         self.adapter = adapter
 
         // The long-running halves, exactly what bootstrap's ServiceGroup
         // would host: the presence service (from the module), plus the
         // PubSub relay a real adapter module would contribute.
-        if let clustered = try container.resolve((any PubSub).self) as? ClusteredPubSub {
+        if let clustered = pubsub.bus as? ClusteredPubSub {
             relayTask = Task { await clustered.runIncomingRelay() }
         } else {
             relayTask = nil
         }
-        let presenceServices = services.compactMap { $0 as? PresenceService }
-        precondition(presenceServices.count == 1, "FlightPresenceModule should contribute exactly one service")
-        let presenceService = presenceServices[0]
+        guard let presenceService = presenceModule.service as? PresenceService else {
+            preconditionFailure("FlightPresenceModule should contribute exactly one PresenceService")
+        }
         serviceTask = Task { try? await presenceService.run() }
     }
 
     /// The local (intra-node) bus — where clients' diff frames fan out.
-    var localBus: LocalPubSub {
-        get throws { try container.resolve(LocalPubSub.self) }
-    }
+    var localBus: LocalPubSub { localPubSub }
 
     func wire(user: String?) async throws -> ChannelWireClient {
         let path = user.map { "/socket?user=\($0)" } ?? "/socket"

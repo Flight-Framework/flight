@@ -35,25 +35,10 @@ public enum Flight {
     ///
     /// - Throws: ``BootstrapError`` if module ordering fails or an eager
     /// singleton's factory throws.
-    public static func assemble(
-        configuration: Configuration,
-        modules: [any FlightModule.Type]
-    ) throws -> AssembledApplication {
-        try _flightAssemble(configuration: configuration, modules: modules)
-    }
-
-    /// Assembles from modules already built, in dependency order.
-    ///
-    /// The type-based overload above instantiates modules itself, so every
-    /// module must be constructible with no arguments — which is why a module
-    /// reads configuration through the container rather than taking it as a
-    /// parameter. This one takes what a caller already has, so a module is
-    /// free to declare what it needs in its initializer and hold what it
-    /// provides (COMPOSITION-MIGRATION.md D11).
-    ///
-    /// Ordered, because resolving the DAG is what the other overload uses the
-    /// types for. A generated composition root has that order from the same
-    /// `dependencies` walk, decided at build time.
+    /// Assembles from modules already built by the composition root, in
+    /// dependency order — a module declares what it needs in its initializer
+    /// and holds what it provides (COMPOSITION-MIGRATION.md D11). There is no
+    /// type-based overload: a value module cannot be built from its type.
     public static func assemble(
         configuration: Configuration,
         modules: [any FlightModule]
@@ -78,19 +63,8 @@ public enum Flight {
     ///     }
     /// }
     /// ```
-    public static func bootstrap(
-        configuration: Configuration,
-        modules: [any FlightModule.Type],
-        logger: Logger = Logger(label: "flight.bootstrap")
-    ) async throws {
-        try await _flightBootstrap(
-            configuration: configuration, modules: modules, logger: logger)
-    }
-
-    /// The same bootstrap from modules already built, in dependency order —
-    /// what a generated composition root supplies, and the only shape that
-    /// works once modules take what they provide. Mirrors
-    /// ``assemble(configuration:modules:)-(_,[any_FlightModule])``.
+    /// Bootstrap from modules already built by the composition root, in
+    /// dependency order — what a generated composer supplies.
     public static func bootstrap(
         configuration: Configuration,
         modules: [any FlightModule],
@@ -154,19 +128,20 @@ public enum Flight {
     public static func run(
         configuration: @autoclosure @Sendable () throws -> Configuration,
         modules: [any FlightModule.Type],
-        composedBy compose: (@Sendable (Configuration) throws -> [any FlightModule])? = nil,
+        composedBy compose: @Sendable (Configuration, ModuleHealthRegistry) throws -> [any FlightModule],
         logger: Logger = Logger(label: "flight.bootstrap")
     ) async -> Never {
         do {
             let configuration = try configuration()
-            if let compose {
-                try await _flightBootstrap(
-                    configuration: configuration, moduleInstances: try compose(configuration),
-                    logger: logger)
-            } else {
-                try await bootstrap(
-                    configuration: configuration, modules: modules, logger: logger)
-            }
+            // The composition root owns the health registry: Actuator reads it,
+            // assemble writes module state into it. One shared reference,
+            // created here and threaded to both.
+            let health = ModuleHealthRegistry()
+            try await _flightBootstrap(
+                configuration: configuration,
+                moduleInstances: try compose(configuration, health),
+                health: health,
+                logger: logger)
             exit(0)
         } catch {
             // Written straight to file descriptor 2 rather than through
@@ -194,45 +169,4 @@ public enum Flight {
         }
     }
 
-    /// The order modules must be configured in, resolved from their declared
-    /// dependencies.
-    ///
-    /// Deterministic: the same module set always produces the same order.
-    ///
-    /// - Throws: ``ModuleGraphError/cycle(_:)``, naming the cycle, when module
-    ///   dependencies are circular. There is no missing-module failure: a
-    ///   transitive dependency is pulled in automatically, so "declared but
-    ///   absent from the list" is not a state this can be in.
-    public static func resolveModuleOrder(
-        _ modules: [any FlightModule.Type]
-    ) throws -> [any FlightModule.Type] {
-        try _flightResolveModuleOrder(modules)
-    }
-
-    /// Instances for `moduleTypes`, reusing anything in `supplying` and
-    /// building the rest with `init()`.
-    ///
-    /// This is the one place a module gets built from its type alone, so it is
-    /// the one place that can refuse. A module whose
-    /// ``FlightModule/isTypeConstructible`` is false has no usable `init()`,
-    /// and the walk reaches such a module most often as a *transitive*
-    /// dependency the caller never named — which is why the failure has to say
-    /// what to pass rather than trapping wherever the `init()` happens to be.
-    ///
-    /// - Throws: ``BootstrapError/moduleRequiresConstruction(module:)``.
-    public static func instantiateModules(
-        _ moduleTypes: [any FlightModule.Type],
-        supplying supplied: [any FlightModule] = []
-    ) throws -> [any FlightModule] {
-        let byType = Dictionary(
-            supplied.map { (ObjectIdentifier(type(of: $0)), $0) },
-            uniquingKeysWith: { first, _ in first })
-        return try moduleTypes.map { moduleType in
-            if let instance = byType[ObjectIdentifier(moduleType)] { return instance }
-            guard moduleType.isTypeConstructible else {
-                throw BootstrapError.moduleRequiresConstruction(module: moduleType.moduleName)
-            }
-            return moduleType.init()
-        }
-    }
 }

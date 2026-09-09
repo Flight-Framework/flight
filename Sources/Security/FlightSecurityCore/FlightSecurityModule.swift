@@ -74,9 +74,6 @@ public struct FlightSecurityModule: FlightModule {
             + MiddlewareRegistration.lane(.authenticated, [authentication, require])
     }
 
-    /// This module takes the validator, so it cannot be built from its type.
-    public static var isTypeConstructible: Bool { false }
-
     public init() {
         preconditionFailure(
             "FlightSecurityModule takes a token validator in init(validator:), so it cannot be "
@@ -84,7 +81,6 @@ public struct FlightSecurityModule: FlightModule {
                 + "provides `(any TokenValidator)`, and let the composition root wire it.")
     }
 
-    public func configure(_ container: Container) throws {}
 }
 
 /// OIDC/JWT token validation: the default implementation of the seam
@@ -127,24 +123,12 @@ public final class FlightOIDCModule: FlightModule {
         self.tokenValidator = validator
     }
 
-    /// This module takes its configuration, so it cannot be built from its
-    /// type — every supported path checks this and throws first.
-    public static var isTypeConstructible: Bool { false }
-
     public init() {
         preconditionFailure(
             "FlightOIDCModule takes its configuration in init(configuration:), so it cannot be "
                 + "instantiated from its type. Pass `composedBy: flightComposeModules` to "
                 + "Flight.run — `flight new` writes that argument — or construct the module "
                 + "yourself and use the entry point taking module instances.")
-    }
-
-    public func configure(_ container: Container) throws {
-        let settings = self.settings
-        let validator = self.validator
-        container.register(OIDCSecurityConfiguration.self, scope: .singleton) { _ in settings }
-        container.register(OIDCTokenValidator.self, scope: .singleton) { _ in validator }
-        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
     }
 
     public var service: (any Service)? {

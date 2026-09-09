@@ -83,15 +83,9 @@ public struct FlightPubSubModule: FlightModule {
         self.bus = clustered
     }
 
-    /// This module takes its configuration, so it cannot be built from its
-    /// type alone — `isTypeConstructible` says so, and every supported path
-    /// checks that flag and throws before reaching this initializer.
-    public static var isTypeConstructible: Bool { false }
-
-    /// The backstop behind that flag, for a caller that writes
-    /// `FlightPubSubModule()` directly. `FlightModule` still requires `init()`
-    /// while the type-based entry points exist; the message says what to do
-    /// rather than trapping anonymously.
+    /// The backstop the generated composer falls back to when it emits
+    /// `FlightPubSubModule()`: a caller that reaches this gets a message
+    /// saying what to do rather than trapping anonymously.
     public init() {
         preconditionFailure(
             "FlightPubSubModule takes its configuration in init(configuration:adapter:), so it "
@@ -103,13 +97,6 @@ public struct FlightPubSubModule: FlightModule {
     /// Projects what this module already holds. Nothing is constructed here:
     /// the components exist before `configure` runs, which is the difference
     /// between a module that registers and one that owns.
-    public func configure(_ container: Container) throws {
-        let local = self.local
-        let bus = self.bus
-        container.register(LocalPubSub.self, scope: .singleton) { _ in local }
-        container.register((any PubSub).self, scope: .singleton) { _ in bus }
-    }
-
     /// The relay, when clustered. It belongs here rather than to the adapter
     /// module because this is what has both halves — the adapter to drain and
     /// the local core to drain it into. An adapter module used to have to

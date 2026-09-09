@@ -128,16 +128,10 @@ struct ContentHashMountTests {
         defer { try? FileManager.default.removeItem(at: site) }
         try Data("0123456789".utf8).write(to: site.appendingPathComponent("file.bin"))
 
-        struct HashSiteModule: FlightModule {
-            static let root = Mutex("")
-            func configure(_ container: Container) throws {
-                container.assets(at: "/", root: Self.root.withLock { $0 }) { options in
-                    options.etag = .contentHash
-                }
-            }
+        let mount = AssetMountRegistration.mount(at: "/", root: site.path) { options in
+            options.etag = .contentHash
         }
-        HashSiteModule.root.withLock { $0 = site.path }
-        let client = try TestClient(container: TestContainer.build { HashSiteModule() })
+        let client = try TestClient(assetMounts: [mount])
 
         let full = await client.get("/file.bin")
         let etag = try #require(full.headers[.eTag])

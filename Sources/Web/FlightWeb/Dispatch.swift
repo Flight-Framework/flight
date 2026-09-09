@@ -82,30 +82,6 @@ public enum DispatchBuilder {
     /// The no-match path (404/405) runs the **default** lane, so access
     /// logging and friends still see every miss — the property the old
     /// wrap-the-router shape had, kept on purpose.
-    /// Builds dispatch from a frozen container's registries.
-    ///
-    /// The test seam. `FlightWebModule` uses the value-based overload below,
-    /// because a module that owns what it provides has the registries before
-    /// any container exists; this one stays for harnesses that assemble a
-    /// container by hand.
-    public static func build(
-        container: Container,
-        logger: Logger = Logger(label: "flight.web")
-    ) throws -> Dispatch {
-        precondition(
-            container.isFrozen,
-            "DispatchBuilder.build requires a frozen container — routes are components, collected post-freeze."
-        )
-        return try build(
-            routes: container.collectRoutes(),
-            middleware: container.collectRegistrations(of: MiddlewareRegistration.self),
-            assetMounts: container.collectAssetMounts(),
-            web: WebRuntime(
-                coders: (try? container.resolve(WebCoders.self)) ?? .default,
-                errorMapper: (try? container.resolve(ErrorMapper.self)) ?? .none),
-            logger: logger)
-    }
-
     /// Builds dispatch from values.
     ///
     /// Every registry it needs is a list of contributions, and a contribution

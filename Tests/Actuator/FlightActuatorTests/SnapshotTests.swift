@@ -11,8 +11,10 @@ struct SnapshotTests {
 
     @Test("snapshot carries every registered component with its metadata")
     func snapshotCarriesComponents() throws {
-        let container = try TestContainer.build { SampleAppModule() }
-        let snapshot = ActuatorSnapshot(container: container, environment: .test)
+        // The components the build scanned for the app, as the composition
+        // root would hand them over.
+        let snapshot = ActuatorSnapshot(
+            environment: .test, modules: [], components: SampleAppModule.components)
 
         #expect(snapshot.environment == .test)
 
@@ -52,7 +54,7 @@ struct SnapshotTests {
         // health-wrapped service records the failure on the live container.
         let app = try Flight.assemble(
             configuration: Configuration(),
-            modules: [FailingServiceModule.self]
+            modules: [FailingServiceModule()]
         )
         let failing = try #require(app.services.first)
         await #expect(throws: FailingServiceModule.Boom.self) {
@@ -60,10 +62,7 @@ struct SnapshotTests {
         }
 
         let snapshot = ActuatorSnapshot(
-            environment: .test,
-            modules: app.container.moduleStatuses(),
-            components: app.container.allRegistrations()
-        )
+            health: app.health, components: [], environment: .test)
         let status = try #require(snapshot.modules.first {
             $0.moduleName == "FailingServiceModule"
         })
@@ -76,11 +75,13 @@ struct SnapshotTests {
     func configuredModulesRunning() throws {
         let app = try Flight.assemble(
             configuration: Configuration(),
-            modules: [FailingServiceModule.self]
+            modules: [FailingServiceModule()]
         )
-        // Configure succeeded and the service has not run yet: .running
-        // (Flight Core — registration-only view of a configured module).
-        let snapshot = ActuatorSnapshot(container: app.container, environment: .test)
+        // Assembly succeeded and the service has not run yet: .running
+        // (Flight Core — a module is running the moment it is part of the
+        // assembly, until its service throws).
+        let snapshot = ActuatorSnapshot(
+            health: app.health, components: [], environment: .test)
         #expect(snapshot.modules.count == 1)
         #expect(snapshot.modules[0].health.isRunning)
     }

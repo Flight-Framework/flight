@@ -14,13 +14,13 @@ struct WebCodersTests {
         let occurredAt: Date
     }
 
-    /// A frozen container wired by the real `FlightWebModule`, so a
-    /// `TestClient` dispatches exactly as an application would.
-    private func container(_ values: [String: String]) throws -> Container {
+    /// The web runtime the real `FlightWebModule` builds from configuration —
+    /// coders and error format — so a `TestClient` dispatches exactly as an
+    /// application would.
+    private func webRuntime(_ values: [String: String]) throws -> WebRuntime {
         let configuration = Configuration(values: values)
-        return try TestContainer.build(configuration: configuration) {
-            try FlightWebModule<InMemoryTransport>(configuration: configuration)
-        }
+        let module = try FlightWebModule<InMemoryTransport>(configuration: configuration)
+        return WebRuntime(coders: module.coders, errorMapper: module.errorMapper)
     }
 
     /// A context whose coders are the ones the real `FlightWebModule` builds
@@ -101,7 +101,7 @@ struct WebCodersTests {
     @Test("a 404 from the router uses the configured error format")
     func routerHonorsErrorFormat() async throws {
         let client = try TestClient(
-            container: container(["web.errors.format": "simple"]))
+            routes: [], web: webRuntime(["web.errors.format": "simple"]))
         let response = await client.get("/nothing-here")
         #expect(response.status == .notFound)
         #expect(response.bodyText.contains("\"error\""))
@@ -127,15 +127,11 @@ struct WebCodersTests {
         // The application's coders arrive as an argument rather than winning
         // a registration race — whether it brought its own is a fact about
         // how it was composed, and the composer matches the property by type.
-        let configuration = Configuration(values: [:])
         let custom = CustomCodersModule()
-        _ = try TestContainer.build(configuration: configuration) {
-            custom
-            try FlightWebModule<InMemoryTransport>(
-                configuration: configuration, coders: custom.coders)
-        }
-        // The coders ride on the context, stamped by dispatch from what the
-        // web module was composed with — here, set directly.
+        // The composer would match `custom.coders` to `FlightWebModule`'s
+        // `coders` parameter by type; here we hand it over directly. The
+        // coders ride on the context, stamped by dispatch from what the web
+        // module was composed with.
         var context = RequestContext.mock()
         context.web = WebRuntime(coders: custom.coders)
         let event = Event(eventName: "a", occurredAt: .init(timeIntervalSince1970: 0))
@@ -145,12 +141,10 @@ struct WebCodersTests {
 
 /// Provides coders for `FlightWebModule` to take, standing in for an
 /// application that wants its own.
-private struct CustomCodersModule: FlightModule {
+private struct CustomCodersModule {
     let coders: WebCoders = {
         var coders = WebCoders.default
         coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
         return coders
     }()
-
-    func configure(_ container: Container) throws {}
 }
