@@ -2247,9 +2247,10 @@ func emitComposer(into out: inout String) {
     out += "/// Pass to `Flight.run(configuration:modules:composedBy:)`. The\n"
     out += "/// `modules:` list stays the declaration of *which* subsystems the\n"
     out += "/// application includes; this is how they are built.\n"
-    out += "func flightComposeModules(_ configuration: FlightCore.Configuration) throws\n"
-    out += "    -> [any FlightCore.FlightModule]\n"
-    out += "{\n"
+    out += "func flightComposeModules(\n"
+    out += "    _ configuration: FlightCore.Configuration,\n"
+    out += "    _ flightHealth: FlightCore.ModuleHealthRegistry\n"
+    out += ") throws -> [any FlightCore.FlightModule] {\n"
     /// The argument for one parameter, or nil when nothing can supply it.
     ///
     /// An optional parameter with no provider is *omittable* rather than
@@ -2259,6 +2260,11 @@ func emitComposer(into out: inout String) {
         label: String, type: String, for consumer: String, needing needed: inout Set<String>
     ) -> String?? {
         if baseName(type) == "Configuration" { return "\(label): configuration" }
+        // The shared health registry the composition root owns — Actuator
+        // takes it, and `Flight.run` writes module state into the same one.
+        if providedTypeKey(type) == "ModuleHealthRegistry" {
+            return "\(label): flightHealth"
+        }
         // The graph is a value the composition root builds, not a module, so
         // it is not in `includedModules` — but a module can take it, and the
         // application's own module does.

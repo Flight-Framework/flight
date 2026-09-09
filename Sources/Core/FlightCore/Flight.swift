@@ -154,14 +154,20 @@ public enum Flight {
     public static func run(
         configuration: @autoclosure @Sendable () throws -> Configuration,
         modules: [any FlightModule.Type],
-        composedBy compose: (@Sendable (Configuration) throws -> [any FlightModule])? = nil,
+        composedBy compose: (@Sendable (Configuration, ModuleHealthRegistry) throws -> [any FlightModule])? = nil,
         logger: Logger = Logger(label: "flight.bootstrap")
     ) async -> Never {
         do {
             let configuration = try configuration()
             if let compose {
+                // The composition root owns the health registry: Actuator reads
+                // it, assemble writes module state into it. One shared reference,
+                // created here and threaded to both.
+                let health = ModuleHealthRegistry()
                 try await _flightBootstrap(
-                    configuration: configuration, moduleInstances: try compose(configuration),
+                    configuration: configuration,
+                    moduleInstances: try compose(configuration, health),
+                    health: health,
                     logger: logger)
             } else {
                 try await bootstrap(

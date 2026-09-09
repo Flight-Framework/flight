@@ -22,11 +22,17 @@ public struct ActuatorSnapshot: Sendable {
 
     /// The per-request assembly the controller performs, as a public
     /// convenience for anyone building their own surface over the same data.
-    public init(container: Container, environment: FlightEnvironment) {
+    /// Health comes from the shared registry, components from what the build
+    /// scanned — the two sources the container used to conflate.
+    public init(
+        health: ModuleHealthRegistry,
+        components: [ComponentDescriptor],
+        environment: FlightEnvironment
+    ) {
         self.init(
             environment: environment,
-            modules: container.moduleStatuses(),
-            components: container.allRegistrations()
+            modules: health.statuses(),
+            components: components
         )
     }
 }

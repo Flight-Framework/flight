@@ -8,6 +8,8 @@ public struct AssembledApplication: Sendable {
     public let container: Container
     public let services: [AssembledService]
     public let moduleOrder: [String]
+    /// Per-module health, no longer on the container. Actuator reads it.
+    public let health: ModuleHealthRegistry
 }
 
 /// One module's service, health-wrapped, with the module's declared
@@ -112,12 +114,13 @@ func _flightAssemble(
 /// requirement that a module be constructible with no arguments.
 func _flightAssemble(
     configuration: Configuration,
-    moduleInstances instances: [any FlightModule]
+    moduleInstances instances: [any FlightModule],
+    health: ModuleHealthRegistry = ModuleHealthRegistry()
 ) throws -> AssembledApplication {
     let container = Container()  // step 4
 
     let names = instances.map { type(of: $0).moduleName }
-    container.beginHealthTracking(moduleNames: names)
+    health.beginTracking(moduleNames: names)
 
     // Configuration is itself a component: modules read config values by resolving
     // it (directly or via @ConfigValue-generated code) during configure.
@@ -134,13 +137,13 @@ func _flightAssemble(
             try module.configure(container)
         } catch {
             container.currentSourceModule = "<direct>"
-            container.setHealth(name, .failed(error))
+            health.set(name, .failed(error))
             throw BootstrapError.moduleConfigurationFailed(module: name, underlying: error)
         }
         // : registration-only modules are "running" the moment they're
         // configured; service-owning modules stay .running unless their
         // Service later terminates with an error (see HealthTrackingService).
-        container.setHealth(name, .running)
+        health.set(name, .running)
         if let service = module.service {  // step 8 (collected here)
             services.append((name, service, module.serviceCompletion, module.serviceShutdownPhase))
         }
@@ -173,7 +176,7 @@ func _flightAssemble(
                 moduleName: entry.element.moduleName,
                 service: HealthTrackingService(
                     moduleName: entry.element.moduleName, inner: entry.element.service,
-                    container: container),
+                    health: health),
                 completion: entry.element.completion,
                 shutdownPhase: entry.element.phase
             )
@@ -181,7 +184,8 @@ func _flightAssemble(
     return AssembledApplication(
         container: container,
         services: wrapped,
-        moduleOrder: names
+        moduleOrder: names,
+        health: health
     )
 }
 
@@ -208,11 +212,13 @@ func _flightBootstrap(
 func _flightBootstrap(
     configuration: Configuration,
     moduleInstances instances: [any FlightModule],
+    health: ModuleHealthRegistry = ModuleHealthRegistry(),
     logger: Logger = Logger(label: "flight.bootstrap")
 ) async throws {
     try await _flightBootstrap(
         configuration: configuration,
-        assembled: _flightAssemble(configuration: configuration, moduleInstances: instances),
+        assembled: _flightAssemble(
+            configuration: configuration, moduleInstances: instances, health: health),
         logger: logger)
 }
 
@@ -259,13 +265,13 @@ private func _flightBootstrap(
 struct HealthTrackingService: Service {
     let moduleName: String
     let inner: any Service
-    let container: Container
+    let health: ModuleHealthRegistry
 
     func run() async throws {
         do {
             try await inner.run()
         } catch {
-            container.setHealth(moduleName, .failed(error))
+            health.set(moduleName, .failed(error))
             throw error
         }
     }

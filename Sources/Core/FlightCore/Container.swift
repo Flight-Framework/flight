@@ -1,5 +1,3 @@
-import Synchronization
-
 /// The Flight DI container.
 ///
 /// ## The two-phase model, as implemented
@@ -59,15 +57,6 @@ public final class Container: @unchecked Sendable {
     // MARK: - Post-freeze state (write-once, then read-only)
 
     nonisolated(unsafe) private var frozenStorage: FrozenStorage?
-
-    // MARK: - Module health — mutated during the service-run phase,
-    // so unlike component storage this genuinely needs synchronization.
-
-    private struct HealthState {
-        var order: [String] = []
-        var map: [String: ModuleHealth] = [:]
-    }
-    private let healthState = Mutex(HealthState())
 
     public init() {}
 
@@ -330,46 +319,4 @@ public final class Container: @unchecked Sendable {
         return order.compactMap { registrations[$0]?.descriptor }
     }
 
-    // MARK: - Module health
-
-    internal func beginHealthTracking(moduleNames: [String]) {
-        healthState.withLock { state in
-            state.order = moduleNames
-            state.map = Dictionary(
-                uniqueKeysWithValues: moduleNames.map { ($0, ModuleHealth.notStarted) })
-        }
-    }
-
-    /// Records a module's health from outside its own lifecycle.
-    ///
-    /// Core writes this itself — `.running` once a module configures,
-    /// `.failed` if its `Service.run()` throws — and that was the whole of
-    /// what anything downstream could ever see. A module that is *up* but has
-    /// lost its database had no way to say so, which made "a module that
-    /// cannot reach its database reports so" true only in the sense that a
-    /// crashing service reports. This is the seam that makes it true
-    /// properly: report the state, and `moduleStatuses()` and everything
-    /// built on it pick it up.
-    ///
-    /// Safe to call at any time, from any task. Nothing polls it and nothing
-    /// runs a check for you — the reporting cadence is the reporter's to
-    /// choose, which is what keeps checks off the request path.
-    public func reportHealth(_ health: ModuleHealth, forModule moduleName: String) {
-        setHealth(moduleName, health)
-    }
-
-    internal func setHealth(_ moduleName: String, _ health: ModuleHealth) {
-        healthState.withLock { state in
-            if state.map[moduleName] == nil { state.order.append(moduleName) }
-            state.map[moduleName] = health
-        }
-    }
-
-    public func moduleStatuses() -> [ModuleStatus] {
-        healthState.withLock { state in
-            state.order.compactMap { name in
-                state.map[name].map { ModuleStatus(moduleName: name, health: $0) }
-            }
-        }
-    }
 }

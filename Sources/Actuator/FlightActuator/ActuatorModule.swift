@@ -63,6 +63,11 @@ public struct ActuatorModule: FlightModule {
 
     private let controller = ControllerBox()
 
+    /// Where module health comes from — the shared registry the composition
+    /// root threads in. Read at request time, so it reflects state as of the
+    /// request, exactly as reading the container did.
+    let health: ModuleHealthRegistry
+
     let environment: FlightEnvironment
 
     /// Bootstrap path: the environment comes from `FLIGHT_ENV`, read via
@@ -76,16 +81,24 @@ public struct ActuatorModule: FlightModule {
 
     /// The shape a composition root uses: the scanned components come from
     /// the generated `flightComponentDescriptors()`.
-    public init(components: [ComponentDescriptor]) {
+    public init(
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry()
+    ) {
         self.init(
             processEnvironment: ProcessInfo.processInfo.environment,
-            components: components)
+            components: components, health: health)
     }
 
     /// The same path with the process environment injected — how a test asks
     /// "what would an unset `FLIGHT_ENV` do" without mutating the real one.
-    public init(processEnvironment: [String: String], components: [ComponentDescriptor] = []) {
+    public init(
+        processEnvironment: [String: String],
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry()
+    ) {
         self.components = components
+        self.health = health
         self.environment = .current(from: processEnvironment)
         self.exposureOverride = nil
         // An unset FLIGHT_ENV resolves to `dev`, which is in the dashboard
@@ -103,8 +116,13 @@ public struct ActuatorModule: FlightModule {
     /// Explicit-environment initializer — the test seam (`TestContainer.build`
     /// honors ready-made instances), and an escape hatch for embedders that
     /// resolve the environment some other way.
-    public init(environment: FlightEnvironment, components: [ComponentDescriptor] = []) {
+    public init(
+        environment: FlightEnvironment,
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry()
+    ) {
         self.components = components
+        self.health = health
         self.environment = environment
         self.exposureOverride = nil
         // Naming the environment in code is a declaration, the same as
@@ -122,9 +140,11 @@ public struct ActuatorModule: FlightModule {
     public init(
         environment: FlightEnvironment,
         exposure: ActuatorExposure,
-        components: [ComponentDescriptor] = []
+        components: [ComponentDescriptor] = [],
+        health: ModuleHealthRegistry = ModuleHealthRegistry()
     ) {
         self.components = components
+        self.health = health
         self.environment = environment
         self.exposureOverride = exposure
         self.isEnvironmentDeclared = true
@@ -242,6 +262,7 @@ public struct ActuatorModule: FlightModule {
         // to it.
         let box = controller
         let components = self.components + Self.ownComponents
+        let health = self.health
         container.register(ActuatorController.self, scope: .singleton, stereotype: .controller) { [environment] c in
             // getIfPresent, not get(_:default:) — the latter is non-throwing
             // and fatalErrors on a malformed *present* value; getIfPresent
@@ -255,7 +276,7 @@ public struct ActuatorModule: FlightModule {
             // tracks it; the component list is the build's answer, passed in.
             let controller = ActuatorController(
                 components: components,
-                health: { [weak c] in c?.moduleStatuses() ?? [] },
+                health: { health.statuses() },
                 environment: environment,
                 format: format)
             // The routes serve from here rather than resolving per request.
