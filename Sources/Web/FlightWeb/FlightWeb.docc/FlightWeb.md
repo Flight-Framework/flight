@@ -99,8 +99,9 @@ paying for authentication it can never use. Naming a lane alone runs *only*
 that lane; `[.default, "admin"]` concatenates.
 
 The older `registerMiddleware(_:order:)` closure API and its
-``MiddlewareResult`` return enum are deprecated: return early from `handle`
-instead of returning a result enum.
+``MiddlewareResult`` return enum are gone with the container; conform a type to
+``Middleware`` and hand it to `MiddlewareRegistration.lane(_:_:)`, returning
+early from `handle` rather than a result enum.
 
 ## WebSockets and streaming
 

@@ -5,13 +5,13 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-/// `@Controller` (§4). Expands exactly like Flight Core's `@Component` —
-/// resolving `init(_flight:)`, registration thunk, `_FlightRegistrable`
-/// conformance — with one purely additive difference: `_flightRegister(_:)`
-/// also registers one `RouteRegistration` component per mapped method, carrying
-/// (HTTP method, path pattern, encoded handler thunk) into the same
-/// container every other component goes through. Routing is not a distinct
-/// system from dependency injection.
+/// `@Controller` (§4). Expands like Flight Core's `@Component` — a
+/// parameterized initializer over its `@Inject`/`@ConfigValue` properties —
+/// with one purely additive difference: it also emits one route *factory* per
+/// mapped method, each carrying (HTTP method, path pattern, encoded handler
+/// thunk) and building the controller to run that method as a
+/// `RouteRegistration` value. Routing is not a distinct system from dependency
+/// injection.
 ///
 /// `@Controller`'s own optional path argument is a base path, combined with
 /// every mapped method's path (Spring's class+method `@RequestMapping`

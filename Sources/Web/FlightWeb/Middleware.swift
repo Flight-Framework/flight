@@ -128,14 +128,14 @@ public func errorResponse(for error: any Error, context: RequestContext) -> Resp
 /// value-out shape exists to remove.
 @available(
     *, deprecated,
-    message: "Conform a type to Middleware and list it in a container.pipeline { } instead."
+    message: "Conform a type to Middleware and provide it via MiddlewareRegistration.lane(_:_:) instead."
 )
 public typealias ClosureNext = @Sendable (inout RequestContext) async -> Response
 
-/// The pre-`@Middleware` shape of a middleware layer. Existing
-/// `container.registerMiddleware(name:order:) { context, next in ... }` call
-/// sites keep compiling unchanged against this — only the names `Middleware`
-/// and `Next` were freed up for the new protocol-based shape.
+/// The pre-`@Middleware` shape of a middleware layer, kept only so the names
+/// read in old diagnostics. The container-era `registerMiddleware` closure it
+/// served is gone with the container; conform a type to `Middleware` and hand
+/// it to `MiddlewareRegistration.lane(_:_:)` instead.
 @available(
     *, deprecated,
     message: "Conform a type to Middleware and list it in a container.pipeline { } instead."

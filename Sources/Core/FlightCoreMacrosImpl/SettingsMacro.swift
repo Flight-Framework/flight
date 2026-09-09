@@ -4,13 +4,12 @@ import SwiftSyntax
 import SwiftSyntaxMacros
 
 /// `@Settings("namespace")`. Expansion:
-/// 1. `init(_flight:)` — one line per stored property, binding it against
-///    `Configuration` under `namespace.<kebab-cased-property-name>`;
-/// 2. `_flightRegister(_:)`, registering `Self` as a `.singleton`
-///    `.settings`-stereotype component, calling `validate()` after
-///    construction if the type declares one;
-/// 3. conformance to `_FlightRegistrable`;
-/// 4. if any property carries `@Secret`, a redacting `CustomStringConvertible`.
+/// 1. `init(_flightConfiguration:)` — one line per stored property, binding it
+///    against `Configuration` under `namespace.<kebab-cased-property-name>`,
+///    calling `validate()` after construction if the type declares one. The
+///    composition root calls it; its `.settings` stereotype rides the
+///    build-scanned descriptor, for Actuator;
+/// 2. if any property carries `@Secret`, a redacting `CustomStringConvertible`.
 ///
 /// Deliberately self-contained rather than sharing `ComponentMacro`'s
 /// property-collection machinery: the classification rules are different

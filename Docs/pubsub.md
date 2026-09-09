@@ -29,8 +29,8 @@ try await Flight.run(
     composedBy: flightComposeModules
 )
 
-// Anywhere components are wired:
-let pubsub = try container.resolve((any PubSub).self)
+// A consumer injects it; the composition root wires in FlightPubSubModule's bus:
+//   @Inject var pubsub: (any PubSub)
 
 // Subscribe — subscription lifetime IS the consuming task's lifetime.
 // Cancel the task, break out of the loop, or drop the stream, and the
@@ -148,13 +148,10 @@ public struct MyAdapterModule: FlightModule {
         self.adapter = MyAdapter(url: try configuration.require("pubsub.mine.url"))
     }
 
-    public static var isTypeConstructible: Bool { false }
     public init() { preconditionFailure("MyAdapterModule takes its configuration.") }
 
-    public func configure(_ container: Container) throws {
-        let adapter = self.adapter
-        container.register((any DistributedPubSubAdapter).self, scope: .singleton) { _ in adapter }
-    }
+    // Provides `adapter` as a value; the composition root matches it to
+    // FlightPubSubModule's `adapter:` parameter by type. Nothing is registered.
 
     /// Only a connection of its own, if it has one. The relay is not yours.
     public var service: (any Service)? { nil }

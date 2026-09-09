@@ -5,38 +5,32 @@ import ServiceLifecycle
 import struct Foundation.UUID
 
 /// Registers Presence with the container. Depends on the
-/// PubSub and Channels modules; registers:
+/// PubSub and Channels modules; provides:
 ///
-/// - `PresenceConfiguration` — node name and liveness intervals, read from
-///   the app configuration once.
-/// - `PresenceTracker` / `(any Presence)` — the engine. Its factory runs
-///   at `freeze()`, after every module has configured, and detects the
-///   deployment mode by *presence* (the same composition-by-presence as
-///   `FlightPubSubModule`): a registered `PresenceMembershipMonitor` means
-///   membership mode; a `DistributedPubSubAdapter` without one means the
-///   degraded heartbeat mode; neither means single-node.
-/// - `PresenceService` — the periodic work, in the app
+/// - `settings` (`PresenceConfiguration`) — node name and liveness intervals,
+///   read from configuration once in `init`.
+/// - `tracker` / `presence` (`(any Presence)`) — the engine, built in `init`.
+///   The deployment mode is decided by *argument*, not by probing: a
+///   `membershipMonitor` means membership mode; an `adapter` without one means
+///   the degraded heartbeat mode; neither means single-node.
+/// - `service` (`PresenceService`) — the periodic work, in the app
 ///   `ServiceGroup`. Logs the active failure-detection mode at startup.
 ///
-/// An app module declares the dependency and resolves `(any Presence)`
-/// into its channels:
+/// A channels module takes `(any Presence)` and closes its room channels over
+/// it — the composition root wires the value in:
 ///
-///     struct AppModule: FlightModule {
-///         static var dependencies: [any FlightModule.Type] { [FlightPresenceModule.self] }
-///         func configure(_ container: Container) throws {
-///             container.registerChannelSocket("/socket")
+///     struct AppChannels: FlightModule {
+///         let channels: [ChannelRegistration]
+///         init(presence: any Presence) {
+///             self.channels = [
+///                 ChannelRegistration("room:*") { _ in RoomChannel(presence: presence) }
+///             ]
 ///         }
-///         let channels = [
-///             ChannelRegistration("room:*") { context in
-///                 RoomChannel(presence: try context.resolve((any Presence).self))
-///             }
-///         ]
 ///     }
 ///
-/// A struct holding what it provides: the tracker exists before any
-/// container does, so `configure` projects it rather than registering a
-/// factory, and the service is built from it rather than from a stashed
-/// `Container` resolved at `run()`.
+/// A struct holding what it provides: the tracker exists as a value before
+/// anything runs, and the service is built from it — nothing is resolved at
+/// `run()`.
 public struct FlightPresenceModule: FlightModule {
     public static var dependencies: [any FlightModule.Type] {
         [FlightPubSubModule.self, FlightChannelsModule.self]

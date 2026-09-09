@@ -2,28 +2,25 @@ import FlightCore
 import FlightWeb
 import Foundation
 
-/// The dashboard. A plain struct, not `@Controller` — deliberately;
-/// registered by hand with `container.register(ActuatorController.self,
-/// scope: .singleton) { ... }`.
+/// The dashboard. A plain struct, not `@Controller` — deliberately: it is
+/// built and held by ``ActuatorModule`` (in its controller box), and its
+/// routes are values the module declares.
 ///
 /// Flight Core's registration plugin scans every recursive source-module
 /// dependency that sits atop FlightCore for `@Component`/`@Controller`
-/// types — right for an app-owned library target (so an app never has to
-/// hand-register it), wrong for a starter package with its own
-/// `FlightModule`: a downstream app's generated `flightRegisterAll` would
-/// try to register this type *itself*, unconditionally — bypassing
-/// `ActuatorModule`'s `.prod` gate entirely (whole point) and
-/// colliding with the registration `ActuatorModule` already performs (a
-/// duplicate-registration trap). Every other starter (`flight-web`,
-/// `flight-pubsub`, `flight-channels`, `flight-data-postgres`) avoids this
-/// the same way: none of them put `@Component`/`@Controller` on their own
-/// infrastructure, only ever registering it by hand from that package's own
-/// `FlightModule`. This mirrors that.
+/// types — right for an app-owned library target (so an app never has to wire
+/// it), wrong for a starter package with its own `FlightModule`: a downstream
+/// app's generated composition root would try to build this type as one of
+/// its own graph nodes — bypassing `ActuatorModule`'s exposure gate entirely
+/// (whole point) and colliding with what `ActuatorModule` already does. Every
+/// other starter (`flight-web`, `flight-pubsub`, `flight-channels`,
+/// `flight-data-postgres`) avoids this the same way: none put
+/// `@Component`/`@Controller` on their own infrastructure, wiring it from that
+/// package's own `FlightModule` instead. This mirrors that.
 ///
-/// Internal deliberately: `ActuatorModule` constructs and registers it (as
-/// an ordinary route via `registerRoute`, the same escape hatch
-/// `@GetRoute` sits beside); nothing outside this package touches it
-/// directly.
+/// Internal deliberately: `ActuatorModule` constructs it and serves it through
+/// route values (`RouteRegistration`, the same seam `@GetRoute` sits beside);
+/// nothing outside this package touches it directly.
 struct ActuatorController {
     /// Every component, as the *build* scanned them — passed in by the
     /// composition root rather than read from `container.allRegistrations()`.

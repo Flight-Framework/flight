@@ -4,15 +4,15 @@ import SwiftSyntaxBuilder
 import FlightMacroSupport
 import SwiftSyntaxMacros
 
-/// The shared expansion behind `@Component` and its stereotypes. Each conforming macro generates:
-/// - `init(_flight:)` — constructs the type with every `@Inject` property
-/// container-resolved and every `@ConfigValue` property config-resolved;
-/// - `_flightRegister(_:)` — the registration thunk the build plugin's
-/// generated `_registerAll` calls;
-/// - `extension T: _FlightRegistrable {}`.
+/// The shared expansion behind `@Component` and its stereotypes: a
+/// parameterized initializer taking every `@Inject` property as a parameter
+/// and reading every `@ConfigValue` property from `Configuration`. The
+/// composition root calls it, wiring the injected values by type. The
+/// container-era `init(_flight:)`, `_flightRegister` thunk, and
+/// `_FlightRegistrable` conformance are gone with the container.
 ///
-/// Stereotypes expand *identically* to `@Component` — the only difference is
-/// the `stereotype:` argument on the generated register call.
+/// Stereotypes expand *identically* to `@Component`; the stereotype only
+/// tags the build-scanned descriptor (for Actuator), not the expansion.
 ///
 /// The authoritative expansions are the fixtures in FlightCoreMacroTests
 ///.
@@ -67,39 +67,6 @@ extension RegistrationMacro {
         let (scopeExpr, qualifierExpr) = parseComponentArguments(node)
         let access = registrationAccess(for: declaration)
 
-        // 1. Resolving initializer. Internal always: its only caller is the
-        // thunk below, which lives on the same type.
-        var initLines: [String] = []
-        for property in properties {
-            switch property.kind {
-            case .inject(let qualifier):
-                if let qualifier {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self, qualifier: \(qualifier))"
-                    )
-                } else {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self)"
-                    )
-                }
-            case .configValue(let key, let defaultValue):
-                if let defaultValue {
-                    // getIfPresent ?? default rather than get(_:default:):
-                    // a present-but-malformed value must throw (failing the
-                    // module's configure with the key named), never be
-                    // silently replaced by the default. Parenthesized so
-                    // low-precedence default expressions (ternaries) can't
-                    // rebind against `??`.
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.metatypeBase).self) ?? (\(defaultValue))"
-                    )
-                } else {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.metatypeBase).self)"
-                    )
-                }
-            }
-        }
         // Constructor injection: a component is built by the composition
         // root through this initializer. The container-era init(_flight:) and
         // _flightRegister thunk are gone with the container.

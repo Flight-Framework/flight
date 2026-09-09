@@ -6,8 +6,8 @@
 /// any particular identity implementation.
 ///
 /// `FlightSecurityCore.Principal` conforms to it — the demo wires exactly
-/// that, feeding the authentication middleware's task-local into
-/// `registerChannelSocket`'s `authenticate` closure — and so can an
+/// that, resolving the principal in its socket route's authenticate closure
+/// (`channels.socketRoute("/socket") { context in ... }`) — and so can an
 /// application's own identity type. Same "seam, not engine" posture the rest
 /// of the package takes with transports and adapters.
 public protocol ChannelPrincipal: Sendable {

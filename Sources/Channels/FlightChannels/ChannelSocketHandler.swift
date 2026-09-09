@@ -11,8 +11,9 @@ import Logging
 ///
 /// One instance per connection: the route handler constructs it during the
 /// upgrade request, which is where per-connection identity (the principal,
-///) enters. Constructed for you by `Container.registerChannelSocket`, or
-/// directly from a `@WebSocketRoute` method via `init(context:principal:)`.
+///) enters. Built by `ChannelSockets.handler(principal:)` — what a
+/// `@WebSocketRoute` method returns, and what a `channels.socketRoute(_:)`
+/// value produces.
 /// The channels stack a socket route needs, as one injectable value.
 ///
 /// A declared route **injects** this rather than resolving three components

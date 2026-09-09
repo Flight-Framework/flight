@@ -1,11 +1,10 @@
 import FlightConfig
 
-/// Marks a type as container-managed. Expansion:
-/// 1. a memberwise resolving initializer `init(_flight:)` that constructs the
-/// type with every `@Inject` property resolved against the container
-/// and every `@ConfigValue` property resolved against `Configuration`;
-/// 2. a static registration thunk `_flightRegister(_:)`;
-/// 3. conformance to `_FlightRegistrable`.
+/// Marks a type as a composed component. Expansion:
+/// 1. a memberwise initializer that takes every `@Inject` property as a
+/// parameter and reads every `@ConfigValue` property from `Configuration`.
+/// The generated composition root calls it, wiring the injected values by
+/// type — there is no container to resolve against.
 ///
 /// The exact expansions are pinned by Tests/Core/FlightCoreMacroTests — those
 /// fixtures are the spec, more precise than this comment.
@@ -16,9 +15,9 @@ public macro Component(
 ) = #externalMacro(module: "FlightCoreMacrosImpl", type: "ComponentMacro")
 
 /// Stereotype for business logic and third-party clients. Expands
-/// *identically* to `@Component` except the registration is tagged
+/// *identically* to `@Component`; its build-scanned descriptor is tagged
 /// `.service` — the tag feeds Actuator's layer grouping and any future AOP
-/// pointcut; resolution never consults it. Lives in Core (not Web/Data)
+/// pointcut; construction never consults it. Lives in Core (not Web/Data)
 /// because a service must be equally callable from a controller, a CLI
 /// command, or a background job.
 @attached(member, names: named(init))
@@ -27,8 +26,8 @@ public macro Service(
     qualifier: String? = nil
 ) = #externalMacro(module: "FlightCoreMacrosImpl", type: "ServiceMacro")
 
-/// Stereotype for data access. Same expansion as `@Component`,
-/// tagged `.repository`. (`@Controller` is deliberately NOT here — it lives
+/// Stereotype for data access. Same expansion as `@Component`; its scanned
+/// descriptor is tagged `.repository`. (`@Controller` is deliberately NOT here — it lives
 /// in Flight Web, carrying route metadata meaningless outside HTTP dispatch;
 /// only the `Stereotype.controller` case belongs to Core's vocabulary.)
 @attached(member, names: named(init))
@@ -37,17 +36,18 @@ public macro Repository(
     qualifier: String? = nil
 ) = #externalMacro(module: "FlightCoreMacrosImpl", type: "RepositoryMacro")
 
-/// Marks a property as container-resolved at construction time.
-/// A pure marker: the generated code lives in `@Component`'s expansion; this
-/// macro's own expansion is empty and exists to validate the attachment site.
+/// Marks a property as injected at construction time — the composition root
+/// supplies it by type. A pure marker: the generated code lives in
+/// `@Component`'s initializer; this macro's own expansion is empty and exists
+/// to validate the attachment site.
 /// When two properties share a type, explicit qualifiers are *required* —
 /// `@Component` emits a compile error otherwise.
 @attached(peer)
 public macro Inject(_ qualifier: String? = nil) =
     #externalMacro(module: "FlightCoreMacrosImpl", type: "InjectMacro")
 
-/// Marks a property as config-resolved instead. Same macro family,
-/// same registration thunk.
+/// Marks a property as config-read instead. Same macro family; the value is
+/// read from `Configuration` in the generated initializer.
 ///
 /// The no-default form is a *required* key: per Flight Config, the build
 /// plugin checks it against flight.yaml (the base layer) at compile time —
@@ -93,11 +93,11 @@ public macro ConfigValue<T: ConfigDecodable>(_ key: String, default: T) =
 /// }
 /// ```
 ///
-/// The type is registered as an ordinary `.singleton` component — resolve it
-/// with `@Inject var settings: AuthSettings` anywhere, exactly like any
-/// other dependency. A `validate()` method with no parameters, if the type
-/// declares one, runs once, right after construction, at bootstrap: the
-/// place a bad value should fail, not the first request that reads it.
+/// The type is composed like any other component — inject it with
+/// `@Inject var settings: AuthSettings` anywhere, exactly like any other
+/// dependency. A `validate()` method with no parameters, if the type declares
+/// one, runs once, right after construction, at composition: the place a bad
+/// value should fail, not the first request that reads it.
 ///
 /// A property may not be `Optional` — `@Settings` binds a value once, and a
 /// key that may or may not exist has no single answer for "what did we

@@ -15,7 +15,7 @@ Core's `Container`/`FlightModule`/`Scope` — through exactly one channel,
 |---|---|
 | `FlightWeb` | `RequestContext`, `Request`/`Response`, middleware lanes, `Router`, `@Controller`/`@GetRoute`/…/`@WebSocketRoute` macros, `ResponseEncodable`, cookies, SSE, streaming bodies, multipart, resumable uploads, static assets, `serveContent`'s conditional/range engine, `WebSocketUpgradeHandler`/`WebSocketConnection`, `ServerTransport` protocol, `FlightWebModule` |
 | `FlightTransport` | The default transport (§5.2): wraps **HummingbirdCore** — a mature, versioned low-level HTTP transport — for HTTP/1.1 (keep-alive, pipelining, 100-continue), streaming bodies, and WebSocket protocol handling. The only target in all of Flight that knows what it wraps (§5.6) |
-| `FlightWebTesting` | `TestContainer`, `RequestContext.mock`, `TestClient` (in-process dispatch + in-process WebSocket), `InMemoryTransport` (§5.4's socket-free transport) |
+| `FlightWebTesting` | `RequestContext.mock`, `TestClient` (in-process dispatch + in-process WebSocket), `InMemoryTransport` (§5.4's socket-free transport) |
 
 ## Using it
 
@@ -68,13 +68,11 @@ struct Authentication: Middleware {
 }
 
 struct AppModule: FlightModule {
-    func configure(_ container: Container) throws {
-        try flightRegisterAll(container)             // plugin-generated: components AND controllers
-        container.pipeline {                          // the default lane, in order
-            RequestLogging.self
-            Authentication.self
-        }
-    }
+    // The default lane, outermost first — provided as values the composition
+    // root hands FlightWebModule. The app's controllers and components are
+    // scanned by the build plugin and wired by the composition root; nothing
+    // is registered here.
+    let middleware = MiddlewareRegistration.lane(.default, [RequestLogging(), Authentication()])
 }
 
 @main struct Main {
@@ -152,8 +150,10 @@ value rather than a lane, so no lane declaration can describe them.
 
 Middleware types are composed once, when the dispatch closure is assembled,
 so a request pays one call per layer and never the construction of the chain.
-The older `registerMiddleware(_:order:)` / `.respond` / `.continue` API is
-deprecated: return early from `handle` instead of returning a result enum.
+The older `registerMiddleware(_:order:)` closure API is gone with the
+container; conform a type to `Middleware` and hand it to
+`MiddlewareRegistration.lane(_:_:)`, returning early from `handle` rather than
+a result enum.
 
 ### Bodies
 
@@ -241,11 +241,10 @@ already parse it. For anything else, register your own `WebCoders` — its
 `renderError` is a closure, so an error body need not be JSON at all:
 
 ```swift
-container.register(WebCoders.self, scope: .singleton) { _ in
-    var coders = WebCoders.default
-    coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
-    return coders
-}
+// A module provides its own coders; the composition root hands them to
+// FlightWebModule, which takes them as its `coders:` parameter.
+var coders = WebCoders.default
+coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
 ```
 
 An application that registers its own keeps it; Flight only fills in the gap.
@@ -300,8 +299,7 @@ compile error at the generated registration, not a runtime race.
 Testing (§7) needs no socket:
 
 ```swift
-let container = try TestContainer.build { AppModule() }
-let client = try TestClient(container: container)
+let client = try TestClient(routes: flightRoutes(graph))
 #expect(await client.get("/users/999").status == .notFound)
 
 let socket = try await client.webSocket("/chat/lobby")   // in-process upgrade
@@ -309,21 +307,20 @@ let socket = try await client.webSocket("/chat/lobby")   // in-process upgrade
 
 ## How routing rides the one registration pipeline (§4)
 
-`@Controller` expands exactly like `@Component` — resolving `init(_flight:)`,
-`_flightRegister(_:)` thunk, `_FlightRegistrable` conformance — plus one
-**`RouteRegistration` component per mapped method**, registered through the same
-`Container.register` call every component goes through. The route table is not a
-parallel mechanism: `FlightWebModule`'s service collects the route components
-post-freeze, validates them (conflicts and malformed patterns fail startup,
-naming both declaration sites), and builds the dispatch closure handed to the
-active transport. Routes are therefore visible to Core introspection
-(`allRegistrations()`) like any other component — an Actuator gets a route
-dashboard for free.
+`@Controller` expands like `@Component` — a parameterized initializer over its
+`@Inject`/`@ConfigValue` properties — plus one **route factory per mapped
+method**, each of which builds the controller and runs one method as a
+`RouteRegistration` value. The route table is not a parallel mechanism: the
+composition root's `flightRoutes(_:)` calls those factories, `FlightWebModule`
+validates the resulting values (conflicts and malformed patterns fail startup,
+naming both declaration sites) and builds the dispatch closure handed to the
+active transport. The controller itself is a scanned component, so it shows on
+an Actuator dashboard like any other.
 
 The build plugin side is Flight Core's existing `FlightRegistrationPlugin`,
-generalized by one word: its scanner now recognizes `@Controller` alongside
-`@Component` (a name-level change — Core references no Flight Web types), so
-the generated `flightRegisterAll(_:)` covers controllers, and route
+generalized by one word: its scanner recognizes `@Controller` alongside
+`@Component` (a name-level change — Core references no Flight Web types), so the
+generated composition root's `flightRoutes(_:)` covers controllers, and route
 existence + path-pattern validity are compile-time information (`@GetRoute`
 rejects non-literal and malformed paths at the declaration site).
 
@@ -390,7 +387,7 @@ Recorded here the way Core records its spec deviations in SPIKE-FINDINGS:
    lane of `Middleware` types, composed once and ordered by registration
    sequence — which already reflects both module order and the order within
    a block. `registerMiddleware(_:order:_:)` was the first spelling and is
-   deprecated.
+   gone with the container.
 7. **WebSocket ping/pong frames are transport-internal on the default
    transport.** HummingbirdCore auto-answers pings and does not surface
    them, so `WebSocketFrame.ping`/`.pong` are never *delivered* through
@@ -449,8 +446,8 @@ No HTTP/2 or HTTP/3 (HummingbirdCore supports HTTP/2 and the builder seam
 would take it; nothing here has needed it yet), no templating/SSR (a future
 consumer of the upgrade hook), no persistence
 (Flight Data), no runtime route-registration API (routes are the macro path;
-`registerRoute` exists as the bootstrap-time escape hatch beside it, exactly
-as `container.register` sits beside `@Component`), and **no hand-rolled HTTP
+a hand-built `RouteRegistration` value is the escape hatch beside it, exactly
+as a hand-written component sits beside `@Component`), and **no hand-rolled HTTP
 parsing** — `FlightTransport` wraps HummingbirdCore rather than reimplementing
 HTTP/1.1 correctness, request-smuggling mitigations, and WebSocket protocol
 handling; Flight owns routing and dispatch, not byte-level protocol work.

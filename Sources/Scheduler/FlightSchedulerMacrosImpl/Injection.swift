@@ -60,28 +60,6 @@ enum Injection {
         return found
     }
 
-    /// The body of the resolving initializer, matching `@Component`'s shape
-    /// exactly — a scheduler author's mental model has to transfer.
-    static func initializerLines(for properties: [Property]) -> [String] {
-        properties.map { property in
-            switch property.kind {
-            case .inject(let qualifier):
-                if let qualifier {
-                    return
-                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self, qualifier: \(qualifier))"
-                }
-                return "self.\(property.name) = try container.resolve(\(property.metatypeBase).self)"
-            case .configValue(let key, let defaultValue):
-                if let defaultValue {
-                    return
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.metatypeBase).self) ?? (\(defaultValue))"
-                }
-                return
-                    "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.metatypeBase).self)"
-            }
-        }
-    }
-
     private static func injectionKind(of variable: VariableDeclSyntax) -> Property.Kind? {
         for attribute in variable.attributes {
             guard let attr = attribute.as(AttributeSyntax.self),

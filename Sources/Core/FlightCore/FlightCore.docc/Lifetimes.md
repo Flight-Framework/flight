@@ -1,87 +1,53 @@
 # Lifetimes
 
-How long a component lives, and how to pick.
+How long a component lives.
 
 ## Overview
 
-| Lifetime | One instance per | Constructed |
-|---|---|---|
-| ``Lifetime/singleton`` | application | eagerly, at `freeze()` |
-| ``Lifetime/scoped`` | request, or an explicit ``Scope`` | on first resolve in that scope |
-| ``Lifetime/transient`` | resolution | every time |
+Singleton is the only lifetime. A component is built **once**, by the
+composition root, and shared for the application's lifetime. There is no
+`.scoped` or `.transient`: nothing needed them once per-request state had a
+better home, and removing them removed the captive-dependency class of bug
+with them. A `scope:` argument naming either is a build error.
 
-## Singleton
+## Singleton — the only lifetime
 
-The default, and the right answer for most services. One instance, built
-during startup, shared by everything.
+One instance, built during composition, shared by everything. Because a
+singleton is shared across every task in the process, it must be `Sendable` —
+the compiler enforces it.
+
+A component declares what it needs with `@Inject`, and the composition root
+builds it once, in dependency order, wiring those dependencies by type:
 
 ```swift
-container.register(UserService.self, scope: .singleton) { c in
-    UserService(repository: try c.resolve(UserRepository.self))
+@Service
+struct UserService {
+    @Inject var repository: UserRepository
 }
 ```
 
-Singletons are constructed **eagerly** at ``Container/freeze()``, not lazily
-on first use. A factory that throws therefore fails the startup that was
-going to fail anyway, rather than the first request unlucky enough to touch
-it.
+Construction is **eager**, at composition — a `@ConfigValue` that fails to
+read, or an initializer that throws, fails the startup that was going to fail
+anyway, rather than the first request unlucky enough to touch it.
 
-Because a singleton is shared across every task in the process, it must be
-`Sendable` — the compiler enforces this at the registration site.
+## Where the other lifetimes went
 
-## Scoped
+**Per-request state** rides ``RequestContext`` as a typed value. The
+authenticated principal is the worked example: the authentication middleware
+writes it into the copy it passes downstream — no registration, no scope. A
+per-request object your own code needs is built by the controller, which a
+`@Controller`'s route factory constructs fresh per request, or carried on the
+context.
 
-One instance per request, for per-request state that genuinely needs a
-component: a request-scoped cache, an accumulator, anything a request builds
-up and several collaborators read.
-
-```swift
-container.register(RequestAudit.self, scope: .scoped) { _ in
-    RequestAudit()
-}
-```
-
-**Two things are deliberately not on that list.** A pooled database
-connection: Flight Data's repositories hold the pool and lease per operation,
-so nothing keeps one alive for the length of a request — an upgraded
-WebSocket would otherwise pin a connection for as long as the tab stayed
-open. And the authenticated principal: it rides `RequestContext.identity` as
-a typed value written by the authentication middleware into the copy it
-passes downstream, which needs no registration and no scope.
-
-Flight itself registers nothing `.scoped` today. If you reach for it, check
-first whether the value can travel on the request context instead.
-
-Resolving a `.scoped` component with no active scope **throws**. It does not
-quietly fall back to a shared instance, because that is the captive-dependency
-bug: a per-request object captured by a singleton, outliving the request it
-belonged to, serving the wrong user's data.
-
-```swift
-try container.withScope { scope in
-    let audit = try container.resolve(RequestAudit.self, in: scope)
-    // …
-}   // scope ends; scoped instances are released
-```
-
-Web integrations create the scope per request, so handler code just resolves.
-
-## Transient
-
-A new instance every time. Reach for it when a component genuinely must not
-be shared and has no natural scope — a builder, a one-shot operation object.
-
-Transient is the least common of the three. If you are choosing it to avoid
-thinking about sharing, `.scoped` is usually the honest answer.
+**A pooled database connection** is leased for one operation by the repository
+that holds the pool (`pool.withConnection { }`), never held for a whole
+request — an upgraded WebSocket would otherwise pin a connection for as long
+as the tab stayed open.
 
 ## Choosing
 
-Ask what the component *holds*.
-
-- Holds nothing mutable → **singleton**.
-- Holds state belonging to one request → **scoped**.
-- Holds state belonging to one operation, with no request in sight →
-  **transient**.
-
-If a singleton needs something scoped, that is the captive-dependency shape.
-Resolve the scoped component where the request is, and pass it in.
+There is nothing to choose: hold shared, stateless collaborators as the
+singletons they are, put per-request state on the request, and lease
+per-operation resources where the operation is. If a value feels like it wants
+its own lifetime, that is the signal to ask where its state really belongs —
+the request, or one operation — rather than to reach for a scope.

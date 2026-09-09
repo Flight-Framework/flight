@@ -109,23 +109,23 @@ struct AppModule: FlightModule {
 @Controller
 struct SocketController {
     @Inject var validator: any TokenValidator
+    @Inject var sockets: ChannelSockets
 
     // Runs during the upgrade request. Return a principal, nil for
     // anonymous, or throw HTTPError(.unauthorized).
     @WebSocketRoute("/socket")
     func socket(_ context: RequestContext) async throws -> ChannelSocketHandler {
         let principal = try await verify(context.request.queryParam("token"))
-        return try ChannelSocketHandler(context: context, principal: principal)
+        return sockets.handler(principal: principal)
     }
 }
 ```
 
-`container.registerChannelSocket("/socket") { ... }` wires the same thing in
-one line — it is a wrapper over `registerRoute(.get, path, kind:
-.upgrade(.webSocket))` — and suits a test harness or a spike. An application
-is better served by the declared form: a route registered from a module body
-is arbitrary Swift, so no build-time scan can enumerate it, and it takes its
-dependencies through `context.resolve` rather than through the type.
+`channels.socketRoute("/socket") { ... }` builds the same upgrade route as a
+value — a `RouteRegistration` the composition root hands `FlightWebModule` —
+and suits a test harness or a spike. An application is better served by the
+declared form: `@WebSocketRoute` is visible to the build-time scan and takes
+its dependencies through the type (`@Inject`) rather than looking them up.
 
 Topic patterns are exact (`"lobby"`), prefix-wildcard (`"room:*"`), or
 catch-all (`"*"`); the most specific match wins, and duplicate or malformed
@@ -135,7 +135,8 @@ per (socket, topic) — instances may hold per-membership state.
 Anything can broadcast — a channel handler, a background job, another node:
 
 ```swift
-let broadcaster = try container.resolve(ChannelBroadcaster.self)
+// The broadcaster the channels module owns, wired in wherever it is needed:
+let broadcaster = channels.broadcaster
 await broadcaster.broadcast(topic: "room:42", event: "system", payload: ["msg": "hi"])
 await broadcaster.broadcast(topic: "room:42", event: "new_msg", payload: p, excluding: senderSocket)
 ```
@@ -238,8 +239,8 @@ pushTimeout: .seconds(10), reconnect: .exponentialBackoff())`.
 ## Testing support
 
 ```swift
-let container = try TestContainer.build { AppModule() }
-let transport = InMemoryChannelTransport(testClient: try TestClient(container: container))
+let testClient = try TestClient(routes: [channels.socketRoute("/socket") { _ in nil }])
+let transport = InMemoryChannelTransport(testClient: testClient)
 let client = ChannelClient(url: URL(string: "flight-test:///socket")!, transport: transport)
 ```
 

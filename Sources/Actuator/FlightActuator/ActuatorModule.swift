@@ -121,9 +121,9 @@ public struct ActuatorModule: FlightModule {
         installController(format: .ssr)
     }
 
-    /// Explicit-environment initializer — the test seam (`TestContainer.build`
-    /// honors ready-made instances), and an escape hatch for embedders that
-    /// resolve the environment some other way.
+    /// Explicit-environment initializer — the test seam (construct the module
+    /// directly with a known environment), and an escape hatch for embedders
+    /// that resolve the environment some other way.
     public init(
         environment: FlightEnvironment,
         components: [ComponentDescriptor] = [],

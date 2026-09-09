@@ -10,8 +10,8 @@ import struct Foundation.URL
 /// so client reconnection is exercised for real: a new server-side session,
 /// rejoins and all.
 ///
-///     let container = try TestContainer.build { AppModule() }
-///     let transport = InMemoryChannelTransport(testClient: try TestClient(container: container))
+///     let testClient = try TestClient(routes: [channels.socketRoute("/socket") { _ in nil }])
+///     let transport = InMemoryChannelTransport(testClient: testClient)
 ///     let client = ChannelClient(url: URL(string: "flight-test:///socket")!, transport: transport)
 ///
 /// The URL's path selects the route ("/socket" for the default mount); the

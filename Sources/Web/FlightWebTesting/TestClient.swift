@@ -7,8 +7,7 @@ import Logging
 /// Drives the full Flight Web pipeline — user middleware, routing, encoding,
 /// scope-per-request, error mapping — entirely in process, no socket (§7).
 ///
-///     let container = try TestContainer.build { AppModule() }
-///     let client = try TestClient(container: container)
+///     let client = try TestClient(routes: flightRoutes(graph))
 ///     let response = try await client.get("/users/1")
 ///     #expect(response.status == .ok)
 ///

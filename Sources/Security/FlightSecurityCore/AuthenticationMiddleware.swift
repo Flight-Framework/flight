@@ -16,12 +16,11 @@ import HTTPTypes
 /// tests" entry point, because that entry point existed only to work around
 /// a closure's inability to hold one. `Authentication(validator: someMock)`
 /// is now the same call for both cases.
-// flight:module-registered — `FlightSecurityModule` registers this, not the
-// application's generated `flightRegisterAll`. It injects `(any
-// TokenValidator)`, which only a security module provides, and `freeze()`
-// builds every singleton eagerly: scanned into an app that links this package
-// without including a security module, it failed the freeze and the app never
-// booted.
+// flight:module-registered — `FlightSecurityModule` provides this, not the
+// application's scan. It injects `(any TokenValidator)`, which only a security
+// module supplies, so composing it into an app that includes no security
+// module could not succeed; the marker keeps the build's scan from treating it
+// as an app component of its own.
 @Middleware
 public struct Authentication: Sendable {
     // Parenthesized: the macro's generated `init(_flight:)` resolves this by

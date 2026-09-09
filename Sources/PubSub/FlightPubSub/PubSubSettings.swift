@@ -72,14 +72,10 @@ public enum PubSubBroadcastTimeout: Sendable, Equatable, ConfigDecodable {
     }
 }
 
-/// The PubSub module's settings, read from `flight.yaml` at `freeze()`.
-///
-/// These used to be `init` parameters on `FlightPubSubModule`. They were
-/// unreachable: `Flight.bootstrap` and `Flight.assemble` both take
-/// `[any FlightModule.Type]` and instantiate with `init()`, so no deployment
-/// could set any of them — the documented example passed a module *instance*
-/// and did not compile. They are deployment knobs, so they live where
-/// deployment knobs live.
+/// The PubSub module's settings, read from `flight.yaml` once when the module
+/// is built. They are deployment knobs, so they live where deployment knobs
+/// live: `FlightPubSubModule.init(configuration:)` reads them, and the module
+/// holds what they configure.
 struct PubSubSettings: Sendable {
     var bufferingPolicy: PubSubBufferingPolicy
     var nodeID: String?

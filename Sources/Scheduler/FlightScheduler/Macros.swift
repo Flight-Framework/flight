@@ -44,7 +44,7 @@ public macro Scheduler() =
 /// - Parameters:
 ///   - cron: The schedule. Must be a string literal — that is what makes
 ///     build-time checking possible. For a schedule known only at runtime,
-///     use `container.registerScheduledJob(_:cron:)`.
+///     build a `ScheduledJobRegistration` value by hand.
 ///   - timeZone: An IANA identifier, checked at build time against the same
 ///     database the scheduler reads — a missing underscore is a compile
 ///     error, not a job that quietly runs in GMT. Defaults to UTC rather

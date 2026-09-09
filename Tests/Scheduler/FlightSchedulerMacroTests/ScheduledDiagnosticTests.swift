@@ -74,7 +74,7 @@ struct ScheduledDiagnosticTests {
                 func run() {}
             }
             """,
-            "registerScheduledJob")
+            "ScheduledJobRegistration")
     }
 
     @Test("a job taking parameters is refused, naming the alternative")

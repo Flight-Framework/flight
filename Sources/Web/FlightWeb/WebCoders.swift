@@ -12,15 +12,15 @@ import HTTPTypes
 /// keys or ISO-8601 timestamps, with no way to argue — and `ResponseEncodable`,
 /// the whole point of returning a domain type from a handler, unusable with it.
 ///
-/// Registered by ``FlightWebModule`` from `flight.yaml`, and reachable from
-/// any handler as `context.coders`. Register your own to override:
+/// Built by ``FlightWebModule`` from `flight.yaml`, and reachable from any
+/// handler as `context.coders`. Provide your own to override — a module holds
+/// it as a value the composition root hands ``FlightWebModule`` (matched by
+/// type, as its `coders:` parameter):
 ///
 /// ```swift
-/// container.register(WebCoders.self, scope: .singleton) { _ in
-///     var coders = WebCoders.default
-///     coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
-///     return coders
-/// }
+/// var coders = WebCoders.default
+/// coders.jsonEncoder.keyEncodingStrategy = .convertToSnakeCase
+/// // expose `coders` from a module; the composer wires it to FlightWebModule
 /// ```
 public struct WebCoders: Sendable {
     /// Encodes handler return values and `Response.json` bodies.

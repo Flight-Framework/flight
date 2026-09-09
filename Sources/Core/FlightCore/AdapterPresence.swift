@@ -24,11 +24,12 @@ extension Configuration {
     /// about.
     ///
     /// ```swift
-    /// guard case .notRegistered = error else { throw error }
-    /// try configuration.requireNoUnloadedAdapter(
-    ///     feature: "cache",
-    ///     candidates: [.init(configurationKey: "cache.valkey.url", module: "FlightCacheValkeyModule")])
-    /// return try container.resolve(InMemoryCache.self)
+    /// // In a module's init, when no adapter argument was supplied:
+    /// if adapter == nil {
+    ///     try configuration.requireNoUnloadedAdapter(
+    ///         feature: "cache",
+    ///         candidates: [.init(configurationKey: "cache.valkey.url", module: "FlightCacheValkeyModule")])
+    /// }
     /// ```
     ///
     /// - Parameters:
@@ -81,7 +82,7 @@ public struct AdapterCandidate: Sendable, Equatable {
 
 /// Configuration named an adapter that no loaded module provides.
 ///
-/// Thrown at `freeze()`, so it stops the process at startup rather than
+/// Thrown at composition, so it stops the process at startup rather than
 /// letting it serve traffic from a fallback nobody asked for.
 public struct UnloadedAdapterError: Error, Sendable, Equatable, CustomStringConvertible {
     public let feature: String

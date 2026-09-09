@@ -22,23 +22,22 @@ import ServiceLifecycle
 /// ```
 public enum Flight {
 
-    /// Builds and freezes the container, then returns it alongside the
-    /// services its modules registered — without running anything.
+    /// Assembles the application from module instances — already built by the
+    /// composition root, in dependency order, each declaring what it needs in
+    /// its initializer and holding what it provides (COMPOSITION-MIGRATION.md
+    /// D11) — and returns the services its modules contribute, without running
+    /// anything. There is no container, and no type-based overload: a value
+    /// module cannot be built from its type.
     ///
     /// The seam for tests and for embedders that drive the lifecycle
     /// themselves. Use ``bootstrap(configuration:modules:logger:)`` to run.
     ///
     /// ```swift
-    /// let app = try Flight.assemble(configuration: config, modules: [AppModule.self])
-    /// let service = try app.container.resolve(UserService.self)
+    /// let app = try Flight.assemble(configuration: config, modules: [appModule])
+    /// for service in app.services { /* drive each service's lifecycle */ }
     /// ```
     ///
-    /// - Throws: ``BootstrapError`` if module ordering fails or an eager
-    /// singleton's factory throws.
-    /// Assembles from modules already built by the composition root, in
-    /// dependency order — a module declares what it needs in its initializer
-    /// and holds what it provides (COMPOSITION-MIGRATION.md D11). There is no
-    /// type-based overload: a value module cannot be built from its type.
+    /// - Throws: ``BootstrapError`` if a module's service collection fails.
     public static func assemble(
         configuration: Configuration,
         modules: [any FlightModule]

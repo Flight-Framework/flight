@@ -40,19 +40,18 @@ public struct HTTPError: HTTPErrorRepresentable, Sendable {
 /// *inside* the chain — by the time a middleware sees anything it is a 500
 /// response with the error gone.
 ///
-/// So an application registers one of these and maps what it knows:
+/// So an application provides one and maps what it knows — a module holds it
+/// as a value the composition root hands ``FlightWebModule`` (matched by type):
 ///
 /// ```swift
-/// container.register(ErrorMapper.self, scope: .singleton) { _ in
-///     ErrorMapper { error in
-///         switch error {
-///         case let validation as ChangesetValidationError:
-///             return .init(.unprocessableContent, validation.description)
-///         case DataSourceError.poolExhausted:
-///             return .init(.serviceUnavailable, "The service is busy.", headers: [.retryAfter: "1"])
-///         default:
-///             return nil          // leave it to the default rendering
-///         }
+/// let errorMapper = ErrorMapper { error in
+///     switch error {
+///     case let validation as ChangesetValidationError:
+///         return .init(.unprocessableContent, validation.description)
+///     case DataSourceError.poolExhausted:
+///         return .init(.serviceUnavailable, "The service is busy.", headers: [.retryAfter: "1"])
+///     default:
+///         return nil          // leave it to the default rendering
 ///     }
 /// }
 /// ```

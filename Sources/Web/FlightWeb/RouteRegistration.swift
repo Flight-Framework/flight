@@ -2,13 +2,12 @@ import FlightCore
 import Foundation
 import HTTPTypes
 
-/// The "different kind of entry" the shared registration pipeline emits for
-/// routes (§4): `@Controller`'s generated `_flightRegister` registers the
-/// controller component *and* one `RouteRegistration` component per mapped method,
-/// through the very same `Container.register` every other component uses. The web
-/// module collects them post-freeze into the route table — no parallel
-/// registration mechanism exists, and routes show up in Core introspection
-/// (`allRegistrations()`) like any other component.
+/// One mapped route, as a value (§4). `@Controller` generates one route
+/// *factory* per mapped method; the composition root's `flightRoutes(_:)`
+/// calls them and hands the resulting `RouteRegistration` values to
+/// `FlightWebModule`, which builds them into the route table when its dispatch
+/// is assembled. A hand-written route is the same value — there is no separate
+/// registration mechanism.
 public struct RouteRegistration: Sendable {
     public enum Kind: Sendable, Equatable {
         /// An ordinary request/response route.

@@ -21,16 +21,15 @@ it and call the method:
 ```
 
 **Routing and middleware.** ``TestClient`` builds the real dispatch table
-from a container — the same `DispatchBuilder` the server uses, route
-validation included — and answers requests in-process:
+from the routes and middleware you hand it — the same `DispatchBuilder` the
+server uses, route validation included — and answers requests in-process. A
+route factory constructs the controller per request, so a stubbed dependency
+is just a value passed in:
 
 ```swift
-let container = try TestContainer.build {
-    AppModule()
-} overriding: { container in
-    container.override(OrderService.self, scope: .singleton) { _ in StubOrderService() }
-}
-let client = try TestClient(container: container)
+let client = try TestClient(routes: [
+    OrderController._flightRoute_show_0 { _ in OrderController(orders: StubOrderService()) }
+])
 let response = try await client.get("/orders/\(id)")
 #expect(response.status == .ok)
 ```
@@ -40,16 +39,13 @@ to `ServerTransport`, so `FlightWebModule` boots against it and every layer
 runs — bootstrap, module ordering, middleware, dispatch — with requests
 delivered through memory instead of TCP.
 
-## Overriding is the point of the container
+## Stubbing a dependency
 
-``TestContainer/build(configuration:_:overriding:)`` runs the real modules
-and then applies overrides on top. `Container.override` wins over any later
-`register` for the same key, so a module can register its real component and
-the test still gets the stub — no conditional wiring inside production code,
-no `#if DEBUG`.
-
-``Components`` registers loose values by name for tests that need one or two
-things rather than a module.
+There is no container to override: you construct the component under test (or
+its route, through the macro-generated factory) with the fake passed to its
+initializer. A component takes what it needs as `@Inject` parameters, so
+`OrderController(orders: StubOrderService())` is the whole of it — no
+conditional wiring inside production code, no `#if DEBUG`.
 
 ## WebSockets
 
@@ -63,8 +59,6 @@ without a browser or a port.
 ### Testing routes
 
 - ``TestClient``
-- ``TestContainer``
-- ``Components``
 
 ### Testing the whole application
 

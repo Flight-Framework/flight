@@ -1,7 +1,7 @@
-/// Component lifetimes.
+/// Component lifetimes. Singleton is the only one — see <doc:Lifetimes>.
 public enum Lifetime: Sendable, Equatable {
-    /// One instance for the container's lifetime. Constructed eagerly at
-    /// `freeze()` — see `FrozenStorage.singletons` for why.
+    /// One instance for the application's lifetime, built once by the
+    /// composition root, in dependency order.
     case singleton
 }
 
@@ -20,7 +20,7 @@ public enum ResolutionError: Error, CustomStringConvertible, Sendable {
         switch self {
         case .notRegistered(let name):
             return
-                "No component registered for \(name). If this type is annotated @Component, the build plugin's generated _registerAll may not be wired in; if it is hand-registered, check the qualifier."
+                "No component available for \(name). If this type is annotated @Component, the build plugin may not be wired into this target; if it is provided by a module, check that the module is composed in."
         case .circularDependency(let chain):
             return "Circular dependency: \(chain.joined(separator: " → "))"
         case .typeMismatch(let requested, let produced):
@@ -29,12 +29,12 @@ public enum ResolutionError: Error, CustomStringConvertible, Sendable {
     }
 }
 
-/// A component's architectural layer. Stereotype macros expand
-/// *identically* to `@Component` — same marker, same thunk — differing only
-/// in this tag. It is not cosmetic: Actuator groups its dashboard by layer,
-/// and it is the pointcut for any future default AOP policy ("all
-/// @Repository methods join the ambient transaction"). Not part of component
-/// identity — resolution never consults it.
+/// A component's architectural layer. Stereotype macros expand *identically*
+/// to `@Component`, differing only in this tag. It is not cosmetic: Actuator
+/// groups its dashboard by layer, and it is the pointcut for any future
+/// default AOP policy ("all @Repository methods join the ambient
+/// transaction"). Not part of component identity — construction never consults
+/// it; it rides the build-scanned descriptor.
 public enum Stereotype: Sendable, Equatable, CaseIterable {
     /// Generic registration (`@Component`), incl. third-party client wrappers.
     case component

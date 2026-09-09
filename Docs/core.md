@@ -77,20 +77,16 @@ gets shared, so the requirement belongs here.
 final class Counter { var count = 0 }                 // ❌ won't compile
 ```
 
-For per-request mutable state, use `.scoped` — one instance per request,
-never shared across them.
+For per-request mutable state, carry it on `RequestContext` — it rides the
+request as a typed value, not a shared component.
 
 ## Lifetimes
 
-| Lifetime | One instance per | Constructed |
-|---|---|---|
-| `.singleton` | application | eagerly, at `freeze()` |
-| `.scoped` | request (or explicit `Scope`) | on first resolve in the scope |
-| `.transient` | resolution | every time |
-
-Resolving a `.scoped` component with no active scope throws rather than
-silently handing back a singleton — the captive-dependency bug is a real one
-and it is worth a hard error.
+Singleton is the only lifetime: a component is built **once**, by the
+composition root, and shared for the application's lifetime. There is no
+`.scoped` or `.transient` — per-request state rides `RequestContext`, and a
+pooled connection is leased per operation, so nothing needed them and their
+captive-dependency class of bug went with them. See <doc:Lifetimes>.
 
 ## Compile-time wiring
 
@@ -130,34 +126,37 @@ public struct Authentication: Sendable {
 ```
 
 The type is still scanned — its dependencies are still checked, and `@Inject`
-of it still resolves without a warning — but `flightRegisterAll` does not
-register it, and it is never chosen as an existential bridge conformer. Its
-module does both jobs instead. The generated file names every type it skipped
-for this reason, so nothing disappears silently.
+of it still resolves without a warning — but the composition root does not
+build it as a graph node of its own, and it is never chosen as an existential
+bridge conformer. Its module provides it instead. The generated file names
+every type it skipped for this reason, so nothing disappears silently.
 
-Why it matters: `freeze()` builds every singleton eagerly. `Authentication`
+Why it matters: a component is built eagerly, at composition. `Authentication`
 injects `(any TokenValidator)`, which only a security module provides, so
-without the marker any app that merely *linked* the security package failed
-its freeze and never booted.
+without the marker any app that merely *linked* the security package could not
+compose and never booted.
 
 > The plugin is a `BuildToolPlugin` and runs under SwiftPM. Xcode projects do
 > not run it, so an Xcode-only target needs its registrations written by hand.
 
 ## Modules
 
-A module declares what it needs and registers what it provides:
+A module declares what it needs and *holds* what it provides, built in its
+initializer:
 
 ```swift
 struct DataModule: FlightModule {
     static let dependencies: [any FlightModule.Type] = [ConfigModule.self]
 
-    func configure(_ container: Container) throws {
-        container.register(DataSource.self, scope: .singleton) { c in
-            PostgresDataSource(configuration: try c.resolve(Configuration.self))
-        }
+    let dataSource: DataSource
+    init(configuration: Configuration) throws {
+        self.dataSource = PostgresDataSource(configuration: configuration)
     }
 }
 ```
+
+The composition root builds each module in dependency order and wires what one
+provides into whatever injects it, by type.
 
 Order is resolved from the declared dependencies and is deterministic: the
 same module set always produces the same order. A cycle is a startup error
@@ -190,27 +189,22 @@ opens it.
 
 ## Testing
 
-`Flight.assemble` builds and freezes without running anything:
+`Flight.assemble` composes the modules and returns their services, without
+running anything:
 
 ```swift
-let app = try Flight.assemble(configuration: config, modules: [AppModule.self])
-let service = try app.container.resolve(UserService.self)
+let app = try Flight.assemble(configuration: config, modules: [appModule])
 ```
 
-Swapping in a test double uses `override`, which replaces a registration
-made earlier rather than adding a second one:
+A component takes what it needs as `@Inject` parameters, so swapping in a test
+double is just constructing it with one — no container to override:
 
 ```swift
-let container = try TestContainer.build { AppModule() } overriding: { container in
-    container.override((any UserRepository).self, scope: .singleton) { _ in InMemoryUsers() }
-}
+let service = UserService(repository: InMemoryUsers())
 ```
 
-A plain second `register` for the same key is *not* the way: duplicate
-registrations fail `freeze()` with `duplicateRegistration`, deliberately, and
-`override` exists precisely because they do. It is order-independent — the
-override may be declared before or after the registration it replaces — and
-it is test-facing API; production code has no reason to reach for it.
+That is the whole of it: a test builds the type under test with fakes passed
+in, and never reaches for framework wiring to do it.
 
 ## Documentation
 

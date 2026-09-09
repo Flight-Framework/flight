@@ -42,11 +42,9 @@ struct AppModule: FlightModule {
         ]
     }
 
-    func configure(_ container: Container) throws {
-        container.registerChannelSocket("/socket") { context in
-            context.request.queryParam("token").map { try verify($0) }
-        }
-    }
+    // The socket route is a value built from the channels module and handed
+    // to FlightWebModule with every other route:
+    //   channels.socketRoute("/socket") { $0.request.queryParam("token").map(verify) }
 }
 
 struct RoomChannel: Channel {

@@ -50,8 +50,8 @@ enum JobScanning {
                     """
                     '\(function.name.text)' has \(scheduled.count) @Scheduled attributes, and \
                     a job is registered under its method name — so they would collide rather \
-                    than both run. Split the schedules across separate methods, or register \
-                    the extra one with container.registerScheduledJob.
+                    than both run. Split the schedules across separate methods, or declare \
+                    the extra one as a `ScheduledJobRegistration` value.
                     """,
                     at: scheduled[1])
                 continue
@@ -132,8 +132,8 @@ enum JobScanning {
                         "scheduled.notliteral",
                         """
                         A cron expression must be a string literal so it can be checked at \
-                        build time. For a schedule only known at runtime, register it with \
-                        container.registerScheduledJob(_:cron:) instead.
+                        build time. For a schedule only known at runtime, build a \
+                        `ScheduledJobRegistration` value with a `CronExpression` instead.
                         """,
                         at: value)
                     return nil
@@ -153,8 +153,8 @@ enum JobScanning {
                         "scheduled.tznotliteral",
                         """
                         A time zone must be a string literal so it can be checked at build \
-                        time. For a zone only known at runtime, register the job with \
-                        container.registerScheduledJob(_:cron:timeZone:) instead.
+                        time. For a zone only known at runtime, build a \
+                        `ScheduledJobRegistration` value with the time zone instead.
                         """,
                         at: value)
                     return nil
@@ -184,8 +184,8 @@ enum JobScanning {
                         "scheduled.notliteralscope",
                         """
                         onEveryNode must be true or false written out, so the scope is \
-                        settled at build time. For a scope only known at runtime, register \
-                        the job with container.registerScheduledJob(_:cron:scope:) instead.
+                        settled at build time. For a scope only known at runtime, build \
+                        a `ScheduledJobRegistration` value with the scope instead.
                         """,
                         at: value)
                     return nil

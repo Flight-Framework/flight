@@ -15,23 +15,22 @@ import HTTPTypes
 ///   the container is frozen, let alone before the socket route serves.
 /// - `ChannelBroadcaster` — the broadcast seam over `any PubSub`.
 ///
-/// An app module *declares* its channels as a value and mounts the socket
-/// route. It no longer depends on this module: a channel is declared without
-/// a broadcaster, and given one when it is created.
+/// An app module *declares* its channels as a value. It no longer depends on
+/// this module: a channel is declared without a broadcaster, and given one
+/// (in the `ChannelContext`) when it is created.
 ///
-///     struct AppModule: FlightModule {
+///     struct AppChannels: FlightModule {
 ///         let channels: [ChannelRegistration]
-///         init() throws {
+///         init() {
 ///             self.channels = [
-///                 try ChannelRegistration("room:*", source: "AppModule") { context in
-///                     RoomChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
+///                 ChannelRegistration("room:*", source: "AppChannels") { channel in
+///                     RoomChannel(broadcaster: channel.broadcaster)
 ///                 }
 ///             ]
 ///         }
-///         func configure(_ container: Container) throws {
-///             container.registerChannelSocket("/socket")
-///         }
 ///     }
+///     // The socket route is a value too: `channels.socketRoute("/socket") { ... }`,
+///     // handed to `FlightWebModule` alongside every other route.
 ///
 /// The composer collects `channels` from every module declaring any and
 /// passes them here, so an extension package contributes without the

@@ -155,7 +155,7 @@ All keys live under `security.oidc.` (env-var form `FLIGHT_SECURITY_OIDC_*`):
 | `scopes_claim`          | no       | `scope,scp` | Same; space-delimited strings are split |
 | `allowed_algorithms`    | no       | every asymmetric algorithm JWTKit verifies | Comma-separated `alg` allowlist — see *Algorithms* below |
 
-Missing required keys fail at container freeze — startup, not first request.
+Missing required keys fail at composition — startup, not first request.
 An unrecognized `jwks_transport` value fails there too, rather than falling
 back to a weaker setting than the operator wrote.
 
@@ -256,12 +256,10 @@ are validated is chosen by listing a module:
   cookies, API keys, mTLS, HMAC, or anything else:
 
 ```swift
-final class MyValidatorModule: FlightModule {
-    func configure(_ container: Container) throws {
-        container.register((any TokenValidator).self, scope: .singleton) { _ in
-            MyValidator()
-        }
-    }
+struct MyValidatorModule: FlightModule {
+    // Provided as a value; the composition root matches it to
+    // FlightSecurityModule's `validator:` parameter by type.
+    let tokenValidator: any TokenValidator = MyValidator()
 }
 ```
 
@@ -269,8 +267,9 @@ List it alongside `FlightSecurityModule` — **order does not matter**, and no
 `security.oidc.*` configuration is required when `FlightOIDCModule` isn't
 listed.
 
-With neither, `(any TokenValidator)` is unregistered and `Authentication`
-fails to resolve it at container freeze — at startup, naming the type.
+With neither, there is no `(any TokenValidator)` to supply, and
+`FlightSecurityModule` cannot be built — its initializer requires one, so
+composition fails at startup, naming the type.
 
 > **Changed.** Previously `FlightSecurityModule` registered OIDC *unless* it
 > found that you had already registered your own, by scanning the container.

@@ -20,9 +20,9 @@ import ServiceLifecycle
 /// - any module of your own that registers `(any TokenValidator)`, for
 ///   session cookies, API keys, mTLS, HMAC, or anything else.
 ///
-/// With neither, `(any TokenValidator)` is unregistered and ``Authentication``
-/// fails to resolve it at container freeze — loudly, at startup, naming the
-/// type.
+/// With neither, there is no `(any TokenValidator)` to supply, and
+/// `FlightSecurityModule` cannot be built — its initializer requires one, so
+/// composition fails loudly at startup rather than at the first request.
 ///
 /// ``RequireAuthentication`` is deliberately *not* in the **default** lane —
 /// unlike authentication itself, enforcement is not something every route

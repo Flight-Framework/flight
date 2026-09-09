@@ -17,12 +17,12 @@ import ServiceLifecycle
 /// `@Inject` dependencies are fully resolved before the first request
 /// arrives (§8).
 ///
-/// A class, because `configure` is where the container that a
-/// `RequestContext` carries becomes available — dispatch is built there, from
-/// values this module already holds, and the service reads it after. The
-/// registries are no longer collected from the container at `freeze()`; only
-/// request-time resolution still needs one, and that goes when
-/// `context.resolve` does (COMPOSITION-MIGRATION.md §9).
+/// A class holding the `Dispatch` it builds in `init` from the values it was
+/// composed with — the routes, middleware, asset mounts and `WebRuntime`
+/// (coders + error mapper). Route-table validation happens there, at
+/// composition; the service the module contributes reads that already-built
+/// dispatch. Nothing is collected from a container, and nothing is resolved
+/// per request (COMPOSITION-MIGRATION.md §9).
 public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @unchecked Sendable {
 
     /// Every route in the application: the generated ones, plus whatever each

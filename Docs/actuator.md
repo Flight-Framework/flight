@@ -70,7 +70,7 @@ needs something in front of it. `health_only` is safe to expose: it answers
 `200`/`UP` or `503` and discloses nothing else.
 
 For tests and embedders, `ActuatorModule(environment:)` bypasses the
-`FLIGHT_ENV` read; `TestContainer.build` honors such ready-made instances.
+`FLIGHT_ENV` read — construct it directly with the environment you want.
 
 ## JSON contract
 
@@ -94,7 +94,7 @@ The JSON rendering is a public contract for hand-rolled front-ends. Shape
 
 - `health`: `"notStarted" | "running" | "failed"` (`error` present only for
   `"failed"`)
-- `scope`: `"singleton" | "transient" | "scoped"`
+- `scope`: `"singleton"` — the only lifetime
 - `stereotype`: `"component" | "service" | "repository" | "controller" |
   "settings" | "middleware"` — all six of Core's `Stereotype` cases; a
   front-end validating against this contract should accept the lot
@@ -113,14 +113,14 @@ Recorded here the same way sibling packages record theirs:
    plugin scans *every* recursive source-module dependency that sits atop
    FlightCore — right for an app-owned library target, wrong for a starter
    package with its own `FlightModule`. A downstream app's generated
-   `flightRegisterAll` tried to register `ActuatorController` itself,
-   unconditionally — bypassing the `.prod` gate entirely (whole
-   point) and colliding with the registration `ActuatorModule` already
-   performs. Every sibling starter (`flight-web`, `flight-pubsub`,
-   `flight-channels`, `flight-data-postgres`) avoids this the same way: none
-   of them put `@Component`/`@Controller` on their own infrastructure.
-   `ActuatorModule.configure` registers the controller and its routes by hand (`registerRoute`, the
-   escape hatch `@GetRoute` sits beside).
+   composition root would try to build `ActuatorController` as one of its own
+   graph nodes — bypassing the exposure gate entirely (whole point) and
+   colliding with what `ActuatorModule` already does. Every sibling starter
+   (`flight-web`, `flight-pubsub`, `flight-channels`, `flight-data-postgres`)
+   avoids this the same way: none of them put `@Component`/`@Controller` on
+   their own infrastructure. `ActuatorModule` builds the controller and serves
+   it through route values (`RouteRegistration`, the escape hatch `@GetRoute`
+   sits beside).
 2. **The container is no longer a registered component at all.** A consequence
    of (1): `ActuatorController` now holds `container` as a plain stored
    property, captured directly from `configure(_:)`'s own parameter — no

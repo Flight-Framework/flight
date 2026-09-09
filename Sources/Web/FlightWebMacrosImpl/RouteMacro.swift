@@ -49,7 +49,7 @@ public struct RouteMacro: PeerMacro {
                 which is what reads these attributes. This method's enclosing type is not \
                 annotated @Controller — nor is a method in an extension of one scanned — so \
                 the route would silently never exist. Add @Controller to the type declaring \
-                this method, or register the route with container.registerRoute.
+                this method, or declare it as a `RouteRegistration` value from a module.
                 """,
                 at: node
             )

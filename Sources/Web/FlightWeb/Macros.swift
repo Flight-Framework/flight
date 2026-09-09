@@ -1,19 +1,18 @@
 import FlightCore
 
-/// Marks a type as a routing controller (§4). Expands exactly like
-/// `@Component` (Flight Core §5.1) — resolving `init(_flight:)`, a
-/// `_flightRegister(_:)` thunk, `_FlightRegistrable` conformance — plus one
-/// `RouteRegistration` component per `@GetRoute`/`@PostRoute`/… method. One
-/// registration pipeline in all of Flight; routes are just one kind of thing
-/// it registers (§4).
+/// Marks a type as a routing controller (§4). Expands like `@Component`
+/// (Flight Core §5.1) — a parameterized initializer over its
+/// `@Inject`/`@ConfigValue` properties — plus one route *factory* per
+/// `@GetRoute`/`@PostRoute`/… method, each of which builds the controller and
+/// runs one method as a `RouteRegistration` value.
 ///
 /// The build plugin (Flight Core's `FlightRegistrationPlugin`) picks
 /// `@Controller` types up in the same source-scanning pass as `@Component`,
-/// so the generated `flightRegisterAll(_:)` covers controllers too — route
-/// existence is information the build has before the binary exists.
+/// so the generated composition root's `flightRoutes(_:)` covers controllers
+/// too — route existence is information the build has before the binary exists.
 ///
-/// `@Inject` and `@ConfigValue` properties work exactly as on
-/// `@Component` types. Controllers are singleton components.
+/// `@Inject` and `@ConfigValue` properties work exactly as on `@Component`
+/// types; a controller is built per request by its route factory.
 ///
 /// `path` is an optional base path, combined with every mapped method's own
 /// path the same way Spring combines a class-level `@RequestMapping` with
@@ -51,10 +50,10 @@ public macro Controller(
 ) =
     #externalMacro(module: "FlightWebMacrosImpl", type: "ControllerMacro")
 
-/// Marks a type as a middleware layer. Expands like `@Component` — resolving
-/// `init(_flight:)`, a `_flightRegister(_:)` thunk, `_FlightRegistrable`
-/// conformance — and additionally declares the type's conformance to
-/// ``Middleware``, so the type only needs to supply `handle(_:next:)`:
+/// Marks a type as a middleware layer. Expands like `@Component` — a
+/// parameterized initializer over its `@Inject`/`@ConfigValue` properties —
+/// and additionally declares the type's conformance to ``Middleware``, so the
+/// type only needs to supply `handle(_:next:)`:
 ///
 /// ```swift
 /// @Middleware

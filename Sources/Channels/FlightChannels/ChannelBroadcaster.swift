@@ -40,11 +40,12 @@ public struct BroadcastFrame: Sendable, Equatable, Codable {
 /// fan-out itself — whether the other subscriber is on this node or another
 /// machine is PubSub's seam (step 3→4), invisible here.
 ///
-/// Registered as a singleton by `FlightChannelsModule`; resolve it from any
-/// channel factory or service:
+/// Owned by `FlightChannelsModule` and handed to each channel as it is
+/// created, in the `ChannelContext` — a channel closes over it rather than
+/// looking it up:
 ///
-///     try ChannelRegistration("room:*") { context in
-///         RoomChannel(broadcaster: try context.resolve(ChannelBroadcaster.self))
+///     ChannelRegistration("room:*") { channel in
+///         RoomChannel(broadcaster: channel.broadcaster)
 ///     }
 public struct ChannelBroadcaster: Sendable {
     /// Metadata key carrying the originating socket's `id` for
