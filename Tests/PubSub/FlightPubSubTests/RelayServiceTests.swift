@@ -7,30 +7,13 @@ import FlightPubSubTesting
 @Suite("PubSubRelayService", .timeLimit(.minutes(1)))
 struct RelayServiceTests {
 
-    @Test("wiring error: a container whose PubSub is local-only")
-    func notClusteredThrows() async throws {
-        let container = Container()
-        container.register((any PubSub).self, scope: .singleton) { _ in LocalPubSub() }
-        try container.freeze()
-
-        let service = PubSubRelayService(container: container)
-        await #expect(throws: PubSubWiringError.self) {
-            try await service.run()
-        }
-    }
-
-    @Test("container-wired relay drains the adapter into local fan-out")
-    func containerWiredRelay() async throws {
+    @Test("the relay drains the adapter into local fan-out")
+    func relayDrainsAdapter() async throws {
         let adapter = RecordingAdapter()
-        let container = Container()
-        container.register((any PubSub).self, scope: .singleton) { _ in
-            ClusteredPubSub(local: LocalPubSub(), adapter: adapter, nodeID: "svc-node")
-        }
-        try container.freeze()
-        let clustered = try container.resolve((any PubSub).self)
+        let clustered = ClusteredPubSub(local: LocalPubSub(), adapter: adapter, nodeID: "svc-node")
 
         var iterator = clustered.subscribe("room:1").makeAsyncIterator()
-        let running = Task { try await PubSubRelayService(container: container).run() }
+        let running = Task { try await PubSubRelayService(clustered: clustered).run() }
 
         adapter.inject(msg("room:1", "via-service", metadata: [ClusteredPubSub.originMetadataKey: "peer"]))
         let received = await iterator.next()

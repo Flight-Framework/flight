@@ -335,13 +335,12 @@ struct RequestTests {
 @Suite("Configured coders are honored everywhere")
 struct ConfiguredCodersTests {
 
-    /// `context.coders` resolves `WebCoders` from the container, so a
-    /// configured app is one registration.
+    /// `context.coders` is a carried value now, stamped by dispatch — here
+    /// set directly.
     private func context(coders: WebCoders) throws -> RequestContext {
-        let container = Container()
-        container.register(WebCoders.self, scope: .singleton) { _ in coders }
-        try container.freeze()
-        return RequestContext.mock(container: container)
+        var context = RequestContext.mock()
+        context.web = WebRuntime(coders: coders)
+        return context
     }
 
     @Test("a dictionary honors the configured encoder, like an array does")

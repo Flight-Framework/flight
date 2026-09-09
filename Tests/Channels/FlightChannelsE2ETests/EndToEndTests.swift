@@ -104,9 +104,7 @@ struct E2EModule: FlightModule {
         }
     ]
 
-    func configure(_ container: Container) throws {
-        container.registerChannelSocket("/socket")
-    }
+    func configure(_ container: Container) throws {}
 }
 
 /// Boots a real `FlightTransport` on an ephemeral port with the channels
@@ -117,13 +115,15 @@ func withRunningChannelServer(
     let configuration = Configuration()
     let pubsub = try FlightPubSubModule(configuration: configuration)
     let app = E2EModule()
+    let channels = try FlightChannelsModule(
+        bus: pubsub.bus, configuration: configuration, channels: app.channels)
     let container = try TestContainer.build(configuration: configuration) {
         pubsub
         app
-        try FlightChannelsModule(
-            bus: pubsub.bus, configuration: configuration, channels: app.channels)
+        channels
     }
-    let dispatch = try TestClient(container: container).dispatch
+    let dispatch = try TestClient(
+        container: container, routes: [channels.socketRoute("/socket")]).dispatch
 
     let (ports, portContinuation) = AsyncStream<Int>.makeStream()
     let transport = FlightTransport(

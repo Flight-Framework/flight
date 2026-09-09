@@ -109,9 +109,8 @@ struct FrameworkSeamTests {
             channels: [ChannelRegistration("seam:*") { _ in SeamChannel(probe: probe) }])
         try pubsub.configure(container)
         try channels.configure(container)
-        container.registerChannelSocket("/socket")
         try container.freeze()
-        return (try TestClient(container: container), probe)
+        return (try TestClient(container: container, routes: [channels.socketRoute("/socket")]), probe)
     }
 
     @Test("onTopicActivated fires after the join is fully established")

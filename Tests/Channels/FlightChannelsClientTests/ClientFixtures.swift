@@ -45,9 +45,7 @@ struct ClientFixtureModule: FlightModule {
         }
     ]
 
-    func configure(_ container: Container) throws {
-        container.registerChannelSocket("/socket")
-    }
+    func configure(_ container: Container) throws {}
 }
 
 struct ClientHarness {
@@ -65,13 +63,15 @@ struct ClientHarness {
         ])
         let pubsub = try FlightPubSubModule(configuration: configuration)
         let fixture = ClientFixtureModule()
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: fixture.channels)
         self.container = try TestContainer.build(configuration: configuration) {
             pubsub
             fixture
-            try FlightChannelsModule(
-                bus: pubsub.bus, configuration: configuration, channels: fixture.channels)
+            channels
         }
-        self.testClient = try TestClient(container: container)
+        self.testClient = try TestClient(
+            container: container, routes: [channels.socketRoute("/socket")])
         self.transport = transportDecorator(InMemoryChannelTransport(testClient: testClient))
     }
 

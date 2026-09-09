@@ -29,7 +29,7 @@ func testingShapes() throws {
     _ = try TestClient(container: container)
 
     // A context for calling a handler directly.
-    _ = RequestContext.mock(container: container)
+    _ = RequestContext.mock()
 
     // Overriding one seam in a booted graph.
     _ = try TestContainer.build {

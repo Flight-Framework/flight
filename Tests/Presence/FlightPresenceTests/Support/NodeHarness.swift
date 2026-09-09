@@ -78,15 +78,16 @@ final class PresenceNode: Sendable {
             if let service = module.service { services.append(service) }
         }
 
-        // Upgrade-time authentication (Channels): `?user=` names the
-        // principal; absent means an anonymous (watch-only) socket.
-        container.registerChannelSocket("/socket") { context in
-            context.request.queryParam("user").map { BasicPrincipal(subject: $0) }
-        }
         try container.freeze()
 
+        // Upgrade-time authentication (Channels): `?user=` names the
+        // principal; absent means an anonymous (watch-only) socket. A route
+        // value now, built from the channels module.
+        let socket = channels.socketRoute("/socket") { context in
+            context.request.queryParam("user").map { BasicPrincipal(subject: $0) }
+        }
         self.container = container
-        self.client = try TestClient(container: container)
+        self.client = try TestClient(container: container, routes: [socket])
         self.tracker = try container.resolve(PresenceTracker.self)
         self.presence = try container.resolve((any Presence).self)
         self.adapter = adapter

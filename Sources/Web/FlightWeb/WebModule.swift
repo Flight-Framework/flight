@@ -40,6 +40,11 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
     /// whichever request first encoded something.
     public let coders: WebCoders
 
+    /// The application's error mapper, when a module provided one — matched by
+    /// type in composition, the same way `coders` is. `.none` declines
+    /// everything, the default for an app that maps no errors of its own.
+    public let errorMapper: ErrorMapper
+
     /// The transport's own settings come from here at start-up.
     private let configuration: Configuration
 
@@ -60,10 +65,12 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
         routes: [RouteRegistration] = [],
         middleware: [MiddlewareRegistration] = [],
         assetMounts: [AssetMountRegistration] = [],
-        coders: WebCoders? = nil
+        coders: WebCoders? = nil,
+        errorMapper: ErrorMapper? = nil
     ) throws {
         self.configuration = configuration
         self.coders = try coders ?? WebCoders(configuration: configuration)
+        self.errorMapper = errorMapper ?? .none
         self.routes = routes
         self.middleware = middleware
         self.assetMounts = assetMounts
@@ -84,7 +91,9 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
 
     public func configure(_ container: Container) throws {
         let coders = self.coders
+        let errorMapper = self.errorMapper
         container.register(WebCoders.self, scope: .singleton) { _ in coders }
+        container.register(ErrorMapper.self, scope: .singleton) { _ in errorMapper }
 
         // Route-table validation happens here now — a conflicting or malformed
         // route, or one naming an undeclared lane, fails during module
@@ -94,7 +103,7 @@ public final class FlightWebModule<Transport: ServerTransport>: FlightModule, @u
             routes: routes,
             middleware: middleware,
             assetMounts: assetMounts,
-            container: container,
+            web: WebRuntime(coders: coders, errorMapper: errorMapper),
             logger: Logger(label: "flight.web"))
         self.dispatch = dispatch
         container.register(Dispatch.self, scope: .singleton) { _ in dispatch }

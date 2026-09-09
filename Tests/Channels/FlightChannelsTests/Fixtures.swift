@@ -146,16 +146,20 @@ struct ChannelsFixtureModule: FlightModule {
     func configure(_ container: Container) throws {
         let events = self.events
         container.register(ChannelEvents.self, scope: .singleton) { _ in events }
+    }
 
-        container.registerChannelSocket("/socket") { context in
-            principal(from: context)
-        }
-        container.registerChannelSocket("/authed") { context in
-            guard let principal = principal(from: context) else {
-                throw HTTPError(.unauthorized)
-            }
-            return principal
-        }
+    /// The socket mounts, as route values built from a channels module — the
+    /// value form of the old `registerChannelSocket` calls.
+    func socketRoutes(_ channels: FlightChannelsModule) -> [RouteRegistration] {
+        [
+            channels.socketRoute("/socket") { principal(from: $0) },
+            channels.socketRoute("/authed") { context in
+                guard let principal = principal(from: context) else {
+                    throw HTTPError(.unauthorized)
+                }
+                return principal
+            },
+        ]
     }
 }
 
@@ -188,13 +192,15 @@ struct Harness {
         // constructed here rather than instantiated from their types.
         let pubsub = try FlightPubSubModule(configuration: configuration)
         let fixture = ChannelsFixtureModule()
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: fixture.channels)
         self.container = try TestContainer.build(configuration: configuration) {
             pubsub
             fixture
-            try FlightChannelsModule(
-                bus: pubsub.bus, configuration: configuration, channels: fixture.channels)
+            channels
         }
-        self.client = try TestClient(container: container)
+        self.client = try TestClient(
+            container: container, routes: fixture.socketRoutes(channels))
     }
 
     func wire(_ path: String = "/socket") async throws -> ChannelWireClient {

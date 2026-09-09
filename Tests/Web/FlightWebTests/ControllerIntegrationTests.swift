@@ -57,6 +57,7 @@ final class RequestTracer: Sendable {
 @Controller
 struct UserController {
     @Inject var userService: UserService
+    @Inject var tracer: RequestTracer
 
     @GetRoute("/users/:id")
     func getUser(_ context: RequestContext) async throws -> User {
@@ -106,11 +107,10 @@ struct UserController {
     }
 
     @GetRoute("/scoped-pair")
-    func scopedPair(_ context: RequestContext) throws -> [String: Int] {
-        // Two resolutions inside one request must agree (§2, §3 of Core).
-        let first = try context.resolve(RequestTracer.self)
-        let second = try context.resolve(RequestTracer.self)
-        return ["first": first.id, "second": second.id]
+    func scopedPair(_ context: RequestContext) -> [String: Int] {
+        // Injected once, so the two reads are the same instance by
+        // construction — the identity a per-request resolve used to prove.
+        ["first": tracer.id, "second": tracer.id]
     }
 
     @GetRoute("/events")

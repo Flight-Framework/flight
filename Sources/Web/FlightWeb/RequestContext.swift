@@ -34,7 +34,19 @@ public struct RequestContext: Sendable {
     /// headers are extracted into it by dispatch before any middleware runs.
     public var tracingContext: ServiceContext
 
-    private let container: Container
+    /// The application's web runtime — encoders/decoders and error mapper,
+    /// identical for every request. Held behind one reference so the context
+    /// stays within two cache lines (it is copied per middleware layer); a
+    /// hand-built context gets `.default`. Stamped by dispatch from what
+    /// `FlightWebModule` was composed with (§2.5), replacing a container
+    /// lookup.
+    public var web: WebRuntime
+
+    /// This application's encoders/decoders.
+    public var coders: WebCoders { web.coders }
+
+    /// This application's error mapper. `.none` declines everything.
+    public var errorMapper: ErrorMapper { web.errorMapper }
 
     public init(
         request: Request,
@@ -42,28 +54,33 @@ public struct RequestContext: Sendable {
         identity: RequestIdentity = .anonymous,
         logger: Logger,
         tracingContext: ServiceContext = .topLevel,
-        container: Container
+        web: WebRuntime = .default
     ) {
         self.request = request
         self.pathParameters = pathParameters
         self.identity = identity
         self.logger = logger
         self.tracingContext = tracingContext
-        self.container = container
+        self.web = web
     }
 
     public func pathParam(_ name: String) -> String? {
         pathParameters[name]
     }
+}
 
-    /// Resolves a component from the application's container.
-    ///
-    /// A service-locator seam, and on the way out: the composition migration
-    /// replaces it with construction in the generated route terminal, where
-    /// a controller's dependencies arrive as initializer arguments instead
-    /// (COMPOSITION-MIGRATION.md §2.1a). It no longer takes a scope, because
-    /// there are no longer any scoped components to resolve.
-    public func resolve<T: Sendable>(_ type: T.Type = T.self, qualifier: String? = nil) throws -> T {
-        try container.resolve(type, qualifier: qualifier)
+/// The per-application web runtime a `RequestContext` carries: coders and the
+/// error mapper. One immutable reference, shared across every request, so the
+/// context it rides on stays small.
+public final class WebRuntime: Sendable {
+    public let coders: WebCoders
+    public let errorMapper: ErrorMapper
+
+    public init(coders: WebCoders = .default, errorMapper: ErrorMapper = .none) {
+        self.coders = coders
+        self.errorMapper = errorMapper
     }
+
+    /// Package defaults — what a hand-built context uses.
+    public static let `default` = WebRuntime()
 }

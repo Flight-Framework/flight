@@ -100,7 +100,9 @@ public enum DispatchBuilder {
             routes: container.collectRoutes(),
             middleware: container.collectRegistrations(of: MiddlewareRegistration.self),
             assetMounts: container.collectAssetMounts(),
-            container: container,
+            web: WebRuntime(
+                coders: (try? container.resolve(WebCoders.self)) ?? .default,
+                errorMapper: (try? container.resolve(ErrorMapper.self)) ?? .none),
             logger: logger)
     }
 
@@ -112,15 +114,11 @@ public enum DispatchBuilder {
     /// the set of middleware naming it, and `pipeline("x") { }` with an empty
     /// block contributes a lane marker so an empty lane still counts as
     /// declared.
-    /// - Parameter container: What a `RequestContext` carries so a handler
-    ///   can `resolve`. Distinct from the registries above, which used to come
-    ///   from it too — this one is request-time resolution, and it goes when
-    ///   `context.resolve` does (COMPOSITION-MIGRATION.md §9).
     public static func build(
         routes: [RouteRegistration],
         middleware: [MiddlewareRegistration],
         assetMounts: [AssetMountRegistration] = [],
-        container: Container,
+        web: WebRuntime = .default,
         logger: Logger = Logger(label: "flight.web")
     ) throws -> Dispatch {
         let router = try Router(routes: routes)
@@ -289,7 +287,7 @@ public enum DispatchBuilder {
                 else { return .buffered(maxBytes: nil) }
                 return match.route.bodyMode
             },
-            container: container,
+            web: web,
             logger: logger)
     }
 
@@ -305,12 +303,13 @@ public enum DispatchBuilder {
         chain: [MiddlewareRegistration],
         responder: @escaping Next,
         acceptsUpgrade: @escaping @Sendable (Request) -> Bool = { _ in false },
-        container: Container,
+        web: WebRuntime = .default,
         logger: Logger
     ) -> Dispatch {
         makeDispatch(
             pipeline: compose(chain, around: responder),
-            acceptsUpgrade: acceptsUpgrade, container: container, logger: logger)
+            acceptsUpgrade: acceptsUpgrade, web: web,
+            logger: logger)
     }
 
     /// The per-request envelope — request id, trace extraction, the server
@@ -321,7 +320,7 @@ public enum DispatchBuilder {
         bodyMode: @escaping @Sendable (Request) -> RouteRegistration.BodyMode = { _ in
             .buffered(maxBytes: nil)
         },
-        container: Container,
+        web: WebRuntime = .default,
         logger: Logger
     ) -> Dispatch {
         let respond: @Sendable (Request) async -> Response = { request in
@@ -353,7 +352,7 @@ public enum DispatchBuilder {
                     request: request,
                     logger: requestLogger,
                     tracingContext: span.context,
-                    container: container
+                    web: web
                 )
                 // The backstop: a route handler's own thrown errors are
                 // already turned into a response inside the router (the

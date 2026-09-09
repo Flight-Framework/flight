@@ -5,17 +5,15 @@ import HTTPTypes
 import Logging
 
 extension RequestContext {
-    /// §7: a ready-made context for exercising middleware and handlers
-    /// without any transport. Backed by a fresh scope and (by default) an
-    /// empty frozen container; pass a `TestContainer.build`-produced
-    /// container to make `context.resolve` meaningful.
+    /// A ready-made context for exercising middleware and handlers without any
+    /// transport. Handlers inject their dependencies (constructed for the
+    /// test), so a context no longer carries a container to resolve from.
     public static func mock(
         method: HTTPRequest.Method = .get,
         path: String = "/",
         headers: HTTPFields = [:],
         body: Data = Data(),
-        pathParameters: [String: String] = [:],
-        container: Container? = nil
+        pathParameters: [String: String] = [:]
     ) -> RequestContext {
         var logger = Logger(label: "flight.web.test")
         logger.logLevel = .critical
@@ -23,8 +21,7 @@ extension RequestContext {
             request: Request(method: method, path: path, headers: headers, body: body),
             pathParameters: pathParameters,
             logger: logger,
-            tracingContext: .topLevel,
-            container: container ?? TestContainer.empty()
+            tracingContext: .topLevel
         )
     }
 }

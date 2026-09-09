@@ -106,22 +106,6 @@ public enum ProblemDetails {
     }
 }
 
-extension RequestContext {
-    /// This application's coders, or the defaults when nothing registered any
-    /// — so a hand-built context (a unit test, a mock) still encodes.
-    public var coders: WebCoders {
-        (try? resolve(WebCoders.self)) ?? .default
-    }
-}
-
-extension RequestContext {
-    /// This application's error mapper, or one that declines everything when
-    /// nothing registered one — so a hand-built context still renders errors.
-    public var errorMapper: ErrorMapper {
-        (try? resolve(ErrorMapper.self)) ?? .none
-    }
-}
-
 extension WebCoders {
     /// Builds the coders from `web.*` configuration.
     ///

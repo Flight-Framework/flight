@@ -108,8 +108,8 @@ public struct FlightChannelsModule: FlightModule {
     /// This module's socket endpoint, as a route value.
     ///
     /// Nothing is looked up: the handler is built from what this module
-    /// already holds. `container.registerChannelSocket` is the same mount
-    /// through the imperative path, and pays one lookup per upgrade for it.
+    /// already holds. This is the value form of a socket mount — a declared
+    /// `@WebSocketRoute` controller injecting ``ChannelSockets`` is the other.
     public func socketRoute(
         _ path: String = "/socket",
         source: String = "FlightChannels",
@@ -121,39 +121,6 @@ public struct FlightChannelsModule: FlightModule {
         ) { context in
             let principal = try await authenticate?(context)
             return .upgrade(handler: sockets.handler(principal: principal), context: context)
-        }
-    }
-}
-
-extension Container {
-    /// Mounts the channels WebSocket endpoint as an ordinary upgrade
-    /// route — the same `registerRoute` pipeline as everything else, so the
-    /// endpoint shows up in startup logs and introspection like any route.
-    ///
-    /// `authenticate` runs during the initial HTTP upgrade request, before
-    /// the WebSocket exists — exactly where connection identity is
-    /// established. Return the connection's principal (nil admits an
-    /// anonymous socket); throw to refuse the upgrade outright:
-    ///
-    ///     container.registerChannelSocket("/socket") { context in
-    ///         guard let token = context.request.queryParam("token") else {
-    ///             throw HTTPError(.unauthorized)
-    ///         }
-    ///         return try await verify(token) // any ChannelPrincipal
-    ///     }
-    public func registerChannelSocket(
-        _ path: String = "/socket",
-        source: String = "FlightChannels",
-        authenticate: (@Sendable (RequestContext) async throws -> (any ChannelPrincipal)?)? = nil
-    ) {
-        // flight:hand-registered — this convenience *is* the mount, and the
-        // path is its argument. An application that wants the route in the
-        // static manifest declares it with `@WebSocketRoute` instead, which
-        // is what the demo template does.
-        registerRoute(.get, path, kind: .upgrade(.webSocket), source: source) { context in
-            let principal = try await authenticate?(context)
-            let handler = try ChannelSocketHandler(context: context, principal: principal)
-            return .upgrade(handler: handler, context: context)
         }
     }
 }

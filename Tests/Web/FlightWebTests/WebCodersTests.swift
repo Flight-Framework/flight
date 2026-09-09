@@ -14,8 +14,8 @@ struct WebCodersTests {
         let occurredAt: Date
     }
 
-    /// A frozen container wired by the real `FlightWebModule`, so these
-    /// exercise the registration path an application actually gets.
+    /// A frozen container wired by the real `FlightWebModule`, so a
+    /// `TestClient` dispatches exactly as an application would.
     private func container(_ values: [String: String]) throws -> Container {
         let configuration = Configuration(values: values)
         return try TestContainer.build(configuration: configuration) {
@@ -23,8 +23,14 @@ struct WebCodersTests {
         }
     }
 
+    /// A context whose coders are the ones the real `FlightWebModule` builds
+    /// from configuration — the value dispatch stamps onto every request.
     private func context(_ values: [String: String], body: Data = Data()) throws -> RequestContext {
-        RequestContext.mock(path: "/", body: body, container: try container(values))
+        let configuration = Configuration(values: values)
+        let module = try FlightWebModule<InMemoryTransport>(configuration: configuration)
+        var context = RequestContext.mock(path: "/", body: body)
+        context.web = WebRuntime(coders: module.coders)
+        return context
     }
 
     // MARK: Defaults
@@ -123,14 +129,15 @@ struct WebCodersTests {
         // how it was composed, and the composer matches the property by type.
         let configuration = Configuration(values: [:])
         let custom = CustomCodersModule()
-        let container = try TestContainer.build(configuration: configuration) {
+        _ = try TestContainer.build(configuration: configuration) {
             custom
             try FlightWebModule<InMemoryTransport>(
                 configuration: configuration, coders: custom.coders)
         }
-        // Asserted through behaviour rather than the strategy enum, which
-        // has associated values and no Equatable.
-        let context = RequestContext.mock(container: container)
+        // The coders ride on the context, stamped by dispatch from what the
+        // web module was composed with — here, set directly.
+        var context = RequestContext.mock()
+        context.web = WebRuntime(coders: custom.coders)
         let event = Event(eventName: "a", occurredAt: .init(timeIntervalSince1970: 0))
         #expect(try event.response(for: context).bodyText.contains("\"event_name\""))
     }

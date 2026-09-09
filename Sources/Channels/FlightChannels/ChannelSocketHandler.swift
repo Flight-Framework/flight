@@ -77,17 +77,6 @@ public struct ChannelSocketHandler: WebSocketUpgradeHandler {
         self.principal = principal
     }
 
-    /// The imperative escape hatch: one lookup of ``ChannelSockets``, for a
-    /// route registered by hand rather than declared.
-    ///
-    /// In the same category as `container.registerRoute` — a route the build
-    /// cannot see is a route whose dependencies the build cannot supply, so it
-    /// looks them up. It used to be three lookups, of values the composition
-    /// root has known since start-up; a declared route injects
-    /// ``ChannelSockets`` and does none.
-    public init(context: RequestContext, principal: (any ChannelPrincipal)? = nil) throws {
-        self = try context.resolve(ChannelSockets.self).handler(principal: principal)
-    }
 
     public func handle(upgraded connection: WebSocketConnection, context: RequestContext) async throws {
         // Bounded: an unbounded queue lets one client that stopped reading

@@ -62,10 +62,10 @@ struct MultiNodeTests {
                 ])
             try pubsub.configure(container)
             try channels.configure(container)
-            container.registerChannelSocket("/socket")
             try container.freeze()
             self.container = container
-            self.client = try TestClient(container: container)
+            self.client = try TestClient(
+                container: container, routes: [channels.socketRoute("/socket")])
         }
 
         func wire() async throws -> ChannelWireClient {

@@ -16,16 +16,19 @@ struct BootstrapIntegrationTests {
         // generated composition root does — `flightRoutes(graph)` produces
         // exactly these calls, and a controller is constructed per request.
         let users = UserService()
+        let tracer = RequestTracer()
         let configuration = Configuration()
         let web = try FlightWebModule<InMemoryTransport>(
             configuration: configuration,
             routes: [
-                UserController._flightRoute_getUser_0 { _ in UserController(userService: users) },
-                UserController._flightRoute_createUser_1 { _ in
-                    UserController(userService: users)
+                UserController._flightRoute_getUser_0 {
+                    _ in UserController(userService: users, tracer: tracer)
                 },
-                UserController._flightRoute_deleteUser_2 { _ in
-                    UserController(userService: users)
+                UserController._flightRoute_createUser_1 {
+                    _ in UserController(userService: users, tracer: tracer)
+                },
+                UserController._flightRoute_deleteUser_2 {
+                    _ in UserController(userService: users, tracer: tracer)
                 },
             ])
         let app = Task {

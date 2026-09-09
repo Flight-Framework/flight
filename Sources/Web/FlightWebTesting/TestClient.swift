@@ -42,14 +42,17 @@ public struct TestClient: Sendable {
     ) throws {
         var logger = Logger(label: "flight.web.test-client")
         logger.logLevel = .critical
+        let coders = (try? container.resolve(WebCoders.self)) ?? WebCoders.default
         self.dispatch = try DispatchBuilder.build(
             routes: container.collectRoutes() + routes,
             middleware: container.collectRegistrations(of: MiddlewareRegistration.self)
                 + middleware,
             assetMounts: container.collectAssetMounts(),
-            container: container,
+            web: WebRuntime(
+                coders: coders,
+                errorMapper: (try? container.resolve(ErrorMapper.self)) ?? .none),
             logger: logger)
-        self.coders = (try? container.resolve(WebCoders.self)) ?? WebCoders.default
+        self.coders = coders
     }
 
     /// Wraps an existing dispatch closure (for transport-free harnesses).
