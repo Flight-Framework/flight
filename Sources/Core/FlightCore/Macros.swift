@@ -1,13 +1,5 @@
 import FlightConfig
 
-/// Compiler-visible marker attached by `@Component`. The build
-/// plugin's generator enumerates conformances of this protocol (via source
-/// scanning) and the
-/// generated `_registerAll` calls each type's `_flightRegister`.
-public protocol _FlightRegistrable {
-    static func _flightRegister(_ container: Container) throws
-}
-
 /// Marks a type as container-managed. Expansion:
 /// 1. a memberwise resolving initializer `init(_flight:)` that constructs the
 /// type with every `@Inject` property resolved against the container
@@ -17,8 +9,7 @@ public protocol _FlightRegistrable {
 ///
 /// The exact expansions are pinned by Tests/Core/FlightCoreMacroTests — those
 /// fixtures are the spec, more precise than this comment.
-@attached(member, names: named(init), named(_flightRegister))
-@attached(extension, conformances: _FlightRegistrable)
+@attached(member, names: named(init))
 public macro Component(
     scope: Lifetime = .singleton,
     qualifier: String? = nil
@@ -30,8 +21,7 @@ public macro Component(
 /// pointcut; resolution never consults it. Lives in Core (not Web/Data)
 /// because a service must be equally callable from a controller, a CLI
 /// command, or a background job.
-@attached(member, names: named(init), named(_flightRegister))
-@attached(extension, conformances: _FlightRegistrable)
+@attached(member, names: named(init))
 public macro Service(
     scope: Lifetime = .singleton,
     qualifier: String? = nil
@@ -41,8 +31,7 @@ public macro Service(
 /// tagged `.repository`. (`@Controller` is deliberately NOT here — it lives
 /// in Flight Web, carrying route metadata meaningless outside HTTP dispatch;
 /// only the `Stereotype.controller` case belongs to Core's vocabulary.)
-@attached(member, names: named(init), named(_flightRegister))
-@attached(extension, conformances: _FlightRegistrable)
+@attached(member, names: named(init))
 public macro Repository(
     scope: Lifetime = .singleton,
     qualifier: String? = nil
@@ -123,8 +112,8 @@ public macro ConfigValue<T: ConfigDecodable>(_ key: String, default: T) =
 /// that used to turn them into a typed object.
 ///
 /// The exact expansion is pinned by Tests/Core/FlightCoreMacroTests.
-@attached(member, names: named(init), named(_flightRegister), named(description))
-@attached(extension, conformances: _FlightRegistrable, CustomStringConvertible)
+@attached(member, names: named(init), named(description))
+@attached(extension, conformances: CustomStringConvertible)
 public macro Settings(_ namespace: String) =
     #externalMacro(module: "FlightCoreMacrosImpl", type: "SettingsMacro")
 

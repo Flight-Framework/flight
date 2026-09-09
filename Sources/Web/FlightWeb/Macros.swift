@@ -44,8 +44,7 @@ import FlightCore
 // `arbitrary` because one member per route is introduced, named after the
 // handler method — `_flightRoute_show_0`. Those names are not knowable from
 // the attribute alone, which is exactly what `arbitrary` is for.
-@attached(member, names: named(init), named(_flightRegister), arbitrary)
-@attached(extension, conformances: _FlightRegistrable)
+@attached(member, names: named(init), arbitrary)
 public macro Controller(
     _ path: String? = nil,
     pipelines: [PipelineLane] = [.default]
@@ -81,8 +80,8 @@ public macro Controller(
 /// relative to other middleware is decided. A `@Middleware` type in no
 /// `pipeline { }` block is a fully-formed, independently resolvable and
 /// testable component that simply never runs.
-@attached(member, names: named(init), named(_flightRegister))
-@attached(extension, conformances: _FlightRegistrable, Middleware)
+@attached(member, names: named(init))
+@attached(extension, conformances: Middleware)
 public macro Middleware() =
     #externalMacro(module: "FlightWebMacrosImpl", type: "MiddlewareMacro")
 

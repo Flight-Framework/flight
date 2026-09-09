@@ -79,30 +79,16 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
                 }
             }
         }
-        let initBody = initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
-        let resolvingInit: DeclSyntax = """
-        internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
-        """
-
-        // 2. Registration thunk: the controller component, then its routes —
-        //    ordered so eager route construction at freeze() can resolve the
-        //    controller mid-freeze (Flight Core §2.1).
-        // `stereotype: .controller` is what Actuator groups the dashboard
-        // by. Omitting it defaulted every controller to `.component`, so the
-        // "Controllers" section listed only ActuatorController — the one
-        // controller registered by hand, which passed the argument.
-        var thunkLines: [String] = [
-            "container.register(Self.self, scope: .singleton, stereotype: .controller) { c in",
-            "    try Self(_flight: c)",
-            "}",
-        ]
         // A route's own `pipelines:` replaces the controller's rather than
         // adding to it — the only rule that can express both "public
         // controller, one authenticated route" and "authenticated
         // controller, one public route". Saying nothing inherits.
         let controllerPipelines = RouteScanning.pipelines(of: node)
+        // The per-route factories are the whole of what a controller emits for
+        // wiring now: each builds the controller and runs one method. The
+        // composition root's `flightRoutes(graph)` calls them. The container
+        // era's init(_flight:) and _flightRegister thunks are gone.
         var factories: [DeclSyntax] = []
-        if !combinedRoutes.isEmpty { thunkLines.append("guard includingRoutes else { return }") }
         for (index, (route, path)) in combinedRoutes.enumerated() {
             let pipelines = RouteScanning.resolvedPipelines(
                 route: route.pipelinesText, controller: controllerPipelines)
@@ -111,40 +97,15 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
                     controller: controllerPipelines, route: routePipelines,
                     at: route.attribute, method: route.methodName, in: context)
             }
-            thunkLines.append(
-                contentsOf: routeRegistrationLines(for: route, path: path, index: index))
             factories.append(
                 DeclSyntax(
                     stringLiteral: routeFactory(
                         for: route, path: path, pipelines: pipelines, index: index)))
         }
-        let thunkBody = thunkLines.map { "    \($0)" }.joined(separator: "\n")
-        // `includingRoutes` defaults to true, so every existing caller —
-        // tests, hand-wired modules, anything registering a controller
-        // directly — keeps getting its routes.
-        //
-        // The generated composition root passes false and registers the
-        // routes itself, with a controller constructed per request instead of
-        // resolved once (COMPOSITION-MIGRATION.md §2.1a). Without the
-        // parameter the two would both register, and the freeze would fail on
-        // a duplicate.
-        // Two overloads, not one with a default: `_FlightRegistrable`
-        // requires exactly `_flightRegister(_:)`, and a method with an extra
-        // defaulted parameter does not satisfy it.
-        let thunk: DeclSyntax = """
-        \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
-            try _flightRegister(container, includingRoutes: true)
-        }
-        """
-        let routesThunk: DeclSyntax = """
-        \(raw: access)static func _flightRegister(_ container: FlightCore.Container, includingRoutes: Bool) throws {
-        \(raw: thunkBody)
-        }
-        """
 
         let parameterInit = parameterizedInitializer(
             properties: properties, access: access, declaration: declaration)
-        return [resolvingInit, parameterInit].compactMap { $0 } + factories + [thunk, routesThunk]
+        return [parameterInit].compactMap { $0 } + factories
     }
 
     /// The name of one route's factory. Unique per route rather than per
@@ -249,12 +210,8 @@ public struct ControllerMacro: MemberMacro, ExtensionMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [ExtensionDeclSyntax] {
-        guard !protocols.isEmpty else { return [] }
-        let ext: DeclSyntax = """
-        extension \(type.trimmed): FlightCore._FlightRegistrable {}
-        """
-        guard let extensionDecl = ext.as(ExtensionDeclSyntax.self) else { return [] }
-        return [extensionDecl]
+        // No conformance to emit: the container marker protocol is gone.
+        []
     }
 
     // MARK: - Route collection

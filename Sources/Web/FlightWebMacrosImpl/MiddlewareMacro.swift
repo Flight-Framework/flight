@@ -40,48 +40,13 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
         }
         let access = registrationAccess(for: declaration)
 
-        var initLines: [String] = []
-        for property in properties {
-            switch property.kind {
-            case .inject(let qualifier):
-                if let qualifier {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self, qualifier: \(qualifier))"
-                    )
-                } else {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(\(property.metatypeBase).self)"
-                    )
-                }
-            case .configValue(let key, let defaultValue):
-                if let defaultValue {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).getIfPresent(\(key), as: \(property.metatypeBase).self) ?? (\(defaultValue))"
-                    )
-                } else {
-                    initLines.append(
-                        "self.\(property.name) = try container.resolve(FlightCore.Configuration.self).get(\(key), as: \(property.metatypeBase).self)"
-                    )
-                }
-            }
-        }
-        let initBody =
-            initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
-        let resolvingInit: DeclSyntax = """
-            internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
-            """
-
-        let thunk: DeclSyntax = """
-            \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
-            container.register(Self.self, scope: .singleton, stereotype: .middleware) { c in
-            try Self(_flight: c)
-            }
-            }
-            """
-
+        // Constructor injection only: the parameterized initializer is the
+        // whole of what a module (or a test) needs to build one. The
+        // container-era `init(_flight:)` and `_flightRegister` thunk are gone
+        // with the container.
         let parameterInit = parameterizedInitializer(
             properties: properties, access: access, declaration: declaration)
-        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
+        return [parameterInit].compactMap { $0 }
     }
 
     // MARK: - ExtensionMacro
@@ -97,11 +62,6 @@ public struct MiddlewareMacro: MemberMacro, ExtensionMacro {
         for requested in protocols {
             let name = requested.trimmedDescription
             switch true {
-            case name.hasSuffix("_FlightRegistrable"):
-                extensions.append(
-                    """
-                    extension \(type.trimmed): FlightCore._FlightRegistrable {}
-                    """)
             case name.hasSuffix("Middleware"):
                 extensions.append(
                     """

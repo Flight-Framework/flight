@@ -100,37 +100,13 @@ extension RegistrationMacro {
                 }
             }
         }
-        let initBody =
-            initLines.isEmpty ? "" : "\n    " + initLines.joined(separator: "\n    ") + "\n"
-        let resolvingInit: DeclSyntax = """
-            internal init(_flight container: FlightCore.Container) throws {\(raw: initBody)}
-            """
-
-        // 1b. Constructor injection, shared with @Controller, @Middleware
-        // and @Scheduler — they expand to the same shape and the rule is
-        // one rule.
+        // Constructor injection: a component is built by the composition
+        // root through this initializer. The container-era init(_flight:) and
+        // _flightRegister thunk are gone with the container.
         let parameterInit = parameterizedInitializer(
             properties: properties, access: access, declaration: declaration)
-
-        // 2. Registration thunk. Stereotypes differ from @Component only in
-        // the trailing stereotype: argument.
-        let stereotypeSuffix = stereotypeArgument.map { ", stereotype: \($0)" } ?? ""
-        let registerCall: String
-        if let qualifierExpr {
-            registerCall =
-                "container.register(Self.self, qualifier: \(qualifierExpr), scope: \(scopeExpr)\(stereotypeSuffix))"
-        } else {
-            registerCall = "container.register(Self.self, scope: \(scopeExpr)\(stereotypeSuffix))"
-        }
-        let thunk: DeclSyntax = """
-            \(raw: access)static func _flightRegister(_ container: FlightCore.Container) throws {
-            \(raw: registerCall) { c in
-            try Self(_flight: c)
-            }
-            }
-            """
-
-        return [resolvingInit, parameterInit, thunk].compactMap { $0 }
+        _ = (scopeExpr, qualifierExpr, stereotypeArgument)  // no longer emitted
+        return [parameterInit].compactMap { $0 }
     }
 
     // MARK: - ExtensionMacro
@@ -142,14 +118,8 @@ extension RegistrationMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [ExtensionDeclSyntax] {
-        // The compiler passes only the conformances still missing; if the
-        // type already declares _FlightRegistrable, this list is empty.
-        guard !protocols.isEmpty else { return [] }
-        let ext: DeclSyntax = """
-            extension \(type.trimmed): FlightCore._FlightRegistrable {}
-            """
-        guard let extensionDecl = ext.as(ExtensionDeclSyntax.self) else { return [] }
-        return [extensionDecl]
+        // No conformance to emit: the container marker protocol is gone.
+        []
     }
 
     // MARK: - Validation
