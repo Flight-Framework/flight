@@ -3,7 +3,7 @@ import Configuration
 import FlightConfigCore
 
 /// Immutable, fully-resolved configuration. Built once at bootstrap, handed
-/// into `Container.bootstrap()`, never mutated after.
+/// to `Flight.bootstrap`, never mutated after.
 ///
 /// A `Configuration` is an ordered stack of swift-configuration providers,
 /// highest precedence first. Lookups walk the stack and the first provider

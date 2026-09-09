@@ -3,8 +3,8 @@
 // Attached to an app (or module) target, this plugin plans one build command
 // that runs flight-registration-gen over the target's own sources plus the
 // sources of every recursive source-module dependency that sits atop
-// FlightCore, producing FlightRegistration.generated.swift with a single
-// flightRegisterAll(_:).
+// FlightCore, producing FlightRegistration.generated.swift with the generated
+// composition root (flightComposeModules, FlightGraph, flightRoutes, ...).
 //
 // Why source scanning and not symbol graphs: symbol graphs are compiler
 // outputs that do not exist when a build tool plugin's commands are planned,

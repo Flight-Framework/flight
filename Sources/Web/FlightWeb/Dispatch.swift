@@ -103,9 +103,8 @@ public enum DispatchBuilder {
         //
         // A lane is declared by anything naming it, including the marker
         // `.lane("x", [])` leaves for an empty lane — so declaring and
-        // populating are separate passes. Order within a lane is
-        // `(generation, order, position)`, the same ordering
-        // `collectMiddleware(lane:)` applies.
+        // populating are separate passes. Order within a lane is declaration
+        // order — outermost first.
         var declaredLanes: Set<PipelineLane> = []
         var entries: [PipelineLane: [(offset: Int, registration: MiddlewareRegistration)]] = [:]
         for (offset, registration) in middleware.enumerated() {
@@ -116,10 +115,7 @@ public enum DispatchBuilder {
         var chainsByLane: [PipelineLane: [MiddlewareRegistration]] = [:]
         for lane in declaredLanes {
             chainsByLane[lane] = (entries[lane] ?? [])
-                .sorted {
-                    ($0.registration.generation, $0.registration.order, $0.offset)
-                        < ($1.registration.generation, $1.registration.order, $1.offset)
-                }
+                .sorted { $0.offset < $1.offset }
                 .map(\.registration)
         }
         if chainsByLane[.default] == nil {

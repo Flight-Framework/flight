@@ -67,7 +67,7 @@ public typealias Next = @Sendable (RequestContext) async throws -> Response
 /// type that only needs to inspect the request and continue-or-answer can
 /// just not call `next` on the paths that answer early — there is no
 /// closure-arity ambiguity to resolve, the way there was between the two
-/// deprecated `registerMiddleware` overloads.
+/// closure-based middleware overloads that predated `Middleware`.
 public protocol Middleware: Sendable {
     func handle(_ context: RequestContext, next: Next) async throws -> Response
 }

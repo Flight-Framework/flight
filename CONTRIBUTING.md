@@ -31,18 +31,20 @@ cheap now and very expensive after 1.0 — if something is wrong, the time to
 say so is before the tag.
 
 **Failures belong at build time, then startup, then never at request time.**
-The build plugin catches what it can, eager singleton construction catches the
-rest during bootstrap, and resolution after `freeze()` is a pure read that
-cannot fail for wiring reasons.
+The build plugin catches what it can, and eager construction at composition
+catches the rest during startup — every component is built once, up front, so
+nothing is left to fail for wiring reasons at request time.
 
-**The container will not vend a data race.** `register` and `resolve` require
-`Sendable`. A container is where shared state becomes shared, so that is where
-the requirement is enforced rather than left to a convention.
+**Composition will not wire a data race.** A singleton is shared across every
+task in the process, so it must be `Sendable`, and the compiler enforces it.
+Shared state becomes shared at composition, so that is where the requirement is
+enforced rather than left to a convention.
 
-**Traps are for programmer errors that cannot be recovered from.** Registering
-after `freeze()` traps because no recovery exists. A duplicate registration
-throws, because generated and hand-written code can legitimately collide and
-the bootstrap sequence can report it.
+**Traps are for programmer errors that cannot be recovered from.** A module
+whose initializer needs values — one that cannot be built from its type alone —
+traps if something constructs it directly instead of through the composition
+root. Recoverable conflicts throw instead: a duplicate route or an undeclared
+lane fails the bootstrap sequence with a message.
 
 ## Testing
 

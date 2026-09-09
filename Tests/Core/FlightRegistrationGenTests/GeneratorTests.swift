@@ -212,8 +212,8 @@ struct GeneratorTests {
         #expect(result.generated.contains("isModuleRegistered: true"))
     }
 
-    /// The hazard the marker exists for, in miniature: `freeze()` builds every
-    /// singleton eagerly, so registering a type whose dependency only a module
+    /// The hazard the marker exists for, in miniature: composition builds every
+    /// singleton eagerly, so building a type whose dependency only a module
     /// provides breaks any app that merely links the package. A bridge to it
     /// would assert the same thing, so it must not be generated either.
     @Test("a module-registered type is not used as an existential bridge conformer")
@@ -526,8 +526,8 @@ struct GeneratorTests {
     func unbuildableDependencyBecomesAParameter() throws {
         // §2.6's escape hatch: externally supplied values arrive through the
         // same typed parameters everything else uses, at one root rather than
-        // scattered across N configure(_:) bodies. A framework component
-        // registered imperatively by a module is the ordinary case.
+        // scattered across many separate configuration sites. A value a module
+        // provides that the graph itself cannot build is the ordinary case.
         let result = try generate([
             "Sources.swift": """
             import FlightCore
@@ -732,9 +732,9 @@ struct GeneratorTests {
 
     @Test("a test can replace one node and get the rest of the graph real")
     func nodesAreDefaultedParameters() throws {
-        // §2.10's claim, made real. `Container.override` exists because the
-        // alternative was hand-rebuilding the object graph in every test
-        // module; a defaulted parameter per node is that, generated.
+        // §2.10's claim, made real: a `FlightGraph` with a defaulted parameter
+        // per node lets a test replace one component and get the rest of the
+        // graph real, without hand-rebuilding the object graph.
         let result = try generate([
             "Sources.swift": """
             import FlightCore
@@ -790,13 +790,11 @@ struct GeneratorTests {
         let result = try generate([
             "Main.swift": """
             import FlightWeb
-            final class PubSubModule: FlightModule {
-            func configure(_ container: Container) throws {}
+            struct PubSubModule: FlightModule {
             }
-            final class ChannelsModule: FlightModule {
+            struct ChannelsModule: FlightModule {
             static var dependencies: [any FlightModule.Type] { [PubSubModule.self] }
             init(configuration: Configuration, pubsub: PubSubModule) throws {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -825,11 +823,9 @@ struct GeneratorTests {
             struct ValkeyModule: FlightModule {
             let adapter: any DistributedPubSubAdapter
             init(configuration: Configuration) throws {}
-            func configure(_ container: Container) throws {}
             }
             struct PubSubModule: FlightModule {
             init(configuration: Configuration, adapter: (any DistributedPubSubAdapter)? = nil) throws {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -863,15 +859,12 @@ struct GeneratorTests {
             import FlightWeb
             struct ChatModule: FlightModule {
             let channels: [ChannelRegistration]
-            func configure(_ container: Container) throws {}
             }
             struct NotificationsModule: FlightModule {
             let channels: [ChannelRegistration]
-            func configure(_ container: Container) throws {}
             }
             struct FlightChannelsModule: FlightModule {
             init(channels: [ChannelRegistration] = []) throws {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -903,7 +896,6 @@ struct GeneratorTests {
             import FlightWeb
             struct FlightChannelsModule: FlightModule {
             init(channels: [ChannelRegistration] = []) throws {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -924,12 +916,10 @@ struct GeneratorTests {
             struct PoolModule: FlightModule {
             let dataSource: DataSource
             init() { self.dataSource = DataSource() }
-            func configure(_ container: Container) throws {}
             }
             struct AppModule: FlightModule {
             let graph: FlightGraph
             init(graph: FlightGraph) { self.graph = graph }
-            func configure(_ container: Container) throws {}
             }
             @Repository struct UserRepository { @Inject var pool: DataSource }
             @main struct Main {
@@ -966,7 +956,6 @@ struct GeneratorTests {
             struct AppModule: FlightModule {
             let graph: FlightGraph
             init(graph: FlightGraph) { self.graph = graph }
-            func configure(_ container: Container) throws {}
             }
             @Repository struct UserRepository { @Inject var pool: DataSource }
             @main struct Main {
@@ -991,11 +980,9 @@ struct GeneratorTests {
             import FlightWeb
             struct FlightChannelsModule: FlightModule {
             init(channels: [ChannelRegistration] = []) throws {}
-            func configure(_ container: Container) throws {}
             }
             struct ChatModule: FlightModule {
             let channels: [ChannelRegistration] = []
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1017,11 +1004,9 @@ struct GeneratorTests {
             import FlightWeb
             struct FlightChannelsModule: FlightModule {
             init(channels: [ChannelRegistration] = []) throws {}
-            func configure(_ container: Container) throws {}
             }
             struct ChatModule: FlightModule {
             let channels: [ChannelRegistration] = []
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1044,11 +1029,9 @@ struct GeneratorTests {
             import FlightWeb
             struct EnvModule: FlightModule {
             let environment: [String: String]
-            func configure(_ container: Container) throws {}
             }
             struct ConsumerModule: FlightModule {
             init(environment: [String: String]) {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1111,7 +1094,6 @@ struct GeneratorTests {
             let environment: [String: String]
             init() { self.environment = [:] }
             init(environment: [String: String]) { self.environment = environment }
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1134,7 +1116,6 @@ struct GeneratorTests {
             import FlightWeb
             struct PubSubModule: FlightModule {
             init(configuration: Configuration, adapter: (any DistributedPubSubAdapter)? = nil) throws {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1156,16 +1137,13 @@ struct GeneratorTests {
             struct ValkeyModule: FlightModule {
             let adapter: any DistributedPubSubAdapter
             init(configuration: Configuration) throws {}
-            func configure(_ container: Container) throws {}
             }
             struct NatsModule: FlightModule {
             let adapter: any DistributedPubSubAdapter
             init(configuration: Configuration) throws {}
-            func configure(_ container: Container) throws {}
             }
             struct PubSubModule: FlightModule {
             init(configuration: Configuration, adapter: (any DistributedPubSubAdapter)? = nil) throws {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1195,11 +1173,9 @@ struct GeneratorTests {
             import FlightWeb
             struct ProviderModule: FlightModule {
             var service: (any Service)? { nil }
-            func configure(_ container: Container) throws {}
             }
             struct ConsumerModule: FlightModule {
             init(service: (any Service)? = nil) {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1222,7 +1198,6 @@ struct GeneratorTests {
             "Main.swift": """
             import FlightWeb
             final class FlightWebModule<T: Sendable>: FlightModule {
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1245,10 +1220,9 @@ struct GeneratorTests {
         let result = try generate([
             "Main.swift": """
             import FlightWeb
-            final class ActuatorModule: FlightModule {
+            struct ActuatorModule: FlightModule {
             init() {}
             init(processEnvironment: [String: String]) {}
-            func configure(_ container: Container) throws {}
             }
             @main struct Main {
             static func main() async {
@@ -1273,19 +1247,15 @@ struct GeneratorTests {
         let result = try generate([
             "Main.swift": """
             import FlightWeb
-            final class AppModule: FlightModule {
+            struct AppModule: FlightModule {
             static var dependencies: [any FlightModule.Type] { [ChannelsModule.self] }
-            func configure(_ container: Container) throws {}
             }
-            final class ChannelsModule: FlightModule {
+            struct ChannelsModule: FlightModule {
             static var dependencies: [any FlightModule.Type] { [PubSubModule.self] }
-            func configure(_ container: Container) throws {}
             }
-            final class PubSubModule: FlightModule {
-            func configure(_ container: Container) throws {}
+            struct PubSubModule: FlightModule {
             }
-            final class UnlistedModule: FlightModule {
-            func configure(_ container: Container) throws {}
+            struct UnlistedModule: FlightModule {
             }
             @main struct Main {
             static func main() async {
@@ -1646,10 +1616,10 @@ struct GeneratorTests {
 
     @Test("a dependency's lanes come before its dependent's, not in file order")
     func lanesFollowModuleOrder() throws {
-        // The defect this exists to catch: collectMiddleware sorts by
-        // registration sequence, which is module sequence — dependencies
-        // configure first. Scan order follows the file list, which put the
-        // app's own module first and reversed the real chain.
+        // The defect this exists to catch: a lane's chain runs in module
+        // order, which is dependency order — dependencies are built first.
+        // Scan order follows the file list, which put the app's own module
+        // first and reversed the real chain.
         let result = try generate([
             "A_AppModule.swift": """
             import FlightWeb
@@ -1678,14 +1648,13 @@ struct GeneratorTests {
         let result = try generate([
             "AppModule.swift": """
             import FlightWeb
-            final class AppModule: FlightModule {
+            struct AppModule: FlightModule {
             static var dependencies: [any FlightModule.Type] {
             [
             PostgresDataModule<PrimaryDataSource>.self,
             FlightPubSubModule.self,
             ]
             }
-            func configure(_ container: Container) throws {}
             }
             """
         ])
@@ -1703,8 +1672,7 @@ struct GeneratorTests {
         let result = try generate([
             "Bare.swift": """
             import FlightWeb
-            final class BareModule: FlightModule {
-            func configure(_ container: Container) throws {}
+            struct BareModule: FlightModule {
             }
             """
         ])
@@ -1714,18 +1682,16 @@ struct GeneratorTests {
 
     @Test("a dependency cycle between modules does not hang the sort")
     func cyclicModulesTerminate() throws {
-        // ModuleGraphError.cycle is the runtime's job; this only has to not
+        // Reporting the cycle is the bootstrap's job; this only has to not
         // loop forever while producing something.
         let result = try generate([
             "Cycle.swift": """
             import FlightWeb
-            final class A: FlightModule {
+            struct A: FlightModule {
             static var dependencies: [any FlightModule.Type] { [B.self] }
-            func configure(_ container: Container) throws {}
             }
-            final class B: FlightModule {
+            struct B: FlightModule {
             static var dependencies: [any FlightModule.Type] { [A.self] }
-            func configure(_ container: Container) throws {}
             }
             """
         ])

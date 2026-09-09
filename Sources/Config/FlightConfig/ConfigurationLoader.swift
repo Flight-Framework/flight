@@ -60,7 +60,7 @@ extension Configuration {
     ///
     /// - Returns: The immutable `Configuration`, precedence-ordered
     ///   env vars → `flight-{env}.yaml` → `flight.yaml`, ready to hand to
-    ///   `Container.bootstrap(configuration:)`.
+    ///   `Flight.bootstrap(configuration:modules:)`.
     public static func load(
         from directory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
         environment: FlightEnvironment? = nil,

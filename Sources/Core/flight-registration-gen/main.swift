@@ -208,9 +208,9 @@ struct ScannedPipelineLane {
 
 /// One `FlightModule` conformer and the modules it pulls in.
 ///
-/// The edges `_flightResolveModuleOrder` walks. It topologically sorts the
-/// DAG and `Bootstrap` runs `configure` in that order, which is what makes
-/// registration sequence — and therefore lane order — a property of the
+/// The edges the composition root orders construction by: it topologically
+/// sorts the DAG and builds each module after its dependencies, which is what
+/// makes module order — and therefore lane order — a property of the
 /// module graph rather than of file order.
 struct ScannedModule {
     let typeName: String
@@ -863,8 +863,6 @@ for module in manifest.modules {
                 // registrable attribute to match on.
                 || source.contains(".lane")
                 || source.contains("FlightModule")
-                || source.contains("registerRoute")
-                || source.contains("registerChannelSocket")
                 || source.contains("modules:")
         else { continue }
         if module.name == manifest.targetModuleName {
@@ -1284,11 +1282,11 @@ diagnoseUndeclaredLanes()
 /// Every module an application actually includes: the ones it listed, plus
 /// everything those pull in through `dependencies`.
 ///
-/// The runtime resolves the same set at bootstrap with
-/// `_flightResolveModuleOrder`; this is that walk over the scanned edges,
-/// against roots read from the `modules:` argument in the application's own
-/// source. It is what makes "does this subsystem exist in this app" a
-/// build-time question instead of a runtime one — the assumption behind
+/// The composition root includes the same set at bootstrap; this is that walk
+/// over the scanned edges, against roots read from the `modules:` argument in
+/// the application's own source. It is what makes "does this subsystem exist in
+/// this app" a build-time question instead of a runtime one — the assumption
+/// behind
 /// `flight:module-registered`, and the thing D11 removes the need for.
 ///
 /// Empty when the target names no bootstrap list, which is the ordinary case
@@ -1384,15 +1382,13 @@ checkConfigKeys()
 
 if errorCount > 0 { exit(1) }
 
-/// Lane declarations in the order their modules configure.
+/// Lane declarations in the order their modules are composed.
 ///
-/// `collectMiddleware(lane:)` sorts by registration sequence, and
-/// registration sequence is module sequence: `_flightResolveModuleOrder`
-/// walks the DAG depth-first and appends each module *after* its
-/// dependencies, then `Bootstrap` runs `configure` in that order. Scan order
-/// has no such notion — it follows the file list, which puts the target's
-/// own module first, so a framework module's middleware landed after the
-/// application's when the runtime puts it before.
+/// A lane's chain runs in module order, and module order is dependency order:
+/// the composition root builds each module *after* its dependencies. Scan
+/// order has no such notion — it follows the file list, which puts the
+/// target's own module first, so a framework module's middleware would land
+/// after the application's when composition puts it before.
 ///
 /// The same walk, over the edges scanned from `static var dependencies`.
 /// Where two modules have no path between them the runtime order comes from
@@ -1408,7 +1404,7 @@ func lanesInModuleOrder() -> [ScannedPipelineLane] {
 
     func visit(_ name: String) {
         guard let module = byName[name], !finished.contains(name) else { return }
-        // A cycle is ModuleGraphError.cycle at startup; nothing to add here
+        // A cycle is caught by the build-time cycle check; nothing to add here
         // beyond not looping.
         guard !inProgress.contains(name) else { return }
         inProgress.insert(name)

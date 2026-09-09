@@ -22,8 +22,8 @@ struct ModuleTests {
         let module = FlightSecurityModule(validator: StubValidator(principalsByToken: [:]))
 
         // The principal needs no registration at all: it rides
-        // `RequestContext.identity` as a typed value rather than a `.scoped`
-        // component resolved out of the request's scope.
+        // `RequestContext.identity` as a typed value the authentication
+        // middleware writes into the request context.
         #expect(module.middleware.contains { $0.name.contains("Authentication") })
         // All three canonical lanes, so `pipelines: [.authenticated]` resolves.
         #expect(
@@ -52,8 +52,8 @@ struct ModuleTests {
     @Test("missing OIDC configuration fails at startup, not first request")
     func missingConfiguration() {
         // Earlier than it used to be: the validator is built when the module
-        // is, so bad configuration fails at composition rather than at
-        // freeze().
+        // is, so bad configuration fails at composition — at startup, not at
+        // the first request.
         #expect(throws: (any Error).self) {
             try FlightOIDCModule(configuration: Configuration())
         }

@@ -80,10 +80,10 @@ struct ActuatorController {
     }
 
     private func respond(to probe: Probe) throws -> Response {
-        // `moduleStatuses()` rather than a full `ActuatorSnapshot`: the
-        // snapshot also copies the entire component registration table, and this
-        // path used every bit of it to compute three integers — on the one
-        // route an orchestrator polls every few seconds.
+        // `health()` rather than a full `ActuatorSnapshot`: the snapshot also
+        // copies the entire component descriptor table, and this path used
+        // every bit of it to compute three integers — on the one route an
+        // orchestrator polls every few seconds.
         let modules = health()
         let failed = modules.filter(\.health.isFailed).count
         let notStarted = modules.filter(\.health.isNotStarted).count

@@ -81,23 +81,11 @@ public struct RouteRegistration: Sendable {
     }
 }
 
-/// A named middleware layer plus its position in the chain, normalized to
-/// one canonical shape regardless of whether it came from `@Middleware` +
-/// `MiddlewareRegistration.lane(_:_:)` or a deprecated `registerMiddleware` closure.
-/// Registered through the same pipeline as everything else; collected and
-/// sorted when dispatch is built.
+/// A named middleware layer plus the lane it belongs to. A module declares
+/// these with `MiddlewareRegistration.lane(_:_:)`; the composition root gathers
+/// them, and dispatch assembles each lane's layers into a chain in declaration
+/// order, outermost first.
 public struct MiddlewareRegistration: Sendable {
-    /// `pipeline`-generation layers always run outermost, ahead of every
-    /// `registerMiddleware` closure, regardless of what numeric `order` the
-    /// closures used — this is what lets a migration move one closure at a
-    /// time into a `.lane(_:_:)` declaration without renumbering everything
-    /// else already there. Within a generation, entries sort by
-    /// `(order, sequence)`.
-    enum Generation: Int, Sendable, Comparable {
-        case pipeline = 0
-        case legacyClosure = 1
-        static func < (lhs: Generation, rhs: Generation) -> Bool { lhs.rawValue < rhs.rawValue }
-    }
 
     /// The lane every route runs through unless it names others — the one
     /// `MiddlewareRegistration.lane(.default, [...])` feeds. Spelled
@@ -108,26 +96,22 @@ public struct MiddlewareRegistration: Sendable {
     public let name: String
     /// Which named lane this layer belongs to.
     public let lane: PipelineLane
-    public let order: Int
-    let generation: Generation
     /// A placeholder recording that a lane was declared, carrying no
     /// behavior. `MiddlewareRegistration.lane(_:_:)` puts one first per lane
     /// so that a lane with no middleware in it still *exists* — the empty
     /// static-asset lane is the motivating case, and the undeclared-lane
-    /// error already promised it was legal. Filtered out of
-    /// `collectMiddleware(lane:)`, so it costs a request nothing.
+    /// error already promised it was legal. Filtered out when the lane's chain
+    /// is assembled, so it costs a request nothing.
     let isLaneMarker: Bool
     let handle: @Sendable (RequestContext, Next) async throws -> Response
 
     init(
-        name: String, lane: PipelineLane, order: Int, generation: Generation,
+        name: String, lane: PipelineLane,
         isLaneMarker: Bool = false,
         handle: @escaping @Sendable (RequestContext, Next) async throws -> Response
     ) {
         self.name = name
         self.lane = lane
-        self.order = order
-        self.generation = generation
         self.isLaneMarker = isLaneMarker
         self.handle = handle
     }
@@ -139,7 +123,7 @@ public struct MiddlewareRegistration: Sendable {
     public init(_ middleware: any Middleware, name: String? = nil) {
         self.init(
             name: name ?? String(reflecting: type(of: middleware)),
-            lane: Self.defaultLane, order: 0, generation: .pipeline
+            lane: Self.defaultLane
         ) { context, next in
             try await middleware.handle(context, next: next)
         }
@@ -160,15 +144,13 @@ extension MiddlewareRegistration {
     ) -> [MiddlewareRegistration] {
         var registrations = [
             MiddlewareRegistration(
-                name: "__lane", lane: name, order: 0, generation: .pipeline,
-                isLaneMarker: true
+                name: "__lane", lane: name, isLaneMarker: true
             ) { context, next in try await next(context) }
         ]
         for instance in middleware {
             registrations.append(
                 MiddlewareRegistration(
-                    name: String(reflecting: type(of: instance)), lane: name, order: 0,
-                    generation: .pipeline
+                    name: String(reflecting: type(of: instance)), lane: name
                 ) { context, next in try await instance.handle(context, next: next) })
         }
         return registrations

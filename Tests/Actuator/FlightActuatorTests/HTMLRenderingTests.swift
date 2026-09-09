@@ -111,7 +111,7 @@ struct HTMLEscapingTests {
 
     @Test("passes ordinary text through untouched")
     func passthrough() {
-        #expect(htmlEscaped("FlightCore.Container") == "FlightCore.Container")
+        #expect(htmlEscaped("FlightCore.Configuration") == "FlightCore.Configuration")
         #expect(htmlEscaped("") == "")
         #expect(htmlEscaped("héllo wörld ✈️") == "héllo wörld ✈️")
     }

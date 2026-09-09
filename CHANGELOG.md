@@ -13,9 +13,11 @@ hand-registration surfaces are removed.
 ### Breaking
 
 - **Removed the deprecated closure-middleware surface**: `ClosureMiddleware`,
-  `ClosureNext`, `MiddlewareResult`, `middleware(from:)`, and the
-  `MiddlewarePipelineBuilder` result builder. Conform a type to `Middleware`
-  and declare lanes with `MiddlewareRegistration.lane(_:_:)`.
+  `ClosureNext`, `MiddlewareResult`, `middleware(from:)`, the
+  `MiddlewarePipelineBuilder` result builder, and `MiddlewareRegistration.order`
+  (a vestigial ordering field that only sequenced the removed closures — a
+  lane's middleware now runs in declaration order). Conform a type to
+  `Middleware` and declare lanes with `MiddlewareRegistration.lane(_:_:)`.
 
 - **The build-time route manifest no longer tracks imperative registration.**
   `FlightRouteManifest` drops its `mounts` and `handRegisteredRoutes` arrays,
